@@ -1,0 +1,14 @@
+*.mat
+*.mex*
+*.pyc
+*.tgz
+*.so
+*.o
+*.obj
+*.mtl
+*.xml
+*.png
+output*
+data/*
+experiments/logs/*
+lib/synthesize/build/*
