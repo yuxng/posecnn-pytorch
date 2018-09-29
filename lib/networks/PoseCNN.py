@@ -42,7 +42,7 @@ class PoseCNN(nn.Module):
         self.conv_score = conv(num_units, num_classes, kernel_size=1)
         self.logsoftmax = nn.LogSoftmax(dim=1)
         self.softmax = nn.Softmax(dim=1)
-        self.hard_label = HardLabel()
+        self.hard_label = HardLabel(threshold=1.0)
 
 
     def forward(self, x, label_gt):
@@ -60,7 +60,7 @@ class PoseCNN(nn.Module):
         out_logsoftmax = self.logsoftmax(out_score)
         out_prob = self.softmax(out_score)
         out_label = out_prob.argmax()
-        out_weight = self.hard_label(1.0, out_prob, label_gt)
+        out_weight = self.hard_label(out_prob, label_gt)
 
         if self.training:
             return out_logsoftmax, out_weight
