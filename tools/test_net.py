@@ -25,13 +25,13 @@ from fcn.train_test import test
 from fcn.config import cfg, cfg_from_file, get_output_dir
 from datasets.factory import get_dataset
 import networks
-import libsynthesizer
+# import libsynthesizer
 
 def parse_args():
     """
     Parse input arguments
     """
-    parser = argparse.ArgumentParser(description='Test a DeepIM network')
+    parser = argparse.ArgumentParser(description='Test a PoseCNN network')
     parser.add_argument('--gpu', dest='gpu_id', help='GPU id to use',
                         default=0, type=int)
     parser.add_argument('--pretrained', dest='pretrained',
@@ -99,8 +99,8 @@ if __name__ == '__main__':
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    cfg.synthesizer = libsynthesizer.Synthesizer(args.cad_name, args.pose_name)
-    cfg.synthesizer.setup(cfg.TRAIN.SYN_WIDTH, cfg.TRAIN.SYN_HEIGHT)
+    # cfg.synthesizer = libsynthesizer.Synthesizer(args.cad_name, args.pose_name)
+    # cfg.synthesizer.setup(cfg.TRAIN.SYN_WIDTH, cfg.TRAIN.SYN_HEIGHT)
 
     # prepare network
     if args.pretrained:
@@ -111,7 +111,7 @@ if __name__ == '__main__':
         print("no pretrained network specified")
         sys.exit()
 
-    network = networks.__dict__[args.network_name](cfg.TRAIN.NUM_CLASSES, network_data).cuda(device=cfg.device)
+    network = networks.__dict__[args.network_name](cfg.TRAIN.NUM_CLASSES, cfg.TRAIN.NUM_UNITS, network_data).cuda(device=cfg.device)
     network = torch.nn.DataParallel(network, device_ids=[args.gpu_id]).cuda(device=cfg.device)
     cudnn.benchmark = True
 

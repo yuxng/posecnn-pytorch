@@ -136,9 +136,9 @@ if __name__ == '__main__':
 
         # save checkpoint
         if (epoch+1) % cfg.TRAIN.SNAPSHOT_EPOCHS == 0 or epoch == args.epochs - 1:
-            state = {'epoch': epoch + 1, 'state_dict': network.module.state_dict()}
+            state = network.module.state_dict()
             infix = ('_' + cfg.TRAIN.SNAPSHOT_INFIX
                      if cfg.TRAIN.SNAPSHOT_INFIX != '' else '')
-            filename = (cfg.TRAIN.SNAPSHOT_PREFIX + infix + '_epoch_{:d}'.format(epoch+1) + '.checkpoint.pth.tar')
+            filename = (cfg.TRAIN.SNAPSHOT_PREFIX + infix + '_epoch_{:d}'.format(epoch+1) + '.checkpoint.pth')
             torch.save(state, os.path.join(output_dir, filename))
             print filename
