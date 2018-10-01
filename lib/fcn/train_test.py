@@ -149,9 +149,10 @@ def test(test_loader, network):
             out_label, out_vertex = network(input_var, label_var)
         else:
             out_label = network(input_var, label_var)
+            out_vertex = []
 
         if cfg.TEST.VISUALIZE:
-            _vis_test(input_var, label_var, out_label, sample, test_loader.dataset.class_colors)
+            _vis_test(input_var, label_var, out_label, out_vertex, sample, test_loader.dataset.class_colors)
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -293,7 +294,7 @@ def _vis_minibatch(input_var, label_var, vertex_targets_var, sample, class_color
         plt.show()
 
 
-def _vis_test(input_var, label_var, out_label, sample, class_colors):
+def _vis_test(input_var, label_var, out_label, out_vertex, sample, class_colors):
 
     """Visualize a mini-batch for debugging."""
     import matplotlib.pyplot as plt
@@ -307,6 +308,10 @@ def _vis_test(input_var, label_var, out_label, sample, class_colors):
     intrinsic_matrix = metadata[:9].reshape((3,3))
     gt_boxes = sample['gt_boxes'].numpy()
     extents = sample['extents'][0, :, :].numpy()
+
+    if cfg.TRAIN.VERTEX_REG:
+        vertex_targets = sample['vertex_targets'].numpy()
+        vertex_pred = out_vertex.detach().cpu().numpy()
     
     for i in range(im_blob.shape[0]):
         fig = plt.figure()
@@ -316,7 +321,7 @@ def _vis_test(input_var, label_var, out_label, sample, class_colors):
         im += cfg.PIXEL_MEANS
         im = im[:, :, (2, 1, 0)]
         im = im.astype(np.uint8)
-        ax = fig.add_subplot(2, 3, 1)
+        ax = fig.add_subplot(3, 4, 1)
         plt.imshow(im)
         ax.set_title('color') 
 
@@ -347,7 +352,7 @@ def _vis_test(input_var, label_var, out_label, sample, class_colors):
                 plt.Rectangle((x1, y1), x2-x1, y2-y1, fill=False, edgecolor='g', linewidth=3))
 
         # show gt boxes
-        ax = fig.add_subplot(2, 3, 2)
+        ax = fig.add_subplot(3, 4, 2)
         plt.imshow(im)
         ax.set_title('gt boxes')
         boxes = gt_boxes[i]
@@ -362,19 +367,19 @@ def _vis_test(input_var, label_var, out_label, sample, class_colors):
                 plt.Rectangle((x1, y1), x2-x1, y2-y1, fill=False, edgecolor='g', linewidth=3))
 
         # show gt label
-        label = label_blob[i, :, :, :]
-        label = label.transpose((1, 2, 0))
-        height = label.shape[0]
-        width = label.shape[1]
-        num_classes = label.shape[2]
-        im_label = np.zeros((height, width, 3), dtype=np.uint8)
+        label_gt = label_blob[i, :, :, :]
+        label_gt = label_gt.transpose((1, 2, 0))
+        height = label_gt.shape[0]
+        width = label_gt.shape[1]
+        num_classes = label_gt.shape[2]
+        im_label_gt = np.zeros((height, width, 3), dtype=np.uint8)
         for j in range(num_classes):
-            I = np.where(label[:, :, j] > 0)
-            im_label[I[0], I[1], :] = class_colors[j]
+            I = np.where(label_gt[:, :, j] > 0)
+            im_label_gt[I[0], I[1], :] = class_colors[j]
 
-        ax = fig.add_subplot(2, 3, 3)
-        plt.imshow(im_label)
-        ax.set_title('label') 
+        ax = fig.add_subplot(3, 4, 3)
+        plt.imshow(im_label_gt)
+        ax.set_title('gt label') 
 
         # show predicted label
         label = label_pred[i, :, :]
@@ -385,8 +390,50 @@ def _vis_test(input_var, label_var, out_label, sample, class_colors):
             I = np.where(label == j)
             im_label[I[0], I[1], :] = class_colors[j]
 
-        ax = fig.add_subplot(2, 3, 6)
+        ax = fig.add_subplot(3, 4, 4)
         plt.imshow(im_label)
-        ax.set_title('predicted label') 
+        ax.set_title('predicted label')
+
+        # show gt vertex targets
+        if cfg.TRAIN.VERTEX_REG:
+            vertex_target = vertex_targets[i, :, :, :]
+            center = np.zeros((3, height, width), dtype=np.float32)
+
+            for j in range(1, num_classes):
+                index = np.where(label_gt[:, :, j] > 0)
+                if len(index[0]) > 0:
+                    center[:, index[0], index[1]] = vertex_target[3*j:3*j+3, index[0], index[1]]
+
+            ax = fig.add_subplot(3, 4, 5)
+            plt.imshow(center[0,:,:])
+            ax.set_title('gt center x') 
+
+            ax = fig.add_subplot(3, 4, 6)
+            plt.imshow(center[1,:,:])
+            ax.set_title('gt center y')
+
+            ax = fig.add_subplot(3, 4, 7)
+            plt.imshow(np.exp(center[2,:,:]))
+            ax.set_title('gt z')
+
+            vertex_target = vertex_pred[i, :, :, :]
+            center = np.zeros((3, height, width), dtype=np.float32)
+
+            for j in range(1, num_classes):
+                index = np.where(label == j)
+                if len(index[0]) > 0:
+                    center[:, index[0], index[1]] = vertex_target[3*j:3*j+3, index[0], index[1]]
+
+            ax = fig.add_subplot(3, 4, 9)
+            plt.imshow(center[0,:,:])
+            ax.set_title('center x') 
+
+            ax = fig.add_subplot(3, 4, 10)
+            plt.imshow(center[1,:,:])
+            ax.set_title('center y')
+
+            ax = fig.add_subplot(3, 4, 11)
+            plt.imshow(np.exp(center[2,:,:]))
+            ax.set_title('z')
 
         plt.show()
