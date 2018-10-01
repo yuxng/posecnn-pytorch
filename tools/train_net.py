@@ -88,6 +88,7 @@ if __name__ == '__main__':
         np.random.seed(cfg.RNG_SEED)
 
     # prepare dataset
+    cfg.MODE = 'TRAIN'
     dataset = get_dataset(args.dataset_name)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=cfg.TRAIN.IMS_PER_BATCH, shuffle=True, num_workers=0)
     print 'Use dataset `{:s}` for training'.format(dataset.name)

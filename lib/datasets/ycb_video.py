@@ -248,6 +248,11 @@ class YCBVideo(data.Dataset, datasets.imdb):
 
         with open(image_set_file) as f:
             image_index = [x.rstrip('\n') for x in f.readlines()]
+
+        # sample a subset for training
+        if cfg.MODE == 'TRAIN':
+            image_index = image_index[::10]
+
         return image_index
 
 

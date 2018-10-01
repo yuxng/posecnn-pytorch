@@ -90,6 +90,7 @@ if __name__ == '__main__':
         shuffle = True
     else:
         shuffle = False
+    cfg.MODE = 'TEST'
     dataset = get_dataset(args.dataset_name)
     dataloader = torch.utils.data.DataLoader(dataset, shuffle=shuffle, num_workers=0)
     print 'Use dataset `{:s}` for training'.format(dataset.name)

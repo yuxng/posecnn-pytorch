@@ -145,7 +145,10 @@ def test(test_loader, network):
         label_var = torch.autograd.Variable(labels)
         
         # compute output
-        out_label = network(input_var, label_var)
+        if cfg.TRAIN.VERTEX_REG:
+            out_label, out_vertex = network(input_var, label_var)
+        else:
+            out_label = network(input_var, label_var)
 
         if cfg.TEST.VISUALIZE:
             _vis_test(input_var, label_var, out_label, sample, test_loader.dataset.class_colors)
