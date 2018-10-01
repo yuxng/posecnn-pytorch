@@ -5,7 +5,7 @@ import math
 import sys
 from torch.nn.init import kaiming_normal_
 from layers.hard_label import HardLabel
-
+from fcn.config import cfg
 
 __all__ = [
     'posecnn',
@@ -13,10 +13,13 @@ __all__ = [
 
 vgg16 = models.vgg16(pretrained=True)
 
-def conv(in_planes, out_planes, kernel_size=3, stride=1):
-    return nn.Sequential(
-        nn.Conv2d(in_planes, out_planes, kernel_size=kernel_size, stride=stride, padding=(kernel_size-1)//2, bias=True),
-        nn.ReLU(inplace=True))
+def conv(in_planes, out_planes, kernel_size=3, stride=1, relu=True):
+    if relu:
+        return nn.Sequential(
+            nn.Conv2d(in_planes, out_planes, kernel_size=kernel_size, stride=stride, padding=(kernel_size-1)//2, bias=True),
+            nn.ReLU(inplace=True))
+    else:
+        return nn.Conv2d(in_planes, out_planes, kernel_size=kernel_size, stride=stride, padding=(kernel_size-1)//2, bias=True)
 
 def upsample(scale_factor):
     return nn.Upsample(scale_factor=scale_factor, mode='bilinear')
@@ -52,10 +55,18 @@ class PoseCNN(nn.Module):
         # semantic labeling branch
         self.conv4_embed = conv(512, num_units, kernel_size=1)
         self.conv5_embed = conv(512, num_units, kernel_size=1)
-        self.conv5_embed_up = upsample(2.0)
-        self.deconv_embed_up = upsample(8.0)
+        self.upsample_conv5_embed = upsample(2.0)
+        self.upsample_embed = upsample(8.0)
         self.conv_score = conv(num_units, num_classes, kernel_size=1)
         self.hard_label = HardLabel(threshold=1.0)
+
+        # center regression branch
+        if cfg.TRAIN.VERTEX_REG:
+            self.conv4_vertex_embed = conv(512, 2*num_units, kernel_size=1, relu=False)
+            self.conv5_vertex_embed = conv(512, 2*num_units, kernel_size=1, relu=False)
+            self.upsample_conv5_vertex_embed = upsample(2.0)
+            self.upsample_vertex_embed = upsample(8.0)
+            self.conv_vertex_score = conv(2*num_units, 3*num_classes, kernel_size=1, relu=False)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
@@ -79,17 +90,29 @@ class PoseCNN(nn.Module):
         # semantic labeling branch
         out_conv4_embed = self.conv4_embed(out_conv4_3)
         out_conv5_embed = self.conv5_embed(out_conv5_3)
-        out_conv5_embed_up = self.conv5_embed_up(out_conv5_embed)
+        out_conv5_embed_up = self.upsample_conv5_embed(out_conv5_embed)
         out_embed = out_conv4_embed + out_conv5_embed_up
-        out_embed_up = self.deconv_embed_up(out_embed)
+        out_embed_up = self.upsample_embed(out_embed)
         out_score = self.conv_score(out_embed_up)
         out_logsoftmax = log_softmax_high_dimension(out_score)
         out_prob = softmax_high_dimension(out_score)
         out_label = torch.max(out_prob, dim=1)[1]
         out_weight = self.hard_label(out_prob, label_gt)
 
+        # center regression branch
+        if cfg.TRAIN.VERTEX_REG:
+            out_conv4_vertex_embed = self.conv4_vertex_embed(out_conv4_3)
+            out_conv5_vertex_embed = self.conv5_vertex_embed(out_conv5_3)
+            out_conv5_vertex_embed_up = self.upsample_conv5_vertex_embed(out_conv5_vertex_embed)
+            out_vertex_embed = out_conv4_vertex_embed + out_conv5_vertex_embed_up
+            out_vertex_embed_up = self.upsample_vertex_embed(out_vertex_embed)
+            out_vertex = self.conv_vertex_score(out_vertex_embed_up)
+
         if self.training:
-            return out_logsoftmax, out_weight
+            if cfg.TRAIN.VERTEX_REG:
+                return out_logsoftmax, out_weight, out_vertex
+            else:
+                return out_logsoftmax, out_weight
         else:
             return out_label
 

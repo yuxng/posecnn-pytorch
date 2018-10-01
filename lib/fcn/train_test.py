@@ -52,6 +52,18 @@ def loss_cross_entropy(scores, labels):
     return loss
 
 
+def smooth_l1_loss_vertex(vertex_pred, vertex_targets, vertex_weights, sigma=1.0):
+    sigma_2 = sigma ** 2
+    vertex_diff = vertex_pred - vertex_targets
+    diff = torch.mul(vertex_weights, vertex_diff)
+    abs_diff = torch.abs(diff)
+    smoothL1_sign = torch.lt(abs_diff, 1. / sigma_2).float().detach()
+    in_loss = torch.pow(diff, 2) * (sigma_2 / 2.) * smoothL1_sign \
+            + (abs_diff - (0.5 / sigma_2)) * (1. - smoothL1_sign)
+    loss = torch.div( torch.sum(in_loss), torch.sum(vertex_weights) + 1e-10 )
+    return loss
+
+
 def train(train_loader, network, optimizer, epoch):
 
     batch_time = AverageMeter()
@@ -68,17 +80,30 @@ def train(train_loader, network, optimizer, epoch):
 
         inputs = sample['image'].cuda()
         labels = sample['label'].cuda()
-
         input_var = torch.autograd.Variable(inputs)
         label_var = torch.autograd.Variable(labels)
 
+        if cfg.TRAIN.VERTEX_REG:
+            vertex_targets = sample['vertex_targets'].cuda()
+            vertex_weights = sample['vertex_weights'].cuda()
+            vertex_targets_var = torch.autograd.Variable(vertex_targets)
+            vertex_weights_var = torch.autograd.Variable(vertex_weights)
+        else:
+            vertex_targets_var = []
+            vertex_weights_var = []
+
         if cfg.TRAIN.VISUALIZE:
-            _vis_minibatch(input_var, label_var, sample, train_loader.dataset.class_colors)
+            _vis_minibatch(input_var, label_var, vertex_targets_var, sample, train_loader.dataset.class_colors)
 
         # compute output
-        out_logsoftmax, out_weight = network(input_var, label_var)
-
-        loss = loss_cross_entropy(out_logsoftmax, out_weight)
+        if cfg.TRAIN.VERTEX_REG:
+            out_logsoftmax, out_weight, out_vertex = network(input_var, label_var)
+            loss_label = loss_cross_entropy(out_logsoftmax, out_weight)
+            loss_vertex = smooth_l1_loss_vertex(out_vertex, vertex_targets_var, vertex_weights_var)
+            loss = loss_label + loss_vertex
+        else:
+            out_logsoftmax, out_weight = network(input_var, label_var)
+            loss = loss_cross_entropy(out_logsoftmax, out_weight)
 
         # record loss
         losses.update(loss.data, input_var.size(0))
@@ -91,8 +116,12 @@ def train(train_loader, network, optimizer, epoch):
         # measure elapsed time
         batch_time.update(time.time() - end)
 
-        print('epoch: [%d/%d][%d/%d], loss %.4f, lr %.6f, batch time %.2f' \
-           % (epoch, cfg.epochs, i, epoch_size, loss, optimizer.param_groups[0]['lr'], batch_time.val))
+        if cfg.TRAIN.VERTEX_REG:
+            print('epoch: [%d/%d][%d/%d], loss %.4f, loss_label %.4f, loss_center %.4f, lr %.6f, batch time %.2f' \
+               % (epoch, cfg.epochs, i, epoch_size, loss.data, loss_label.data, loss_vertex.data, optimizer.param_groups[0]['lr'], batch_time.val))
+        else:
+            print('epoch: [%d/%d][%d/%d], loss %.4f, lr %.6f, batch time %.2f' \
+               % (epoch, cfg.epochs, i, epoch_size, loss, optimizer.param_groups[0]['lr'], batch_time.val))
 
         cfg.TRAIN.ITERS += 1
 
@@ -150,7 +179,7 @@ def convert_to_image(im_blob):
     return np.clip(255 * im_blob, 0, 255).astype(np.uint8)
 
 
-def _vis_minibatch(input_var, label_var, sample, class_colors):
+def _vis_minibatch(input_var, label_var, vertex_targets_var, sample, class_colors):
 
     """Visualize a mini-batch for debugging."""
     import matplotlib.pyplot as plt
@@ -163,6 +192,9 @@ def _vis_minibatch(input_var, label_var, sample, class_colors):
     intrinsic_matrix = metadata[:9].reshape((3,3))
     gt_boxes = sample['gt_boxes'].numpy()
     extents = sample['extents'][0, :, :].numpy()
+
+    if cfg.TRAIN.VERTEX_REG:
+        vertex_target_blob = vertex_targets_var.cpu().numpy()
     
     for i in range(im_blob.shape[0]):
         fig = plt.figure()
@@ -231,7 +263,29 @@ def _vis_minibatch(input_var, label_var, sample, class_colors):
 
         ax = fig.add_subplot(2, 3, 3)
         plt.imshow(im_label)
-        ax.set_title('label') 
+        ax.set_title('label')
+
+        # show vertex targets
+        if cfg.TRAIN.VERTEX_REG:
+            vertex_target = vertex_target_blob[i, :, :, :]
+            center = np.zeros((3, height, width), dtype=np.float32)
+
+            for j in range(1, num_classes):
+                index = np.where(label[:, :, j] > 0)
+                if len(index[0]) > 0:
+                    center[:, index[0], index[1]] = vertex_target[3*j:3*j+3, index[0], index[1]]
+
+            ax = fig.add_subplot(2, 3, 4)
+            plt.imshow(center[0,:,:])
+            ax.set_title('center x') 
+
+            ax = fig.add_subplot(2, 3, 5)
+            plt.imshow(center[1,:,:])
+            ax.set_title('center y')
+
+            ax = fig.add_subplot(2, 3, 6)
+            plt.imshow(np.exp(center[2,:,:]))
+            ax.set_title('z')
 
         plt.show()
 

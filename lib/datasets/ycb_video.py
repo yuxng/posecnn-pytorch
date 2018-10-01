@@ -62,7 +62,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
         im_blob, im_scale, height, width = self._get_image_blob(roidb, random_scale_ind)
 
         # build the label blob
-        label_blob, meta_data_blob, pose_blob, gt_boxes \
+        label_blob, meta_data_blob, pose_blob, gt_boxes, vertex_targets, vertex_weights \
             = self._get_label_blob(roidb, self._num_classes, im_scale, height, width)
 
         im_info = np.array([im_blob.shape[1], im_blob.shape[2], im_scale], dtype=np.float32)
@@ -75,6 +75,10 @@ class YCBVideo(data.Dataset, datasets.imdb):
                   'points': self._point_blob,
                   'gt_boxes': gt_boxes,
                   'im_info': im_info}
+
+        if cfg.TRAIN.VERTEX_REG:
+            sample['vertex_targets'] = vertex_targets
+            sample['vertex_weights'] = vertex_weights
 
         return sample
 
@@ -120,16 +124,16 @@ class YCBVideo(data.Dataset, datasets.imdb):
         meta_data['cls_indexes'] = meta_data['cls_indexes'].flatten()
 
         # read label image
-        im = pad_im(cv2.imread(roidb['label'], cv2.IMREAD_UNCHANGED), 16)
+        im_label = pad_im(cv2.imread(roidb['label'], cv2.IMREAD_UNCHANGED), 16)
         if roidb['flipped']:
-            if len(im.shape) == 2:
-                im = im[:, ::-1]
+            if len(im_label.shape) == 2:
+                im_label = im_label[:, ::-1]
             else:
-                im = im[:, ::-1, :]
-        im = cv2.resize(im, None, None, fx=im_scale, fy=im_scale, interpolation=cv2.INTER_NEAREST)
+                im_label = im_label[:, ::-1, :]
+        im_label = cv2.resize(im_label, None, None, fx=im_scale, fy=im_scale, interpolation=cv2.INTER_NEAREST)
         label_blob = np.zeros((num_classes, height, width), dtype=np.float32)
         for i in range(num_classes):
-            I = np.where(im == i)
+            I = np.where(im_label == i)
             label_blob[i, I[0], I[1]] = 1.0
 
         # bounding boxes
@@ -175,8 +179,52 @@ class YCBVideo(data.Dataset, datasets.imdb):
         meta_data_blob = np.zeros(18, dtype=np.float32)
         meta_data_blob[0:9] = K.flatten()
         meta_data_blob[9:18] = Kinv.flatten()
-    
-        return label_blob, meta_data_blob, pose_blob, gt_boxes
+
+        # vertex regression target
+        if cfg.TRAIN.VERTEX_REG:
+            center = meta_data['center']
+            if roidb['flipped']:
+                center[:, 0] = width - center[:, 0]
+            vertex_targets, vertex_weights = self._generate_vertex_targets(im_label, meta_data['cls_indexes'], center, poses, num_classes)
+        else:
+            vertex_targets = []
+            vertex_weights = []
+
+        return label_blob, meta_data_blob, pose_blob, gt_boxes, vertex_targets, vertex_weights
+
+
+    # compute the voting label image in 2D
+    def _generate_vertex_targets(self, im_label, cls_indexes, center, poses, num_classes):
+
+        width = im_label.shape[1]
+        height = im_label.shape[0]
+        vertex_targets = np.zeros((3 * num_classes, height, width), dtype=np.float32)
+        vertex_weights = np.zeros((3 * num_classes, height, width), dtype=np.float32)
+
+        c = np.zeros((2, 1), dtype=np.float32)
+        for i in xrange(1, num_classes):
+            y, x = np.where(im_label == i)
+            I = np.where(im_label == i)
+            ind = np.where(cls_indexes == i)[0]
+            if len(x) > 0 and len(ind) > 0:
+                c[0] = center[ind, 0]
+                c[1] = center[ind, 1]
+                z = poses[2, 3, ind]
+                R = np.tile(c, (1, len(x))) - np.vstack((x, y))
+                # compute the norm
+                N = np.linalg.norm(R, axis=0) + 1e-10
+                # normalization
+                R = np.divide(R, np.tile(N, (2,1)))
+                # assignment
+                vertex_targets[3*i+0, y, x] = R[0,:]
+                vertex_targets[3*i+1, y, x] = R[1,:]
+                vertex_targets[3*i+2, y, x] = math.log(z)
+
+                vertex_weights[3*i+0, y, x] = cfg.TRAIN.VERTEX_W_INSIDE
+                vertex_weights[3*i+1, y, x] = cfg.TRAIN.VERTEX_W_INSIDE
+                vertex_weights[3*i+2, y, x] = cfg.TRAIN.VERTEX_W_INSIDE
+
+        return vertex_targets, vertex_weights
 
 
     def __len__(self):
