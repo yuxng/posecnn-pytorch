@@ -5,6 +5,7 @@ import math
 import sys
 from torch.nn.init import kaiming_normal_
 from layers.hard_label import HardLabel
+from layers.hough_voting import HoughVoting
 from fcn.config import cfg
 
 __all__ = [
@@ -67,6 +68,8 @@ class PoseCNN(nn.Module):
             self.upsample_conv5_vertex_embed = upsample(2.0)
             self.upsample_vertex_embed = upsample(8.0)
             self.conv_vertex_score = conv(2*num_units, 3*num_classes, kernel_size=1, relu=False)
+            self.hough_voting = HoughVoting(is_train=0, skip_pixels=10, label_threshold=500, \
+                                            inlier_threshold=0.9, voting_threshold=-1, per_threshold=0.01)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
@@ -78,7 +81,8 @@ class PoseCNN(nn.Module):
                 m.bias.data.zero_()
 
 
-    def forward(self, x, label_gt):
+    def forward(self, x, label_gt, meta_data, extents):
+
         # conv features
         for i, model in enumerate(self.features):
             x = model(x)
@@ -96,7 +100,7 @@ class PoseCNN(nn.Module):
         out_score = self.conv_score(out_embed_up)
         out_logsoftmax = log_softmax_high_dimension(out_score)
         out_prob = softmax_high_dimension(out_score)
-        out_label = torch.max(out_prob, dim=1)[1]
+        out_label = torch.max(out_prob, dim=1)[1].type(torch.IntTensor).cuda()
         out_weight = self.hard_label(out_prob, label_gt)
 
         # center regression branch
@@ -108,6 +112,13 @@ class PoseCNN(nn.Module):
             out_vertex_embed_up = self.upsample_vertex_embed(out_vertex_embed)
             out_vertex = self.conv_vertex_score(out_vertex_embed_up)
 
+            # hough voting
+            if self.training:
+                self.hough_voting.is_train = 1
+            else:
+                self.hough_voting.is_train = 0
+            out_box, out_pose = self.hough_voting(out_label, out_vertex, meta_data, extents)
+
         if self.training:
             if cfg.TRAIN.VERTEX_REG:
                 return out_logsoftmax, out_weight, out_vertex
@@ -115,7 +126,7 @@ class PoseCNN(nn.Module):
                 return out_logsoftmax, out_weight
         else:
             if cfg.TRAIN.VERTEX_REG:
-                return out_label, out_vertex
+                return out_label, out_vertex, out_box, out_pose
             else:
                 return out_label
 

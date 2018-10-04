@@ -250,7 +250,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
             image_index = [x.rstrip('\n') for x in f.readlines()]
 
         # sample a subset for training
-        if cfg.MODE == 'TRAIN':
+        if self._image_set == 'train':
             image_index = image_index[::10]
 
         return image_index
