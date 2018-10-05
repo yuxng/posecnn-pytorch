@@ -12,3 +12,4 @@ output*
 data/*
 experiments/logs/*
 lib/synthesize/build/*
+lib/utils/bbox.c
