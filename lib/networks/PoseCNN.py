@@ -6,6 +6,8 @@ import sys
 from torch.nn.init import kaiming_normal_
 from layers.hard_label import HardLabel
 from layers.hough_voting import HoughVoting
+from layers.roi_align import RoIAlign
+from layers.roi_target_layer import roi_target_layer
 from fcn.config import cfg
 
 __all__ = [
@@ -22,24 +24,47 @@ def conv(in_planes, out_planes, kernel_size=3, stride=1, relu=True):
     else:
         return nn.Conv2d(in_planes, out_planes, kernel_size=kernel_size, stride=stride, padding=(kernel_size-1)//2, bias=True)
 
+
+def fc(in_planes, out_planes, relu=True):
+    if relu:
+        return nn.Sequential(
+            nn.Linear(in_planes, out_planes),
+            nn.LeakyReLU(0.1, inplace=True))
+    else:
+        return nn.Linear(in_planes, out_planes)
+
+
 def upsample(scale_factor):
     return nn.Upsample(scale_factor=scale_factor, mode='bilinear')
+
 
 def log_softmax_high_dimension(input):
     num_classes = input.size()[1]
     m = torch.max(input, dim=1, keepdim=True)[0]
-    d = input - m.repeat(1, num_classes, 1, 1)
+    if input.dim() == 4:
+        d = input - m.repeat(1, num_classes, 1, 1)
+    else:
+        d = input - m.repeat(1, num_classes)
     e = torch.exp(d)
     s = torch.sum(e, dim=1, keepdim=True)
-    output = d - torch.log(s.repeat(1, num_classes, 1, 1))
+    if input.dim() == 4:
+        output = d - torch.log(s.repeat(1, num_classes, 1, 1))
+    else:
+        output = d - torch.log(s.repeat(1, num_classes))
     return output
 
 def softmax_high_dimension(input):
     num_classes = input.size()[1]
     m = torch.max(input, dim=1, keepdim=True)[0]
-    e = torch.exp(input - m.repeat(1, num_classes, 1, 1))
+    if input.dim() == 4:
+        e = torch.exp(input - m.repeat(1, num_classes, 1, 1))
+    else:
+        e = torch.exp(input - m.repeat(1, num_classes))
     s = torch.sum(e, dim=1, keepdim=True)
-    output = torch.div(e, s.repeat(1, num_classes, 1, 1))
+    if input.dim() == 4:
+        output = torch.div(e, s.repeat(1, num_classes, 1, 1))
+    else:
+        output = torch.div(e, s.repeat(1, num_classes))
     return output
 
 
@@ -68,8 +93,15 @@ class PoseCNN(nn.Module):
             self.upsample_conv5_vertex_embed = upsample(2.0)
             self.upsample_vertex_embed = upsample(8.0)
             self.conv_vertex_score = conv(2*num_units, 3*num_classes, kernel_size=1, relu=False)
-            self.hough_voting = HoughVoting(is_train=0, skip_pixels=10, label_threshold=500, \
+            self.hough_voting = HoughVoting(is_train=0, skip_pixels=10, label_threshold=100, \
                                             inlier_threshold=0.9, voting_threshold=-1, per_threshold=0.01)
+
+            self.roi_align_conv4 = RoIAlign(aligned_height=7, aligned_width=7, spatial_scale=1.0 / 8.0)
+            self.roi_align_conv5 = RoIAlign(aligned_height=7, aligned_width=7, spatial_scale=1.0 / 16.0)
+            self.fc6 = fc(7 * 7 * 512, 256)
+            self.fc7 = fc(256, 256)
+            self.fc8 = fc(256, num_classes)
+            self.fc9 = fc(256, 4 * num_classes, relu=False)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
@@ -81,7 +113,7 @@ class PoseCNN(nn.Module):
                 m.bias.data.zero_()
 
 
-    def forward(self, x, label_gt, meta_data, extents):
+    def forward(self, x, label_gt, meta_data, extents, gt_boxes):
 
         # conv features
         for i, model in enumerate(self.features):
@@ -103,8 +135,8 @@ class PoseCNN(nn.Module):
         out_label = torch.max(out_prob, dim=1)[1].type(torch.IntTensor).cuda()
         out_weight = self.hard_label(out_prob, label_gt)
 
-        # center regression branch
         if cfg.TRAIN.VERTEX_REG:
+            # center regression branch
             out_conv4_vertex_embed = self.conv4_vertex_embed(out_conv4_3)
             out_conv5_vertex_embed = self.conv5_vertex_embed(out_conv5_3)
             out_conv5_vertex_embed_up = self.upsample_conv5_vertex_embed(out_conv5_vertex_embed)
@@ -115,13 +147,28 @@ class PoseCNN(nn.Module):
             # hough voting
             if self.training:
                 self.hough_voting.is_train = 1
+                self.hough_voting.voting_threshold=cfg.TRAIN.VOTING_THRESHOLD
             else:
                 self.hough_voting.is_train = 0
+                self.hough_voting.voting_threshold=cfg.TEST.VOTING_THRESHOLD
             out_box, out_pose = self.hough_voting(out_label, out_vertex, meta_data, extents)
+
+            # bounding box classification and regression branch
+            bbox_labels, bbox_targets, bbox_inside_weights, bbox_outside_weights = roi_target_layer(out_box, gt_boxes)
+            out_roi_conv4 = self.roi_align_conv4(out_conv4_3, out_box)
+            out_roi_conv5 = self.roi_align_conv4(out_conv5_3, out_box)
+            out_roi = out_roi_conv4 + out_roi_conv5
+            out_roi_flatten = out_roi.view(out_roi.size(0), -1)
+            out_fc6 = self.fc6(out_roi_flatten)
+            out_fc7 = self.fc7(out_fc6)
+            out_fc8 = self.fc8(out_fc7)
+            out_logsoftmax_box = log_softmax_high_dimension(out_fc8)
+            bbox_pred = self.fc9(out_fc7)
 
         if self.training:
             if cfg.TRAIN.VERTEX_REG:
-                return out_logsoftmax, out_weight, out_vertex
+                return out_logsoftmax, out_weight, out_vertex, out_logsoftmax_box, bbox_labels, \
+                       bbox_pred, bbox_targets, bbox_inside_weights
             else:
                 return out_logsoftmax, out_weight
         else:

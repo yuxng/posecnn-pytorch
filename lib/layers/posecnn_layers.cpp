@@ -7,7 +7,7 @@
 #define CHECK_INPUT(x) CHECK_CUDA(x); CHECK_CONTIGUOUS(x)
 
 /************************************************************
- hard_label layer
+ hard label layer
 *************************************************************/
 std::vector<at::Tensor> hard_label_cuda_forward(
     float threshold,
@@ -73,8 +73,56 @@ std::vector<at::Tensor> hough_voting_forward(
 }
 
 
+/************************************************************
+ roi align layer
+*************************************************************/
+std::vector<at::Tensor> roi_align_cuda_forward(
+    int aligned_height,
+    int aligned_width,
+    float spatial_scale,
+    at::Tensor bottom_features,
+    at::Tensor bottom_rois);
+
+std::vector<at::Tensor> roi_align_cuda_backward(
+    int batch_size,
+    int height,
+    int width,
+    float spatial_scale,
+    at::Tensor top_diff,
+    at::Tensor bottom_rois);
+
+std::vector<at::Tensor> roi_align_forward(
+    int aligned_height,
+    int aligned_width,
+    float spatial_scale,
+    at::Tensor bottom_features,
+    at::Tensor bottom_rois)
+{
+  CHECK_INPUT(bottom_features);
+  CHECK_INPUT(bottom_rois);
+
+  return roi_align_cuda_forward(aligned_height, aligned_width, spatial_scale, bottom_features, bottom_rois);
+}
+
+std::vector<at::Tensor> roi_align_backward(
+    int batch_size,
+    int height,
+    int width,
+    float spatial_scale,
+    at::Tensor top_diff,
+    at::Tensor bottom_rois) 
+{
+  CHECK_INPUT(top_diff);
+  CHECK_INPUT(bottom_rois);
+
+  return roi_align_cuda_backward(batch_size, height, width, spatial_scale, top_diff, bottom_rois);
+}
+
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("hard_label_forward", &hard_label_forward, "hard_label forward (CUDA)");
   m.def("hard_label_backward", &hard_label_backward, "hard_label backward (CUDA)");
   m.def("hough_voting_forward", &hough_voting_forward, "hough_voting forward (CUDA)");
+  m.def("roi_align_forward", &roi_align_forward, "roi_align forward (CUDA)");
+  m.def("roi_align_backward", &roi_align_backward, "roi_align backward (CUDA)");
 }

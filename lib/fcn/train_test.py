@@ -52,7 +52,7 @@ def loss_cross_entropy(scores, labels):
     return loss
 
 
-def smooth_l1_loss_vertex(vertex_pred, vertex_targets, vertex_weights, sigma=1.0):
+def smooth_l1_loss(vertex_pred, vertex_targets, vertex_weights, sigma=1.0):
     sigma_2 = sigma ** 2
     vertex_diff = vertex_pred - vertex_targets
     diff = torch.mul(vertex_weights, vertex_diff)
@@ -80,33 +80,37 @@ def train(train_loader, network, optimizer, epoch):
 
         inputs = sample['image'].cuda()
         labels = sample['label'].cuda()
-        input_var = torch.autograd.Variable(inputs)
-        label_var = torch.autograd.Variable(labels)
+        meta_data = sample['meta_data'].cuda()
+        extents = sample['extents'][0, :, :].repeat(cfg.TRAIN.GPUNUM, 1, 1).cuda()
+        gt_boxes = sample['gt_boxes'].cuda()
 
         if cfg.TRAIN.VERTEX_REG:
             vertex_targets = sample['vertex_targets'].cuda()
             vertex_weights = sample['vertex_weights'].cuda()
-            vertex_targets_var = torch.autograd.Variable(vertex_targets)
-            vertex_weights_var = torch.autograd.Variable(vertex_weights)
         else:
-            vertex_targets_var = []
-            vertex_weights_var = []
+            vertex_targets = []
+            vertex_weights = []
 
         if cfg.TRAIN.VISUALIZE:
-            _vis_minibatch(input_var, label_var, vertex_targets_var, sample, train_loader.dataset.class_colors)
+            _vis_minibatch(inputs, labels, vertex_targets, sample, train_loader.dataset.class_colors)
 
         # compute output
         if cfg.TRAIN.VERTEX_REG:
-            out_logsoftmax, out_weight, out_vertex = network(input_var, label_var)
+            out_logsoftmax, out_weight, out_vertex, out_logsoftmax_box, \
+                bbox_labels, bbox_pred, bbox_targets, bbox_inside_weights \
+                = network(inputs, labels, meta_data, extents, gt_boxes)
+
             loss_label = loss_cross_entropy(out_logsoftmax, out_weight)
-            loss_vertex = smooth_l1_loss_vertex(out_vertex, vertex_targets_var, vertex_weights_var)
-            loss = loss_label + loss_vertex
+            loss_vertex = smooth_l1_loss(out_vertex, vertex_targets, vertex_weights)
+            loss_box = loss_cross_entropy(out_logsoftmax_box, bbox_labels)
+            loss_location = smooth_l1_loss(bbox_pred, bbox_targets, bbox_inside_weights)
+            loss = loss_label + loss_vertex + loss_box + loss_location
         else:
-            out_logsoftmax, out_weight = network(input_var, label_var)
+            out_logsoftmax, out_weight = network(inputs, labels, meta_data, extents, gt_boxes)
             loss = loss_cross_entropy(out_logsoftmax, out_weight)
 
         # record loss
-        losses.update(loss.data, input_var.size(0))
+        losses.update(loss.data, inputs.size(0))
 
         # compute gradient and do optimization step
         optimizer.zero_grad()
@@ -117,8 +121,11 @@ def train(train_loader, network, optimizer, epoch):
         batch_time.update(time.time() - end)
 
         if cfg.TRAIN.VERTEX_REG:
-            print('epoch: [%d/%d][%d/%d], loss %.4f, loss_label %.4f, loss_center %.4f, lr %.6f, batch time %.2f' \
-               % (epoch, cfg.epochs, i, epoch_size, loss.data, loss_label.data, loss_vertex.data, optimizer.param_groups[0]['lr'], batch_time.val))
+            num_bg = torch.sum(bbox_labels[:, 0])
+            num_fg = torch.sum(torch.sum(bbox_labels[:, 1:], dim=1))
+            print('epoch: [%d/%d][%d/%d], l %.4f, l_label %.4f, l_center %.4f, l_box %.4f (%03d, %03d), l_loc %.4f, lr %.6f, batch time %.2f' \
+               % (epoch, cfg.epochs, i, epoch_size, loss.data, loss_label.data, loss_vertex.data, loss_box.data, num_fg.data, num_bg.data, \
+                  loss_location.data, optimizer.param_groups[0]['lr'], batch_time.val))
         else:
             print('epoch: [%d/%d][%d/%d], loss %.4f, lr %.6f, batch time %.2f' \
                % (epoch, cfg.epochs, i, epoch_size, loss, optimizer.param_groups[0]['lr'], batch_time.val))
@@ -142,23 +149,18 @@ def test(test_loader, network):
         labels = sample['label'].cuda()
         meta_data = sample['meta_data'].cuda()
         extents = sample['extents'][0, :, :].repeat(cfg.TRAIN.GPUNUM, 1, 1).cuda()
-
-        input_var = torch.autograd.Variable(inputs)
-        label_var = torch.autograd.Variable(labels)
-        meta_data_var = torch.autograd.Variable(meta_data)
-        extents_var = torch.autograd.Variable(extents)
         
         # compute output
         if cfg.TRAIN.VERTEX_REG:
-            out_label, out_vertex, out_box, out_pose = network(input_var, label_var, meta_data_var, extents_var)
+            out_label, out_vertex, out_box, out_pose = network(inputs, labels, meta_data, extents)
         else:
-            out_label = network(input_var, label_var, meta_data_var, extents_var)
+            out_label = network(inputs, labels, meta_data, extents)
             out_vertex = []
             out_box = []
             out_pose = []
 
         if cfg.TEST.VISUALIZE:
-            _vis_test(input_var, label_var, out_label, out_vertex, out_box, out_pose, sample, test_loader.dataset.class_colors)
+            _vis_test(inputs, labels, out_label, out_vertex, out_box, out_pose, sample, test_loader.dataset.class_colors)
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -189,13 +191,13 @@ def convert_to_image(im_blob):
     return np.clip(255 * im_blob, 0, 255).astype(np.uint8)
 
 
-def _vis_minibatch(input_var, label_var, vertex_targets_var, sample, class_colors):
+def _vis_minibatch(inputs, labels, vertex_targets, sample, class_colors):
 
     """Visualize a mini-batch for debugging."""
     import matplotlib.pyplot as plt
 
-    im_blob = input_var.cpu().numpy()
-    label_blob = label_var.cpu().numpy()
+    im_blob = inputs.cpu().numpy()
+    label_blob = labels.cpu().numpy()
     poses = sample['poses'].numpy()
     meta_data_blob = sample['meta_data'].numpy()
     metadata = meta_data_blob[0, :]
@@ -204,7 +206,7 @@ def _vis_minibatch(input_var, label_var, vertex_targets_var, sample, class_color
     extents = sample['extents'][0, :, :].numpy()
 
     if cfg.TRAIN.VERTEX_REG:
-        vertex_target_blob = vertex_targets_var.cpu().numpy()
+        vertex_target_blob = vertex_targets.cpu().numpy()
     
     for i in range(im_blob.shape[0]):
         fig = plt.figure()
@@ -300,13 +302,13 @@ def _vis_minibatch(input_var, label_var, vertex_targets_var, sample, class_color
         plt.show()
 
 
-def _vis_test(input_var, label_var, out_label, out_vertex, out_box, out_pose, sample, class_colors):
+def _vis_test(inputs, labels, out_label, out_vertex, out_box, out_pose, sample, class_colors):
 
     """Visualize a mini-batch for debugging."""
     import matplotlib.pyplot as plt
 
-    im_blob = input_var.cpu().numpy()
-    label_blob = label_var.cpu().numpy()
+    im_blob = inputs.cpu().numpy()
+    label_blob = labels.cpu().numpy()
     label_pred = out_label.cpu().numpy()
     poses = sample['poses'].numpy()
     meta_data_blob = sample['meta_data'].numpy()

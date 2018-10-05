@@ -432,6 +432,8 @@ std::vector<at::Tensor> hough_voting_cuda_forward(
   // copy outputs
   int num_rois_host;
   cudaMemcpy(&num_rois_host, num_rois.data<int>(), sizeof(int), cudaMemcpyDeviceToHost);
+  if (num_rois_host == 0)
+    num_rois_host = 1;
   auto top_box_final = at::zeros({num_rois_host, 7}, bottom_vertex.options());
   auto top_pose_final = at::zeros({num_rois_host, 7}, bottom_vertex.options());
   cudaMemcpy(top_box_final.data<float>(), top_box.data<float>(), num_rois_host * 7 * sizeof(float), cudaMemcpyDeviceToDevice);
