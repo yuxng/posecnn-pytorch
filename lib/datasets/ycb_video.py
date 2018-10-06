@@ -36,7 +36,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
                               (192, 0, 0), (0, 192, 0), (0, 0, 192)]
 
         self._class_weights = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
-        self._symmetry = np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])
+        self._symmetry = np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]).astype(np.float32)
         self._extents = self._load_object_extents()
         self._points, self._points_all, self._point_blob = self._load_object_points()
 
@@ -73,6 +73,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
                   'poses': pose_blob,
                   'extents': self._extents,
                   'points': self._point_blob,
+                  'symmetry': self._symmetry,
                   'gt_boxes': gt_boxes,
                   'im_info': im_info}
 
@@ -277,9 +278,13 @@ class YCBVideo(data.Dataset, datasets.imdb):
         point_blob = points_all.copy()
         for i in xrange(1, self._num_classes):
             # compute the rescaling factor for the points
-            # weight = 2.0 / np.amax(self._extents[i, :])
-            weight = 1.0
-            point_blob[i, :, :] = weight * point_blob[i, :, :]
+            weight = 2.0 / np.amax(self._extents[i, :])
+            if weight < 10:
+                weight = 10
+            if self._symmetry[i] > 0:
+                point_blob[i, :, :] = 4 * weight * point_blob[i, :, :]
+            else:
+                point_blob[i, :, :] = weight * point_blob[i, :, :]
 
         return points, points_all, point_blob
 

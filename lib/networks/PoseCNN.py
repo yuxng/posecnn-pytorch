@@ -7,7 +7,9 @@ from torch.nn.init import kaiming_normal_
 from layers.hard_label import HardLabel
 from layers.hough_voting import HoughVoting
 from layers.roi_align import RoIAlign
+from layers.point_matching_loss import PMLoss
 from layers.roi_target_layer import roi_target_layer
+from layers.pose_target_layer import pose_target_layer
 from fcn.config import cfg
 
 __all__ = [
@@ -102,6 +104,8 @@ class PoseCNN(nn.Module):
             self.fc7 = fc(256, 256)
             self.fc8 = fc(256, num_classes)
             self.fc9 = fc(256, 4 * num_classes, relu=False)
+            self.fc10 = fc(256, 4 * num_classes, relu=False)
+            self.pml = PMLoss()
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
@@ -113,7 +117,7 @@ class PoseCNN(nn.Module):
                 m.bias.data.zero_()
 
 
-    def forward(self, x, label_gt, meta_data, extents, gt_boxes):
+    def forward(self, x, label_gt, meta_data, extents, gt_boxes, poses, points, symmetry):
 
         # conv features
         for i, model in enumerate(self.features):
@@ -163,17 +167,31 @@ class PoseCNN(nn.Module):
             out_fc7 = self.fc7(out_fc6)
             out_fc8 = self.fc8(out_fc7)
             out_logsoftmax_box = log_softmax_high_dimension(out_fc8)
+            bbox_prob = softmax_high_dimension(out_fc8)
             bbox_pred = self.fc9(out_fc7)
+
+            # rotation regression branch
+            rois, poses_target, poses_weight = pose_target_layer(out_box, bbox_prob, bbox_pred, gt_boxes, poses)
+            out_qt_conv4 = self.roi_align_conv4(out_conv4_3, rois)
+            out_qt_conv5 = self.roi_align_conv4(out_conv5_3, rois)
+            out_qt = out_qt_conv4 + out_qt_conv5
+            out_qt_flatten = out_qt.view(out_qt.size(0), -1)
+            out_qt_fc6 = self.fc6(out_qt_flatten)
+            out_qt_fc7 = self.fc7(out_qt_fc6)
+            out_fcr = self.fc10(out_qt_fc7)
+            # point matching loss
+            poses_pred = nn.functional.normalize(torch.mul(out_fcr, poses_weight))
+            loss_pose = self.pml(poses_pred, poses_target, poses_weight, points, symmetry)
 
         if self.training:
             if cfg.TRAIN.VERTEX_REG:
                 return out_logsoftmax, out_weight, out_vertex, out_logsoftmax_box, bbox_labels, \
-                       bbox_pred, bbox_targets, bbox_inside_weights
+                       bbox_pred, bbox_targets, bbox_inside_weights, loss_pose
             else:
                 return out_logsoftmax, out_weight
         else:
             if cfg.TRAIN.VERTEX_REG:
-                return out_label, out_vertex, out_box, out_pose
+                return out_label, out_vertex, rois, out_pose
             else:
                 return out_label
 

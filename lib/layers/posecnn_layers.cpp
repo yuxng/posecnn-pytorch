@@ -118,6 +118,47 @@ std::vector<at::Tensor> roi_align_backward(
   return roi_align_cuda_backward(batch_size, height, width, spatial_scale, top_diff, bottom_rois);
 }
 
+/************************************************************
+ point matching loss layer
+*************************************************************/
+
+std::vector<at::Tensor> pml_cuda_forward(
+    at::Tensor bottom_prediction,
+    at::Tensor bottom_target,
+    at::Tensor bottom_weight,
+    at::Tensor points,
+    at::Tensor symmetry);
+
+std::vector<at::Tensor> pml_cuda_backward(
+    at::Tensor grad_loss,
+    at::Tensor bottom_diff);
+
+std::vector<at::Tensor> pml_forward(
+    at::Tensor bottom_prediction,
+    at::Tensor bottom_target,
+    at::Tensor bottom_weight,
+    at::Tensor points,
+    at::Tensor symmetry)
+{
+  CHECK_INPUT(bottom_prediction);
+  CHECK_INPUT(bottom_target);
+  CHECK_INPUT(bottom_weight);
+  CHECK_INPUT(points);
+  CHECK_INPUT(symmetry);
+
+  return pml_cuda_forward(bottom_prediction, bottom_target, bottom_weight, points, symmetry);
+}
+
+std::vector<at::Tensor> pml_backward(
+    at::Tensor grad_loss,
+    at::Tensor bottom_diff) 
+{
+  CHECK_INPUT(grad_loss);
+  CHECK_INPUT(bottom_diff);
+
+  return pml_cuda_backward(grad_loss, bottom_diff);
+}
+
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("hard_label_forward", &hard_label_forward, "hard_label forward (CUDA)");
@@ -125,4 +166,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("hough_voting_forward", &hough_voting_forward, "hough_voting forward (CUDA)");
   m.def("roi_align_forward", &roi_align_forward, "roi_align forward (CUDA)");
   m.def("roi_align_backward", &roi_align_backward, "roi_align backward (CUDA)");
+  m.def("pml_forward", &pml_forward, "pml forward (CUDA)");
+  m.def("pml_backward", &pml_backward, "pml backward (CUDA)");
 }

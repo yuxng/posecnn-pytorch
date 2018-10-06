@@ -83,6 +83,9 @@ def train(train_loader, network, optimizer, epoch):
         meta_data = sample['meta_data'].cuda()
         extents = sample['extents'][0, :, :].repeat(cfg.TRAIN.GPUNUM, 1, 1).cuda()
         gt_boxes = sample['gt_boxes'].cuda()
+        poses = sample['poses'].cuda()
+        points = sample['points'][0, :, :, :].repeat(cfg.TRAIN.GPUNUM, 1, 1, 1).cuda()
+        symmetry = sample['symmetry'][0, :].repeat(cfg.TRAIN.GPUNUM, 1).cuda()
 
         if cfg.TRAIN.VERTEX_REG:
             vertex_targets = sample['vertex_targets'].cuda()
@@ -97,16 +100,17 @@ def train(train_loader, network, optimizer, epoch):
         # compute output
         if cfg.TRAIN.VERTEX_REG:
             out_logsoftmax, out_weight, out_vertex, out_logsoftmax_box, \
-                bbox_labels, bbox_pred, bbox_targets, bbox_inside_weights \
-                = network(inputs, labels, meta_data, extents, gt_boxes)
+                bbox_labels, bbox_pred, bbox_targets, bbox_inside_weights, loss_pose_tensor \
+                = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
 
             loss_label = loss_cross_entropy(out_logsoftmax, out_weight)
             loss_vertex = smooth_l1_loss(out_vertex, vertex_targets, vertex_weights)
             loss_box = loss_cross_entropy(out_logsoftmax_box, bbox_labels)
             loss_location = smooth_l1_loss(bbox_pred, bbox_targets, bbox_inside_weights)
-            loss = loss_label + loss_vertex + loss_box + loss_location
+            loss_pose = torch.mean(loss_pose_tensor)
+            loss = loss_label + loss_vertex + loss_box + loss_location + loss_pose
         else:
-            out_logsoftmax, out_weight = network(inputs, labels, meta_data, extents, gt_boxes)
+            out_logsoftmax, out_weight = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
             loss = loss_cross_entropy(out_logsoftmax, out_weight)
 
         # record loss
@@ -123,11 +127,11 @@ def train(train_loader, network, optimizer, epoch):
         if cfg.TRAIN.VERTEX_REG:
             num_bg = torch.sum(bbox_labels[:, 0])
             num_fg = torch.sum(torch.sum(bbox_labels[:, 1:], dim=1))
-            print('epoch: [%d/%d][%d/%d], l %.4f, l_label %.4f, l_center %.4f, l_box %.4f (%03d, %03d), l_loc %.4f, lr %.6f, batch time %.2f' \
+            print('epoch: [%d/%d][%d/%d], l %.4f, l_label %.4f, l_center %.4f, l_box %.4f (%03d, %03d), l_loc %.4f, l_pose %.4f, lr %.6f, time %.2f' \
                % (epoch, cfg.epochs, i, epoch_size, loss.data, loss_label.data, loss_vertex.data, loss_box.data, num_fg.data, num_bg.data, \
-                  loss_location.data, optimizer.param_groups[0]['lr'], batch_time.val))
+                  loss_location.data, loss_pose.data, optimizer.param_groups[0]['lr'], batch_time.val))
         else:
-            print('epoch: [%d/%d][%d/%d], loss %.4f, lr %.6f, batch time %.2f' \
+            print('epoch: [%d/%d][%d/%d], loss %.4f, lr %.6f, time %.2f' \
                % (epoch, cfg.epochs, i, epoch_size, loss, optimizer.param_groups[0]['lr'], batch_time.val))
 
         cfg.TRAIN.ITERS += 1
@@ -149,12 +153,16 @@ def test(test_loader, network):
         labels = sample['label'].cuda()
         meta_data = sample['meta_data'].cuda()
         extents = sample['extents'][0, :, :].repeat(cfg.TRAIN.GPUNUM, 1, 1).cuda()
+        gt_boxes = sample['gt_boxes'].cuda()
+        poses = sample['poses'].cuda()
+        points = sample['points'][0, :, :, :].repeat(cfg.TRAIN.GPUNUM, 1, 1, 1).cuda()
+        symmetry = sample['symmetry'][0, :].repeat(cfg.TRAIN.GPUNUM, 1).cuda()
         
         # compute output
         if cfg.TRAIN.VERTEX_REG:
-            out_label, out_vertex, out_box, out_pose = network(inputs, labels, meta_data, extents)
+            out_label, out_vertex, out_box, out_pose = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
         else:
-            out_label = network(inputs, labels, meta_data, extents)
+            out_label = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
             out_vertex = []
             out_box = []
             out_pose = []
