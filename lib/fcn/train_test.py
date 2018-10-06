@@ -160,15 +160,27 @@ def test(test_loader, network):
         
         # compute output
         if cfg.TRAIN.VERTEX_REG:
-            out_label, out_vertex, out_box, out_pose = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
+            out_label, out_vertex, rois, out_pose, out_quaternion = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
+                
+            # combine poses
+            rois = rois.detach().cpu().numpy()
+            out_pose = out_pose.detach().cpu().numpy()
+            out_quaternion = out_quaternion.detach().cpu().numpy()
+            num = rois.shape[0]
+            poses = out_pose.copy()
+            for j in xrange(num):
+                cls = int(rois[j, 1])
+                if cls >= 0:
+                    q = out_quaternion[j, 4*cls:4*cls+4]
+                    poses[j, :4] = q / np.linalg.norm(q)
         else:
             out_label = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
             out_vertex = []
-            out_box = []
-            out_pose = []
+            rois = []
+            poses = []
 
         if cfg.TEST.VISUALIZE:
-            _vis_test(inputs, labels, out_label, out_vertex, out_box, out_pose, sample, test_loader.dataset.class_colors)
+            _vis_test(inputs, labels, out_label, out_vertex, rois, poses, sample, test_loader.dataset._points_all, test_loader.dataset.class_colors)
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -206,7 +218,7 @@ def _vis_minibatch(inputs, labels, vertex_targets, sample, class_colors):
 
     im_blob = inputs.cpu().numpy()
     label_blob = labels.cpu().numpy()
-    poses = sample['poses'].numpy()
+    gt_poses = sample['poses'].numpy()
     meta_data_blob = sample['meta_data'].numpy()
     metadata = meta_data_blob[0, :]
     intrinsic_matrix = metadata[:9].reshape((3,3))
@@ -229,7 +241,7 @@ def _vis_minibatch(inputs, labels, vertex_targets, sample, class_colors):
         ax.set_title('color') 
 
         # project the 3D box to image
-        pose_blob = poses[i]
+        pose_blob = gt_poses[i]
         for j in range(pose_blob.shape[0]):
             if pose_blob[j, 0] == 0:
                 continue
@@ -310,7 +322,7 @@ def _vis_minibatch(inputs, labels, vertex_targets, sample, class_colors):
         plt.show()
 
 
-def _vis_test(inputs, labels, out_label, out_vertex, out_box, out_pose, sample, class_colors):
+def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, sample, points, class_colors):
 
     """Visualize a mini-batch for debugging."""
     import matplotlib.pyplot as plt
@@ -318,7 +330,7 @@ def _vis_test(inputs, labels, out_label, out_vertex, out_box, out_pose, sample, 
     im_blob = inputs.cpu().numpy()
     label_blob = labels.cpu().numpy()
     label_pred = out_label.cpu().numpy()
-    poses = sample['poses'].numpy()
+    gt_poses = sample['poses'].numpy()
     meta_data_blob = sample['meta_data'].numpy()
     metadata = meta_data_blob[0, :]
     intrinsic_matrix = metadata[:9].reshape((3,3))
@@ -328,7 +340,6 @@ def _vis_test(inputs, labels, out_label, out_vertex, out_box, out_pose, sample, 
     if cfg.TRAIN.VERTEX_REG:
         vertex_targets = sample['vertex_targets'].numpy()
         vertex_pred = out_vertex.detach().cpu().numpy()
-        box_pred = out_box.detach().cpu().numpy()
     
     for i in range(im_blob.shape[0]):
         fig = plt.figure()
@@ -340,38 +351,9 @@ def _vis_test(inputs, labels, out_label, out_vertex, out_box, out_pose, sample, 
         im = im.astype(np.uint8)
         ax = fig.add_subplot(3, 4, 1)
         plt.imshow(im)
-        ax.set_title('color') 
-
-        # project the 3D box to image
-        pose_blob = poses[i]
-        for j in range(pose_blob.shape[0]):
-            if pose_blob[j, 0] == 0:
-                continue
-
-            class_id = int(pose_blob[j, 1])
-            bb3d = _get_bb3D(extents[class_id, :])
-            x3d = np.ones((4, 8), dtype=np.float32)
-            x3d[0:3, :] = bb3d
-            
-            # projection
-            RT = np.zeros((3, 4), dtype=np.float32)
-            RT[:3, :3] = quat2mat(pose_blob[j, 2:6])
-            RT[:, 3] = pose_blob[j, 6:]
-            x2d = np.matmul(intrinsic_matrix, np.matmul(RT, x3d))
-            x2d[0, :] = np.divide(x2d[0, :], x2d[2, :])
-            x2d[1, :] = np.divide(x2d[1, :], x2d[2, :])
-
-            x1 = np.min(x2d[0, :])
-            x2 = np.max(x2d[0, :])
-            y1 = np.min(x2d[1, :])
-            y2 = np.max(x2d[1, :])
-            plt.gca().add_patch(
-                plt.Rectangle((x1, y1), x2-x1, y2-y1, fill=False, edgecolor='g', linewidth=3))
+        ax.set_title('gt boxes') 
 
         # show gt boxes
-        ax = fig.add_subplot(3, 4, 2)
-        plt.imshow(im)
-        ax.set_title('gt boxes')
         boxes = gt_boxes[i]
         for j in range(boxes.shape[0]):
             if boxes[j, 4] == 0:
@@ -394,9 +376,9 @@ def _vis_test(inputs, labels, out_label, out_vertex, out_box, out_pose, sample, 
             I = np.where(label_gt[:, :, j] > 0)
             im_label_gt[I[0], I[1], :] = class_colors[j]
 
-        ax = fig.add_subplot(3, 4, 3)
+        ax = fig.add_subplot(3, 4, 5)
         plt.imshow(im_label_gt)
-        ax.set_title('gt label') 
+        ax.set_title('gt labels') 
 
         # show predicted label
         label = label_pred[i, :, :]
@@ -407,31 +389,77 @@ def _vis_test(inputs, labels, out_label, out_vertex, out_box, out_pose, sample, 
             I = np.where(label == j)
             im_label[I[0], I[1], :] = class_colors[j]
 
-        ax = fig.add_subplot(3, 4, 4)
+        ax = fig.add_subplot(3, 4, 6)
         plt.imshow(im_label)
-        ax.set_title('predicted label')
+        ax.set_title('predicted labels')
 
         if cfg.TRAIN.VERTEX_REG:
 
             # show predicted boxes
-            ax = fig.add_subplot(3, 4, 5)
+            ax = fig.add_subplot(3, 4, 2)
             plt.imshow(im)
             ax.set_title('predicted boxes')
-            boxes = gt_boxes[i]
-            for j in range(box_pred.shape[0]):
-                if box_pred[j, 0] != i:
+            for j in range(rois.shape[0]):
+                if rois[j, 0] != i:
                     continue
-                cls = box_pred[j, 1]
-                x1 = box_pred[j, 2]
-                y1 = box_pred[j, 3]
-                x2 = box_pred[j, 4]
-                y2 = box_pred[j, 5]
+                cls = rois[j, 1]
+                x1 = rois[j, 2]
+                y1 = rois[j, 3]
+                x2 = rois[j, 4]
+                y2 = rois[j, 5]
                 plt.gca().add_patch(
                     plt.Rectangle((x1, y1), x2-x1, y2-y1, fill=False, edgecolor=np.array(class_colors[int(cls)])/255.0, linewidth=3))
 
                 cx = (x1 + x2) / 2
                 cy = (y1 + y2) / 2
                 plt.plot(cx, cy, 'yo')
+
+            # show gt poses
+            ax = fig.add_subplot(3, 4, 9)
+            ax.set_title('gt poses')
+            plt.imshow(im)
+            pose_blob = gt_poses[i]
+            for j in range(pose_blob.shape[0]):
+                if pose_blob[j, 0] == 0:
+                    continue
+
+                cls = int(pose_blob[j, 1])
+                # extract 3D points
+                x3d = np.ones((4, points.shape[1]), dtype=np.float32)
+                x3d[0, :] = points[cls,:,0]
+                x3d[1, :] = points[cls,:,1]
+                x3d[2, :] = points[cls,:,2]
+               
+                # projection
+                RT = np.zeros((3, 4), dtype=np.float32)
+                RT[:3, :3] = quat2mat(pose_blob[j, 2:6])
+                RT[:, 3] = pose_blob[j, 6:]
+                x2d = np.matmul(intrinsic_matrix, np.matmul(RT, x3d))
+                x2d[0, :] = np.divide(x2d[0, :], x2d[2, :])
+                x2d[1, :] = np.divide(x2d[1, :], x2d[2, :])
+                plt.plot(x2d[0, :], x2d[1, :], '.', color=np.divide(class_colors[cls], 255.0), alpha=0.5)                    
+
+            # show predicted poses
+            ax = fig.add_subplot(3, 4, 10)
+            ax.set_title('predicted poses')
+            plt.imshow(im)
+            for j in xrange(rois.shape[0]):
+                cls = int(rois[j, 1])
+                if cls > 0 and rois[j, -1] > 0.1:
+                    # extract 3D points
+                    x3d = np.ones((4, points.shape[1]), dtype=np.float32)
+                    x3d[0, :] = points[cls,:,0]
+                    x3d[1, :] = points[cls,:,1]
+                    x3d[2, :] = points[cls,:,2]
+
+                    # projection
+                    RT = np.zeros((3, 4), dtype=np.float32)
+                    RT[:3, :3] = quat2mat(poses[j, :4])
+                    RT[:, 3] = poses[j, 4:7]
+                    x2d = np.matmul(intrinsic_matrix, np.matmul(RT, x3d))
+                    x2d[0, :] = np.divide(x2d[0, :], x2d[2, :])
+                    x2d[1, :] = np.divide(x2d[1, :], x2d[2, :])
+                    plt.plot(x2d[0, :], x2d[1, :], '.', color=np.divide(class_colors[cls], 255.0), alpha=0.5)
 
             # show gt vertex targets
             vertex_target = vertex_targets[i, :, :, :]
@@ -442,7 +470,7 @@ def _vis_test(inputs, labels, out_label, out_vertex, out_box, out_pose, sample, 
                 if len(index[0]) > 0:
                     center[:, index[0], index[1]] = vertex_target[3*j:3*j+3, index[0], index[1]]
 
-            ax = fig.add_subplot(3, 4, 6)
+            ax = fig.add_subplot(3, 4, 3)
             plt.imshow(center[0,:,:])
             ax.set_title('gt center x') 
 
@@ -450,7 +478,7 @@ def _vis_test(inputs, labels, out_label, out_vertex, out_box, out_pose, sample, 
             plt.imshow(center[1,:,:])
             ax.set_title('gt center y')
 
-            ax = fig.add_subplot(3, 4, 8)
+            ax = fig.add_subplot(3, 4, 11)
             plt.imshow(np.exp(center[2,:,:]))
             ax.set_title('gt z')
 
@@ -463,11 +491,11 @@ def _vis_test(inputs, labels, out_label, out_vertex, out_box, out_pose, sample, 
                 if len(index[0]) > 0:
                     center[:, index[0], index[1]] = vertex_target[3*j:3*j+3, index[0], index[1]]
 
-            ax = fig.add_subplot(3, 4, 10)
+            ax = fig.add_subplot(3, 4, 4)
             plt.imshow(center[0,:,:])
             ax.set_title('predicted center x') 
 
-            ax = fig.add_subplot(3, 4, 11)
+            ax = fig.add_subplot(3, 4, 8)
             plt.imshow(center[1,:,:])
             ax.set_title('predicted center y')
 

@@ -178,9 +178,9 @@ class PoseCNN(nn.Module):
             out_qt_flatten = out_qt.view(out_qt.size(0), -1)
             out_qt_fc6 = self.fc6(out_qt_flatten)
             out_qt_fc7 = self.fc7(out_qt_fc6)
-            out_fcr = self.fc10(out_qt_fc7)
+            out_quaternion = self.fc10(out_qt_fc7)
             # point matching loss
-            poses_pred = nn.functional.normalize(torch.mul(out_fcr, poses_weight))
+            poses_pred = nn.functional.normalize(torch.mul(out_quaternion, poses_weight))
             loss_pose = self.pml(poses_pred, poses_target, poses_weight, points, symmetry)
 
         if self.training:
@@ -191,7 +191,7 @@ class PoseCNN(nn.Module):
                 return out_logsoftmax, out_weight
         else:
             if cfg.TRAIN.VERTEX_REG:
-                return out_label, out_vertex, rois, out_pose
+                return out_label, out_vertex, rois, out_pose, out_quaternion
             else:
                 return out_label
 
