@@ -88,13 +88,14 @@ class PoseCNN(nn.Module):
         self.conv_score = conv(num_units, num_classes, kernel_size=1)
         self.hard_label = HardLabel(threshold=1.0)
 
-        # center regression branch
         if cfg.TRAIN.VERTEX_REG:
+            # center regression branch
             self.conv4_vertex_embed = conv(512, 2*num_units, kernel_size=1, relu=False)
             self.conv5_vertex_embed = conv(512, 2*num_units, kernel_size=1, relu=False)
             self.upsample_conv5_vertex_embed = upsample(2.0)
             self.upsample_vertex_embed = upsample(8.0)
             self.conv_vertex_score = conv(2*num_units, 3*num_classes, kernel_size=1, relu=False)
+            # hough voting
             self.hough_voting = HoughVoting(is_train=0, skip_pixels=10, label_threshold=100, \
                                             inlier_threshold=0.9, voting_threshold=-1, per_threshold=0.01)
 
@@ -151,10 +152,12 @@ class PoseCNN(nn.Module):
             # hough voting
             if self.training:
                 self.hough_voting.is_train = 1
-                self.hough_voting.voting_threshold=cfg.TRAIN.VOTING_THRESHOLD
+                self.hough_voting.voting_threshold=cfg.TRAIN.HOUGH_VOTING_THRESHOLD
+                self.hough_voting.skip_pixels=cfg.TRAIN.HOUGH_SKIP_PIXELS
             else:
                 self.hough_voting.is_train = 0
                 self.hough_voting.voting_threshold=cfg.TEST.VOTING_THRESHOLD
+                self.hough_voting.skip_pixels=cfg.TEST.HOUGH_SKIP_PIXELS
             out_box, out_pose = self.hough_voting(out_label, out_vertex, meta_data, extents)
 
             # bounding box classification and regression branch

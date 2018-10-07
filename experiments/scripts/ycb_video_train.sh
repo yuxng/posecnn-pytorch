@@ -18,4 +18,4 @@ time ./tools/train_net.py \
   --cad data/YCB_Video/models.txt \
   --pose data/YCB_Video/poses.txt \
   --solver sgd \
-  --epochs 8
+  --epochs 80
