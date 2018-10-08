@@ -109,7 +109,7 @@ if __name__ == '__main__':
         network_data = None
         print("=> creating network '{}'".format(args.network_name))
 
-    network = networks.__dict__[args.network_name](cfg.TRAIN.NUM_CLASSES, cfg.TRAIN.NUM_UNITS, network_data).cuda()
+    network = networks.__dict__[args.network_name](dataset.num_classes, cfg.TRAIN.NUM_UNITS, network_data).cuda()
     if torch.cuda.device_count() > 1:
         cfg.TRAIN.GPUNUM = torch.cuda.device_count()
         print("Let's use", torch.cuda.device_count(), "GPUs!")

@@ -60,6 +60,7 @@ __C.TRAIN.SEGMENTATION = True
 __C.TRAIN.ITERNUM = 4
 __C.TRAIN.HEATUP = 4
 __C.TRAIN.GPUNUM = 1
+__C.TRAIN.CLASSES = (1,2,3)
 
 __C.TRAIN.SINGLE_FRAME = False
 __C.TRAIN.TRAINABLE = True
@@ -129,7 +130,6 @@ __C.TRAIN.ADD_NOISE = False
 __C.TRAIN.IMS_PER_BATCH = 2
 __C.TRAIN.NUM_STEPS = 5
 __C.TRAIN.NUM_UNITS = 64
-__C.TRAIN.NUM_CLASSES = 10
 
 # Use horizontally-flipped images during training?
 __C.TRAIN.USE_FLIPPED = True

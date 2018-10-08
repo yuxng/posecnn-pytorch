@@ -146,7 +146,7 @@ class PoseCNN(nn.Module):
             out_conv4_vertex_embed = self.conv4_vertex_embed(out_conv4_3)
             out_conv5_vertex_embed = self.conv5_vertex_embed(out_conv5_3)
             out_conv5_vertex_embed_up = self.upsample_conv5_vertex_embed(out_conv5_vertex_embed)
-            out_vertex_embed = self.dropout(out_conv4_vertex_embed + out_conv5_vertex_embed_up)
+            out_vertex_embed = out_conv4_vertex_embed + out_conv5_vertex_embed_up
             out_vertex_embed_up = self.upsample_vertex_embed(out_vertex_embed)
             out_vertex = self.conv_vertex_score(out_vertex_embed_up)
 

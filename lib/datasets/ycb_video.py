@@ -24,20 +24,25 @@ class YCBVideo(data.Dataset, datasets.imdb):
                             else ycb_video_path
         self._data_path = os.path.join(self._ycb_video_path, 'data')
 
-        self._classes = ('__background__', '002_master_chef_can', '003_cracker_box', '004_sugar_box', '005_tomato_soup_can', '006_mustard_bottle', \
+        # define all the classes
+        self._classes_all = ('__background__', '002_master_chef_can', '003_cracker_box', '004_sugar_box', '005_tomato_soup_can', '006_mustard_bottle', \
                          '007_tuna_fish_can', '008_pudding_box', '009_gelatin_box', '010_potted_meat_can', '011_banana', '019_pitcher_base', \
                          '021_bleach_cleanser', '024_bowl', '025_mug', '035_power_drill', '036_wood_block', '037_scissors', '040_large_marker', \
                          '051_large_clamp', '052_extra_large_clamp', '061_foam_brick')
-        self._num_classes = len(self._classes)
-
-        self._class_colors = [(255, 255, 255), (255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (255, 0, 255), (0, 255, 255), \
+        self._num_classes_all = len(self._classes_all)
+        self._class_colors_all = [(255, 255, 255), (255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (255, 0, 255), (0, 255, 255), \
                               (128, 0, 0), (0, 128, 0), (0, 0, 128), (128, 128, 0), (128, 0, 128), (0, 128, 128), \
                               (64, 0, 0), (0, 64, 0), (0, 0, 64), (64, 64, 0), (64, 0, 64), (0, 64, 64), 
                               (192, 0, 0), (0, 192, 0), (0, 0, 192)]
+        self._symmetry_all = np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]).astype(np.float32)
+        self._extents_all = self._load_object_extents()
 
-        self._class_weights = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
-        self._symmetry = np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]).astype(np.float32)
-        self._extents = self._load_object_extents()
+        # select a subset of classes
+        self._classes = [self._classes_all[i] for i in cfg.TRAIN.CLASSES]
+        self._num_classes = len(self._classes)
+        self._class_colors = [self._class_colors_all[i] for i in cfg.TRAIN.CLASSES]
+        self._symmetry = self._symmetry_all[cfg.TRAIN.CLASSES]
+        self._extents = self._extents_all[cfg.TRAIN.CLASSES]
         self._points, self._points_all, self._point_blob = self._load_object_points()
 
         self._class_to_ind = dict(zip(self._classes, xrange(self._num_classes)))
@@ -239,21 +244,6 @@ class YCBVideo(data.Dataset, datasets.imdb):
         return os.path.join(datasets.ROOT_DIR, 'data', 'YCB_Video')
 
 
-    def _print_statistics(self, video_ids):
-
-        count = np.zeros((self.num_classes, ), dtype=np.int32)
-        for i in range(len(video_ids)):
-            filename = os.path.join(self._data_path, video_ids[i], '000001-meta.mat')
-            meta_data = scipy.io.loadmat(filename)
-            cls_indexes = meta_data['cls_indexes'].flatten()
-            for j in range(len(cls_indexes)):
-                cls = int(cls_indexes[j])
-                count[cls] += 1
-
-        for i in range(1, self.num_classes):
-            print('%d %s [%d/%d]' % (i, self.classes[i], count[i], len(video_ids)))
-
-
     def _load_image_set_index(self):
         """
         Load the indexes listed in this dataset's image set file.
@@ -262,24 +252,43 @@ class YCBVideo(data.Dataset, datasets.imdb):
         assert os.path.exists(image_set_file), \
                 'Path does not exist: {}'.format(image_set_file)
 
-        with open(image_set_file) as f:
-            image_index = [x.rstrip('\n') for x in f.readlines()]
-
         image_index = []
-        video_ids = set([])
+        video_ids_selected = set([])
+        video_ids_not = set([])
+        count = np.zeros((self.num_classes, ), dtype=np.int32)
+
         with open(image_set_file) as f:
             for x in f.readlines():
                 index = x.rstrip('\n')
                 pos = index.find('/')
                 video_id = index[:pos]
-                image_index.append(index)
-                video_ids.add(video_id)
+
+                if not video_id in video_ids_selected and not video_id in video_ids_not:
+                    filename = os.path.join(self._data_path, video_id, '000001-meta.mat')
+                    meta_data = scipy.io.loadmat(filename)
+                    cls_indexes = meta_data['cls_indexes'].flatten()
+                    flag = 0
+                    for i in range(len(cls_indexes)):
+                        cls_index = int(cls_indexes[i])
+                        ind = np.where(np.array(cfg.TRAIN.CLASSES) == cls_index)[0]
+                        if len(ind) > 0:
+                            count[ind] += 1
+                            flag = 1
+                    if flag:
+                        video_ids_selected.add(video_id)
+                    else:
+                        video_ids_not.add(video_id)
+
+                if video_id in video_ids_selected:
+                    image_index.append(index)
+
+        for i in range(1, self.num_classes):
+            print('%d %s [%d/%d]' % (i, self.classes[i], count[i], len(list(video_ids_selected))))
 
         # sample a subset for training
         if self._image_set == 'train':
             image_index = image_index[::10]
 
-        self._print_statistics(list(video_ids))
         return image_index
 
 
@@ -321,7 +330,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
         assert os.path.exists(extent_file), \
                 'Path does not exist: {}'.format(extent_file)
 
-        extents = np.zeros((self._num_classes, 3), dtype=np.float32)
+        extents = np.zeros((self._num_classes_all, 3), dtype=np.float32)
         extents[1:, :] = np.loadtxt(extent_file)
 
         return extents

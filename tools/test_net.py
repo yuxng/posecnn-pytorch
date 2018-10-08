@@ -112,7 +112,7 @@ if __name__ == '__main__':
         print("no pretrained network specified")
         sys.exit()
 
-    network = networks.__dict__[args.network_name](cfg.TRAIN.NUM_CLASSES, cfg.TRAIN.NUM_UNITS, network_data).cuda(device=cfg.device)
+    network = networks.__dict__[args.network_name](dataset.num_classes, cfg.TRAIN.NUM_UNITS, network_data).cuda(device=cfg.device)
     network = torch.nn.DataParallel(network, device_ids=[args.gpu_id]).cuda(device=cfg.device)
     cudnn.benchmark = True
 
