@@ -86,7 +86,7 @@ class PoseCNN(nn.Module):
         self.upsample_conv5_embed = upsample(2.0)
         self.upsample_embed = upsample(8.0)
         self.conv_score = conv(num_units, num_classes, kernel_size=1)
-        self.hard_label = HardLabel(threshold=1.0)
+        self.hard_label = HardLabel(threshold=cfg.TRAIN.THRESHOLD_LABEL)
 
         if cfg.TRAIN.VERTEX_REG:
             # center regression branch
@@ -156,7 +156,7 @@ class PoseCNN(nn.Module):
                 self.hough_voting.skip_pixels=cfg.TRAIN.HOUGH_SKIP_PIXELS
             else:
                 self.hough_voting.is_train = 0
-                self.hough_voting.voting_threshold=cfg.TEST.VOTING_THRESHOLD
+                self.hough_voting.voting_threshold=cfg.TEST.HOUGH_VOTING_THRESHOLD
                 self.hough_voting.skip_pixels=cfg.TEST.HOUGH_SKIP_PIXELS
             out_box, out_pose = self.hough_voting(out_label, out_vertex, meta_data, extents)
 
