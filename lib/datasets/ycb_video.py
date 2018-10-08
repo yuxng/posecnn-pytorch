@@ -239,6 +239,21 @@ class YCBVideo(data.Dataset, datasets.imdb):
         return os.path.join(datasets.ROOT_DIR, 'data', 'YCB_Video')
 
 
+    def _print_statistics(self, video_ids):
+
+        count = np.zeros((self.num_classes, ), dtype=np.int32)
+        for i in range(len(video_ids)):
+            filename = os.path.join(self._data_path, video_ids[i], '000001-meta.mat')
+            meta_data = scipy.io.loadmat(filename)
+            cls_indexes = meta_data['cls_indexes'].flatten()
+            for j in range(len(cls_indexes)):
+                cls = int(cls_indexes[j])
+                count[cls] += 1
+
+        for i in range(1, self.num_classes):
+            print('%d %s [%d/%d]' % (i, self.classes[i], count[i], len(video_ids)))
+
+
     def _load_image_set_index(self):
         """
         Load the indexes listed in this dataset's image set file.
@@ -250,10 +265,21 @@ class YCBVideo(data.Dataset, datasets.imdb):
         with open(image_set_file) as f:
             image_index = [x.rstrip('\n') for x in f.readlines()]
 
+        image_index = []
+        video_ids = set([])
+        with open(image_set_file) as f:
+            for x in f.readlines():
+                index = x.rstrip('\n')
+                pos = index.find('/')
+                video_id = index[:pos]
+                image_index.append(index)
+                video_ids.add(video_id)
+
         # sample a subset for training
         if self._image_set == 'train':
             image_index = image_index[::10]
 
+        self._print_statistics(list(video_ids))
         return image_index
 
 

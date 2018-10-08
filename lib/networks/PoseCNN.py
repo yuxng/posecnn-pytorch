@@ -87,6 +87,7 @@ class PoseCNN(nn.Module):
         self.upsample_embed = upsample(8.0)
         self.conv_score = conv(num_units, num_classes, kernel_size=1)
         self.hard_label = HardLabel(threshold=cfg.TRAIN.THRESHOLD_LABEL)
+        self.dropout = nn.Dropout()
 
         if cfg.TRAIN.VERTEX_REG:
             # center regression branch
@@ -132,7 +133,7 @@ class PoseCNN(nn.Module):
         out_conv4_embed = self.conv4_embed(out_conv4_3)
         out_conv5_embed = self.conv5_embed(out_conv5_3)
         out_conv5_embed_up = self.upsample_conv5_embed(out_conv5_embed)
-        out_embed = out_conv4_embed + out_conv5_embed_up
+        out_embed = self.dropout(out_conv4_embed + out_conv5_embed_up)
         out_embed_up = self.upsample_embed(out_embed)
         out_score = self.conv_score(out_embed_up)
         out_logsoftmax = log_softmax_high_dimension(out_score)
@@ -145,7 +146,7 @@ class PoseCNN(nn.Module):
             out_conv4_vertex_embed = self.conv4_vertex_embed(out_conv4_3)
             out_conv5_vertex_embed = self.conv5_vertex_embed(out_conv5_3)
             out_conv5_vertex_embed_up = self.upsample_conv5_vertex_embed(out_conv5_vertex_embed)
-            out_vertex_embed = out_conv4_vertex_embed + out_conv5_vertex_embed_up
+            out_vertex_embed = self.dropout(out_conv4_vertex_embed + out_conv5_vertex_embed_up)
             out_vertex_embed_up = self.upsample_vertex_embed(out_vertex_embed)
             out_vertex = self.conv_vertex_score(out_vertex_embed_up)
 
@@ -166,8 +167,8 @@ class PoseCNN(nn.Module):
             out_roi_conv5 = self.roi_align_conv4(out_conv5_3, out_box)
             out_roi = out_roi_conv4 + out_roi_conv5
             out_roi_flatten = out_roi.view(out_roi.size(0), -1)
-            out_fc6 = self.fc6(out_roi_flatten)
-            out_fc7 = self.fc7(out_fc6)
+            out_fc6 = self.dropout(self.fc6(out_roi_flatten))
+            out_fc7 = self.dropout(self.fc7(out_fc6))
             out_fc8 = self.fc8(out_fc7)
             out_logsoftmax_box = log_softmax_high_dimension(out_fc8)
             bbox_prob = softmax_high_dimension(out_fc8)
@@ -179,8 +180,8 @@ class PoseCNN(nn.Module):
             out_qt_conv5 = self.roi_align_conv4(out_conv5_3, rois)
             out_qt = out_qt_conv4 + out_qt_conv5
             out_qt_flatten = out_qt.view(out_qt.size(0), -1)
-            out_qt_fc6 = self.fc6(out_qt_flatten)
-            out_qt_fc7 = self.fc7(out_qt_fc6)
+            out_qt_fc6 = self.dropout(self.fc6(out_qt_flatten))
+            out_qt_fc7 = self.dropout(self.fc7(out_qt_fc6))
             out_quaternion = self.fc10(out_qt_fc7)
             # point matching loss
             poses_pred = nn.functional.normalize(torch.mul(out_quaternion, poses_weight))
