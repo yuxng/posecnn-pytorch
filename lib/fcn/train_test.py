@@ -180,7 +180,8 @@ def test(test_loader, network):
             poses = []
 
         if cfg.TEST.VISUALIZE:
-            _vis_test(inputs, labels, out_label, out_vertex, rois, poses, sample, test_loader.dataset._points_all, test_loader.dataset.class_colors)
+            _vis_test(inputs, labels, out_label, out_vertex, rois, poses, sample, \
+                test_loader.dataset._points_all, test_loader.dataset.classes, test_loader.dataset.class_colors)
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -322,7 +323,7 @@ def _vis_minibatch(inputs, labels, vertex_targets, sample, class_colors):
         plt.show()
 
 
-def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, sample, points, class_colors):
+def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, sample, points, classes, class_colors):
 
     """Visualize a mini-batch for debugging."""
     import matplotlib.pyplot as plt
@@ -445,7 +446,8 @@ def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, sample, points
             plt.imshow(im)
             for j in xrange(rois.shape[0]):
                 cls = int(rois[j, 1])
-                if cls > 0 and rois[j, -1] > 0.1:
+                print classes[cls], rois[j, -1]
+                if cls > 0 and rois[j, -1] > 0.01:
                     # extract 3D points
                     x3d = np.ones((4, points.shape[1]), dtype=np.float32)
                     x3d[0, :] = points[cls,:,0]

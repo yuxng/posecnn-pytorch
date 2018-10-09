@@ -128,6 +128,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
 
         meta_data = scipy.io.loadmat(roidb['meta_data'])
         meta_data['cls_indexes'] = meta_data['cls_indexes'].flatten()
+        classes = np.array(cfg.TRAIN.CLASSES)
 
         # read label image
         im_label = pad_im(cv2.imread(roidb['label'], cv2.IMREAD_UNCHANGED), 16)
@@ -138,9 +139,12 @@ class YCBVideo(data.Dataset, datasets.imdb):
                 im_label = im_label[:, ::-1, :]
         im_label = cv2.resize(im_label, None, None, fx=im_scale, fy=im_scale, interpolation=cv2.INTER_NEAREST)
         label_blob = np.zeros((num_classes, height, width), dtype=np.float32)
-        for i in range(num_classes):
-            I = np.where(im_label == i)
-            label_blob[i, I[0], I[1]] = 1.0
+        label_blob[0, :, :] = 1.0
+        for i in range(1, num_classes):
+            I = np.where(im_label == classes[i])
+            if len(I[0]) > 0:
+                label_blob[i, I[0], I[1]] = 1.0
+                label_blob[0, I[0], I[1]] = 0.0
 
         # bounding boxes
         boxes = meta_data['box'].copy()
@@ -161,17 +165,20 @@ class YCBVideo(data.Dataset, datasets.imdb):
         num = poses.shape[2]
         pose_blob = np.zeros((num_classes, 9), dtype=np.float32)
         gt_boxes = np.zeros((num_classes, 5), dtype=np.float32)
+        count = 0
         for i in xrange(num):
-            R = poses[:, :3, i]
-            T = poses[:, 3, i]
-
-            pose_blob[i, 0] = 1
-            pose_blob[i, 1] = meta_data['cls_indexes'][i]
-            pose_blob[i, 2:6] = mat2quat(R)
-            pose_blob[i, 6:] = T
-
-            gt_boxes[i, :4] =  boxes[i, :] * im_scale
-            gt_boxes[i, 4] =  meta_data['cls_indexes'][i]
+            cls = int(meta_data['cls_indexes'][i])
+            ind = np.where(classes == cls)[0]
+            if len(ind) > 0:
+                R = poses[:, :3, i]
+                T = poses[:, 3, i]
+                pose_blob[count, 0] = 1
+                pose_blob[count, 1] = ind
+                pose_blob[count, 2:6] = mat2quat(R)
+                pose_blob[count, 6:] = T
+                gt_boxes[count, :4] =  boxes[i, :] * im_scale
+                gt_boxes[count, 4] =  ind
+                count += 1
 
         # construct the meta data
         """
@@ -191,7 +198,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
             center = meta_data['center']
             if roidb['flipped']:
                 center[:, 0] = width - center[:, 0]
-            vertex_targets, vertex_weights = self._generate_vertex_targets(im_label, meta_data['cls_indexes'], center, poses, num_classes)
+            vertex_targets, vertex_weights = self._generate_vertex_targets(im_label, meta_data['cls_indexes'], center, poses, classes, num_classes)
         else:
             vertex_targets = []
             vertex_weights = []
@@ -200,7 +207,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
 
 
     # compute the voting label image in 2D
-    def _generate_vertex_targets(self, im_label, cls_indexes, center, poses, num_classes):
+    def _generate_vertex_targets(self, im_label, cls_indexes, center, poses, classes, num_classes):
 
         width = im_label.shape[1]
         height = im_label.shape[0]
@@ -209,9 +216,9 @@ class YCBVideo(data.Dataset, datasets.imdb):
 
         c = np.zeros((2, 1), dtype=np.float32)
         for i in xrange(1, num_classes):
-            y, x = np.where(im_label == i)
-            I = np.where(im_label == i)
-            ind = np.where(cls_indexes == i)[0]
+            y, x = np.where(im_label == classes[i])
+            I = np.where(im_label == classes[i])
+            ind = np.where(cls_indexes == classes[i])[0]
             if len(x) > 0 and len(ind) > 0:
                 c[0] = center[ind, 0]
                 c[1] = center[ind, 1]
@@ -408,7 +415,10 @@ class YCBVideo(data.Dataset, datasets.imdb):
         This function loads/saves from/to a cache file to speed up future calls.
         """
 
-        cache_file = os.path.join(self.cache_path, self.name + '_gt_roidb.pkl')
+        prefix = '_class'
+        for i in range(len(cfg.TRAIN.CLASSES)):
+            prefix += '_%d' % cfg.TRAIN.CLASSES[i]
+        cache_file = os.path.join(self.cache_path, self.name + prefix + '_gt_roidb.pkl')
         if os.path.exists(cache_file):
             with open(cache_file, 'rb') as fid:
                 roidb = cPickle.load(fid)
