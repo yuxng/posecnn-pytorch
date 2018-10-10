@@ -11,7 +11,7 @@
 #include <cublas_v2.h>
 
 #define VERTEX_CHANNELS 3
-#define MAX_ROI 256
+#define MAX_ROI 128
 
 #define CUDA_1D_KERNEL_LOOP(i, n)                            \
   for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; \

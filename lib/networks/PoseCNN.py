@@ -78,7 +78,8 @@ class PoseCNN(nn.Module):
 
         # conv features
         features = list(vgg16.features)[:30]
-        self.features = nn.ModuleList(features).eval() 
+        self.features = nn.ModuleList(features)
+        self.classifier = vgg16.classifier[:-1]
 
         # semantic labeling branch
         self.conv4_embed = conv(512, num_units, kernel_size=1)
@@ -102,11 +103,9 @@ class PoseCNN(nn.Module):
 
             self.roi_align_conv4 = RoIAlign(aligned_height=7, aligned_width=7, spatial_scale=1.0 / 8.0)
             self.roi_align_conv5 = RoIAlign(aligned_height=7, aligned_width=7, spatial_scale=1.0 / 16.0)
-            self.fc6 = fc(7 * 7 * 512, 256)
-            self.fc7 = fc(256, 256)
-            self.fc8 = fc(256, num_classes)
-            self.fc9 = fc(256, 4 * num_classes, relu=False)
-            self.fc10 = fc(256, 4 * num_classes, relu=False)
+            self.fc8 = fc(4096, num_classes)
+            self.fc9 = fc(4096, 4 * num_classes, relu=False)
+            self.fc10 = fc(4096, 4 * num_classes, relu=False)
             self.pml = PMLoss()
 
         for m in self.modules():
@@ -167,8 +166,7 @@ class PoseCNN(nn.Module):
             out_roi_conv5 = self.roi_align_conv4(out_conv5_3, out_box)
             out_roi = out_roi_conv4 + out_roi_conv5
             out_roi_flatten = out_roi.view(out_roi.size(0), -1)
-            out_fc6 = self.dropout(self.fc6(out_roi_flatten))
-            out_fc7 = self.dropout(self.fc7(out_fc6))
+            out_fc7 = self.classifier(out_roi_flatten)
             out_fc8 = self.fc8(out_fc7)
             out_logsoftmax_box = log_softmax_high_dimension(out_fc8)
             bbox_prob = softmax_high_dimension(out_fc8)
@@ -180,8 +178,7 @@ class PoseCNN(nn.Module):
             out_qt_conv5 = self.roi_align_conv4(out_conv5_3, rois)
             out_qt = out_qt_conv4 + out_qt_conv5
             out_qt_flatten = out_qt.view(out_qt.size(0), -1)
-            out_qt_fc6 = self.dropout(self.fc6(out_qt_flatten))
-            out_qt_fc7 = self.dropout(self.fc7(out_qt_fc6))
+            out_qt_fc7 = self.classifier(out_qt_flatten)
             out_quaternion = self.fc10(out_qt_fc7)
             # point matching loss
             poses_pred = nn.functional.normalize(torch.mul(out_quaternion, poses_weight))
