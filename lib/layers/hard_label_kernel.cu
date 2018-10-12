@@ -31,17 +31,16 @@ std::vector<at::Tensor> hard_label_cuda_forward(
   const int kThreadsPerBlock = 1024;
   int output_size;
 
-  const int batch_size = bottom_prob.size(0);
-  const int num_channels = bottom_prob.size(1);
-  const int height = bottom_prob.size(2);
-  const int width = bottom_prob.size(3);
+  if (bottom_prob.dim() == 4)
+    output_size = bottom_prob.size(0) * bottom_prob.size(1) * bottom_prob.size(2) * bottom_prob.size(3);
+  else
+    output_size = bottom_prob.size(0) * bottom_prob.size(1);
 
-  auto top_data = at::zeros({batch_size, num_channels, height, width}, bottom_prob.options());
+  auto top_data = at::zeros(bottom_prob.sizes(), bottom_prob.options());
 
   AT_DISPATCH_FLOATING_TYPES(bottom_prob.type(), "hard_label_forward_cuda", ([&] {
 
     // compute the losses and gradients
-    output_size = batch_size * num_channels * height * width;
     HardLabelForward<scalar_t><<<(output_size + kThreadsPerBlock - 1) / kThreadsPerBlock, kThreadsPerBlock>>>(
         output_size,
         threshold,
@@ -58,13 +57,8 @@ std::vector<at::Tensor> hard_label_cuda_forward(
 std::vector<at::Tensor> hard_label_cuda_backward(
     at::Tensor top_diff)
 {
-  const int batch_size = top_diff.size(0);
-  const int num_channels = top_diff.size(1);
-  const int height = top_diff.size(2);
-  const int width = top_diff.size(3);
-
-  auto grad_prob = at::zeros({batch_size, num_channels, height, width}, top_diff.options());
-  auto grad_label = at::zeros({batch_size, num_channels, height, width}, top_diff.options());
+  auto grad_prob = at::zeros(top_diff.sizes(), top_diff.options());
+  auto grad_label = at::zeros(top_diff.sizes(), top_diff.options());
 
   return {grad_prob, grad_label};
 }

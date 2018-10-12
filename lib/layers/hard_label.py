@@ -14,7 +14,7 @@ class HardLabelFunction(Function):
 
     @staticmethod
     def backward(ctx, top_diff):
-        outputs = posecnn_cuda.hard_label_backward(top_diff.contiguous())
+        outputs = posecnn_cuda.hard_label_backward(top_diff)
         d_prob, d_label = outputs
         return d_prob, d_label, None
 

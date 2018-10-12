@@ -170,6 +170,7 @@ class PoseCNN(nn.Module):
             out_fc8 = self.fc8(out_fc7)
             out_logsoftmax_box = log_softmax_high_dimension(out_fc8)
             bbox_prob = softmax_high_dimension(out_fc8)
+            bbox_label_weights = self.hard_label(bbox_prob, bbox_labels)
             bbox_pred = self.fc9(out_fc7)
 
             # rotation regression branch
@@ -186,7 +187,7 @@ class PoseCNN(nn.Module):
 
         if self.training:
             if cfg.TRAIN.VERTEX_REG:
-                return out_logsoftmax, out_weight, out_vertex, out_logsoftmax_box, bbox_labels, \
+                return out_logsoftmax, out_weight, out_vertex, out_logsoftmax_box, bbox_label_weights, \
                        bbox_pred, bbox_targets, bbox_inside_weights, loss_pose
             else:
                 return out_logsoftmax, out_weight
