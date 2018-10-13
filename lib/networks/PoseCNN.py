@@ -174,7 +174,7 @@ class PoseCNN(nn.Module):
             bbox_pred = self.fc9(out_fc7)
 
             # rotation regression branch
-            rois, poses_target, poses_weight = pose_target_layer(out_box, bbox_prob, bbox_pred, gt_boxes, poses)
+            rois, poses_target, poses_weight = pose_target_layer(out_box, bbox_prob, bbox_pred, gt_boxes, poses, self.training)
             out_qt_conv4 = self.roi_align_conv4(out_conv4_3, rois)
             out_qt_conv5 = self.roi_align_conv4(out_conv5_3, rois)
             out_qt = out_qt_conv4 + out_qt_conv5

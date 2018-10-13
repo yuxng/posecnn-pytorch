@@ -16,7 +16,7 @@ from utils.cython_bbox import bbox_overlaps
 
 # rpn_rois: (batch_ids, cls, x1, y1, x2, y2, scores)
 # gt_boxes: batch * num_classes * (x1, y1, x2, y2, cls)
-def pose_target_layer(rois, bbox_prob, bbox_pred, gt_boxes, poses):
+def pose_target_layer(rois, bbox_prob, bbox_pred, gt_boxes, poses, is_training):
 
     rois = rois.detach().cpu().numpy()
     bbox_prob = bbox_prob.detach().cpu().numpy()
@@ -76,6 +76,14 @@ def pose_target_layer(rois, bbox_prob, bbox_pred, gt_boxes, poses):
 
         bg_inds = np.where(roi_blob[:, -1] != labels)[0]
         labels[bg_inds] = 0
+
+        # in training, only use the positive boxes for pose regression
+        if is_training:
+            fg_inds = np.where(labels > 0)[0]
+            if len(fg_inds) > 0:
+                rois = rois[fg_inds, :]
+                quaternions = quaternions[fg_inds, :]
+                labels = labels[fg_inds]
     
         # pose regression targets and weights
         poses_target, poses_weight = _compute_pose_targets(quaternions, labels, num_classes)
