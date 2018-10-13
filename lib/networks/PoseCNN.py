@@ -188,7 +188,7 @@ class PoseCNN(nn.Module):
         if self.training:
             if cfg.TRAIN.VERTEX_REG:
                 return out_logsoftmax, out_weight, out_vertex, out_logsoftmax_box, bbox_label_weights, \
-                       bbox_pred, bbox_targets, bbox_inside_weights, loss_pose
+                       bbox_pred, bbox_targets, bbox_inside_weights, loss_pose, poses_weight
             else:
                 return out_logsoftmax, out_weight
         else:

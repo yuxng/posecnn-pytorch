@@ -237,7 +237,7 @@ __global__ void compute_rois_kernel(const int nthreads, float* top_box, float* t
 {
   CUDA_1D_KERNEL_LOOP(index, nthreads) 
   {
-    float scale = 0.05;
+    float scale = 0.0;
     int max_index = max_indexes[index];
     int ind = max_index / (height * width);
     int cls = class_indexes[ind];
