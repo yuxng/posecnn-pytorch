@@ -128,7 +128,7 @@ def train(train_loader, network, optimizer, epoch):
             num_bg = torch.sum(bbox_labels[:, 0])
             num_fg = torch.sum(torch.sum(bbox_labels[:, 1:], dim=1))
             num_fg_pose = torch.sum(torch.sum(poses_weight[:, 4:], dim=1)) / 4
-            print('epoch: [%d/%d][%d/%d], l %.4f, l_label %.4f, l_center %.4f, l_box %.4f (%03d, %03d), l_loc %.4f, l_pose %.4f (%03d), lr %.6f, time %.2f' \
+            print('epoch:[%d/%d][%d/%d], %.4f, label %.4f, center %.4f, box %.4f (%03d, %03d), loc %.4f, pose %.4f (%03d), lr %.6f, time %.2f' \
                % (epoch, cfg.epochs, i, epoch_size, loss.data, loss_label.data, loss_vertex.data, loss_box.data, num_fg.data, num_bg.data, \
                   loss_location.data, loss_pose.data, num_fg_pose, optimizer.param_groups[0]['lr'], batch_time.val))
         else:

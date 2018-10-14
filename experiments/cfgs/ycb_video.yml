@@ -15,7 +15,7 @@ TRAIN:
   HOUGH_VOTING_THRESHOLD: 10
   HOUGH_SKIP_PIXELS: 50
   FG_THRESH: 0.5
-  FG_THRESH_POSE: 0.2
+  FG_THRESH_POSE: 0.5
   CLASSES: !!python/tuple [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
   SNAPSHOT_INFIX: ycb_video
 #  CLASSES: !!python/tuple [0, 1, 5]
