@@ -156,10 +156,12 @@ class PoseCNN(nn.Module):
             # hough voting
             if self.training:
                 self.hough_voting.is_train = 1
+                self.hough_voting.label_threshold=cfg.TRAIN.HOUGH_LABEL_THRESHOLD
                 self.hough_voting.voting_threshold=cfg.TRAIN.HOUGH_VOTING_THRESHOLD
                 self.hough_voting.skip_pixels=cfg.TRAIN.HOUGH_SKIP_PIXELS
             else:
                 self.hough_voting.is_train = 0
+                self.hough_voting.label_threshold=cfg.TEST.HOUGH_LABEL_THRESHOLD
                 self.hough_voting.voting_threshold=cfg.TEST.HOUGH_VOTING_THRESHOLD
                 self.hough_voting.skip_pixels=cfg.TEST.HOUGH_SKIP_PIXELS
             out_box, out_pose = self.hough_voting(out_label, out_vertex, meta_data, extents)
