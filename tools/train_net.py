@@ -38,6 +38,9 @@ def parse_args():
     parser.add_argument('--epochs', dest='epochs',
                         help='number of epochs to train',
                         default=40000, type=int)
+    parser.add_argument('--startepoch', dest='startepoch',
+                        help='the starting epoch',
+                        default=0, type=int)
     parser.add_argument('--pretrained', dest='pretrained',
                         help='initialize with pretrained checkpoint',
                         default=None, type=str)
@@ -127,10 +130,11 @@ if __name__ == '__main__':
         optimizer = torch.optim.SGD(param_groups, cfg.TRAIN.LEARNING_RATE,
                                     momentum=cfg.TRAIN.MOMENTUM)
 
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=cfg.TRAIN.MILESTONES, gamma=cfg.TRAIN.GAMMA)
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, \
+        milestones=[m - args.startepoch for m in cfg.TRAIN.MILESTONES], gamma=cfg.TRAIN.GAMMA)
     cfg.epochs = args.epochs
 
-    for epoch in range(args.epochs):
+    for epoch in range(args.startepoch, args.epochs):
         scheduler.step()
         
         train(dataloader, network, optimizer, epoch)
