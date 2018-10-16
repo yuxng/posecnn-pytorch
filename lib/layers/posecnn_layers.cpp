@@ -74,26 +74,27 @@ std::vector<at::Tensor> hough_voting_forward(
 
 
 /************************************************************
- roi align layer
+ roi pool layer
 *************************************************************/
-std::vector<at::Tensor> roi_align_cuda_forward(
-    int aligned_height,
-    int aligned_width,
+std::vector<at::Tensor> roi_pool_cuda_forward(
+    int pooled_height,
+    int pooled_width,
     float spatial_scale,
     at::Tensor bottom_features,
     at::Tensor bottom_rois);
 
-std::vector<at::Tensor> roi_align_cuda_backward(
+std::vector<at::Tensor> roi_pool_cuda_backward(
     int batch_size,
     int height,
     int width,
     float spatial_scale,
     at::Tensor top_diff,
-    at::Tensor bottom_rois);
+    at::Tensor bottom_rois,
+    at::Tensor argmax_data);
 
-std::vector<at::Tensor> roi_align_forward(
-    int aligned_height,
-    int aligned_width,
+std::vector<at::Tensor> roi_pool_forward(
+    int pooled_height,
+    int pooled_width,
     float spatial_scale,
     at::Tensor bottom_features,
     at::Tensor bottom_rois)
@@ -101,21 +102,23 @@ std::vector<at::Tensor> roi_align_forward(
   CHECK_INPUT(bottom_features);
   CHECK_INPUT(bottom_rois);
 
-  return roi_align_cuda_forward(aligned_height, aligned_width, spatial_scale, bottom_features, bottom_rois);
+  return roi_pool_cuda_forward(pooled_height, pooled_width, spatial_scale, bottom_features, bottom_rois);
 }
 
-std::vector<at::Tensor> roi_align_backward(
+std::vector<at::Tensor> roi_pool_backward(
     int batch_size,
     int height,
     int width,
     float spatial_scale,
     at::Tensor top_diff,
-    at::Tensor bottom_rois) 
+    at::Tensor bottom_rois,
+    at::Tensor argmax_data) 
 {
   CHECK_INPUT(top_diff);
   CHECK_INPUT(bottom_rois);
+  CHECK_INPUT(argmax_data);
 
-  return roi_align_cuda_backward(batch_size, height, width, spatial_scale, top_diff, bottom_rois);
+  return roi_pool_cuda_backward(batch_size, height, width, spatial_scale, top_diff, bottom_rois, argmax_data);
 }
 
 /************************************************************
@@ -164,8 +167,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("hard_label_forward", &hard_label_forward, "hard_label forward (CUDA)");
   m.def("hard_label_backward", &hard_label_backward, "hard_label backward (CUDA)");
   m.def("hough_voting_forward", &hough_voting_forward, "hough_voting forward (CUDA)");
-  m.def("roi_align_forward", &roi_align_forward, "roi_align forward (CUDA)");
-  m.def("roi_align_backward", &roi_align_backward, "roi_align backward (CUDA)");
+  m.def("roi_pool_forward", &roi_pool_forward, "roi_pool forward (CUDA)");
+  m.def("roi_pool_backward", &roi_pool_backward, "roi_pool backward (CUDA)");
   m.def("pml_forward", &pml_forward, "pml forward (CUDA)");
   m.def("pml_backward", &pml_backward, "pml backward (CUDA)");
 }

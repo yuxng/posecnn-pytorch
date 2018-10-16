@@ -6,7 +6,7 @@ import sys
 from torch.nn.init import kaiming_normal_
 from layers.hard_label import HardLabel
 from layers.hough_voting import HoughVoting
-from layers.roi_align import RoIAlign
+from layers.roi_pooling import RoIPool
 from layers.point_matching_loss import PMLoss
 from layers.roi_target_layer import roi_target_layer
 from layers.pose_target_layer import pose_target_layer
@@ -101,8 +101,8 @@ class PoseCNN(nn.Module):
             self.hough_voting = HoughVoting(is_train=0, skip_pixels=10, label_threshold=100, \
                                             inlier_threshold=0.9, voting_threshold=-1, per_threshold=0.01)
 
-            self.roi_align_conv4 = RoIAlign(aligned_height=7, aligned_width=7, spatial_scale=1.0 / 8.0)
-            self.roi_align_conv5 = RoIAlign(aligned_height=7, aligned_width=7, spatial_scale=1.0 / 16.0)
+            self.roi_pool_conv4 = RoIPool(pool_height=7, pool_width=7, spatial_scale=1.0 / 8.0)
+            self.roi_pool_conv5 = RoIPool(pool_height=7, pool_width=7, spatial_scale=1.0 / 16.0)
             self.fc6_box = fc(7 * 7 * 512, 256)
             self.fc7_box = fc(256, 256)
             self.fc6_pose = fc(7 * 7 * 512, 256)
@@ -166,8 +166,8 @@ class PoseCNN(nn.Module):
 
             # bounding box classification and regression branch
             bbox_labels, bbox_targets, bbox_inside_weights, bbox_outside_weights = roi_target_layer(out_box, gt_boxes)
-            out_roi_conv4 = self.roi_align_conv4(out_conv4_3, out_box)
-            out_roi_conv5 = self.roi_align_conv4(out_conv5_3, out_box)
+            out_roi_conv4 = self.roi_pool_conv4(out_conv4_3, out_box)
+            out_roi_conv5 = self.roi_pool_conv4(out_conv5_3, out_box)
             out_roi = out_roi_conv4 + out_roi_conv5
             out_roi_flatten = out_roi.view(out_roi.size(0), -1)
             out_fc6 = self.fc6_box(out_roi_flatten)
@@ -180,8 +180,8 @@ class PoseCNN(nn.Module):
 
             # rotation regression branch
             rois, poses_target, poses_weight = pose_target_layer(out_box, bbox_prob, bbox_pred, gt_boxes, poses, self.training)
-            out_qt_conv4 = self.roi_align_conv4(out_conv4_3, rois)
-            out_qt_conv5 = self.roi_align_conv4(out_conv5_3, rois)
+            out_qt_conv4 = self.roi_pool_conv4(out_conv4_3, rois)
+            out_qt_conv5 = self.roi_pool_conv4(out_conv5_3, rois)
             out_qt = out_qt_conv4 + out_qt_conv5
             out_qt_flatten = out_qt.view(out_qt.size(0), -1)
             out_qt_fc6 = self.fc6_pose(out_qt_flatten)
