@@ -24,11 +24,11 @@ import os.path as osp
 import cv2
 
 import _init_paths
-from fcn.config import cfg, cfg_from_file, get_output_dir
+from fcn.config import cfg, cfg_from_file, get_output_dir, write_selected_class_file
 from fcn.train_test import train
 from datasets.factory import get_dataset
 import networks
-# import libsynthesizer
+import libsynthesizer
 
 def parse_args():
     """
@@ -101,8 +101,12 @@ if __name__ == '__main__':
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    # cfg.synthesizer = libsynthesizer.Synthesizer(args.cad_name, args.pose_name)
-    # cfg.synthesizer.setup(cfg.TRAIN.SYN_WIDTH, cfg.TRAIN.SYN_HEIGHT)
+    # select a subset
+    classes = np.array(cfg.TRAIN.CLASSES[1:]) - 1
+    cad_name = write_selected_class_file(args.cad_name, classes)
+    pose_name = write_selected_class_file(args.pose_name, classes)
+    cfg.synthesizer = libsynthesizer.Synthesizer(cad_name, pose_name)
+    cfg.synthesizer.setup(cfg.TRAIN.SYN_WIDTH, cfg.TRAIN.SYN_HEIGHT)
 
     # prepare network
     if args.pretrained:

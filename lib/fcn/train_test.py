@@ -307,7 +307,9 @@ def _vis_minibatch(inputs, labels, vertex_targets, sample, class_colors):
             for j in range(1, num_classes):
                 index = np.where(label[:, :, j] > 0)
                 if len(index[0]) > 0:
-                    center[:, index[0], index[1]] = vertex_target[3*j:3*j+3, index[0], index[1]]
+                    center[0, index[0], index[1]] = vertex_target[3*j, index[0], index[1]]
+                    center[1, index[0], index[1]] = vertex_target[3*j+1, index[0], index[1]]
+                    center[2, index[0], index[1]] = np.exp(vertex_target[3*j+2, index[0], index[1]])
 
             ax = fig.add_subplot(2, 3, 4)
             plt.imshow(center[0,:,:])
@@ -318,7 +320,7 @@ def _vis_minibatch(inputs, labels, vertex_targets, sample, class_colors):
             ax.set_title('center y')
 
             ax = fig.add_subplot(2, 3, 6)
-            plt.imshow(np.exp(center[2,:,:]))
+            plt.imshow(center[2,:,:])
             ax.set_title('z')
 
         plt.show()

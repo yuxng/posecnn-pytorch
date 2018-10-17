@@ -98,7 +98,9 @@ __C.TRAIN.SYN_TFAR = 2.0
 __C.TRAIN.SYN_SAMPLE_OBJECT = True
 __C.TRAIN.SYN_SAMPLE_POSE = False
 __C.TRAIN.SYN_STD_ROTATION = 15
-__C.TRAIN.SYN_STD_TRANSLATION = 0.01
+__C.TRAIN.SYN_STD_TRANSLATION = 0.05
+__C.TRAIN.SYN_MIN_OBJECT = 5
+__C.TRAIN.SYN_MAX_OBJECT = 8
 
 # domain adaptation
 __C.TRAIN.ADAPT = False
@@ -326,3 +328,18 @@ def cfg_from_file(filename):
         yaml_cfg = edict(yaml.load(f))
 
     _merge_a_into_b(yaml_cfg, __C)
+
+
+def write_selected_class_file(filename, index):
+    # read file
+    with open(filename) as f:
+        lines = [x for x in f.readlines()]
+    lines_selected = [lines[i] for i in index]
+
+    # write new file
+    filename_new = filename + '.selected'
+    f = open(filename_new, 'w')
+    for i in range(len(lines_selected)):
+        f.write(lines_selected[i])
+    f.close()
+    return filename_new
