@@ -77,7 +77,10 @@ class YCBVideo(data.Dataset, datasets.imdb):
         py = self._intrinsic_matrix[1, 2]
         zfar = 6.0
         znear = 0.25
-        is_display = 1
+        if cfg.TRAIN.ITERS % 100 == 0:
+            is_display = 1
+        else:
+            is_display = 0
 
         parameters = np.zeros((14, ), dtype=np.float32)
         parameters[0] = self._width
