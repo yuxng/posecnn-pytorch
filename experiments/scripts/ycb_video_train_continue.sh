@@ -12,11 +12,11 @@ echo Logging output to "$LOG"
 
 time ./tools/train_net.py \
   --network posecnn \
-  --pretrained output/ycb_video/ycb_video_debug/vgg16_ycb_video_epoch_80.checkpoint.pth \
-  --dataset ycb_video_debug \
-  --cfg experiments/cfgs/ycb_video.yml \
+  --pretrained output/ycb_video/ycb_video_train/vgg16_ycb_video_can_box_banana_epoch_5.checkpoint.pth \
+  --startepoch 5 \
+  --dataset ycb_video_train \
+  --cfg experiments/cfgs/ycb_video_subset.yml \
   --cad data/YCB_Video/models.txt \
   --pose data/YCB_Video/poses.txt \
   --solver sgd \
-  --epochs 1000 \
-  --startepoch 80
+  --epochs 16
