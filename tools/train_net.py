@@ -101,12 +101,13 @@ if __name__ == '__main__':
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    # select a subset
-    classes = np.array(cfg.TRAIN.CLASSES[1:]) - 1
-    cad_name = write_selected_class_file(args.cad_name, classes)
-    pose_name = write_selected_class_file(args.pose_name, classes)
-    cfg.synthesizer = libsynthesizer.Synthesizer(cad_name, pose_name)
-    cfg.synthesizer.setup(cfg.TRAIN.SYN_WIDTH, cfg.TRAIN.SYN_HEIGHT)
+    if cfg.TRAIN.SYNTHESIZE:
+        # select a subset
+        classes = np.array(cfg.TRAIN.CLASSES[1:]) - 1
+        cad_name = write_selected_class_file(args.cad_name, classes)
+        pose_name = write_selected_class_file(args.pose_name, classes)
+        cfg.synthesizer = libsynthesizer.Synthesizer(cad_name, pose_name)
+        cfg.synthesizer.setup(cfg.TRAIN.SYN_WIDTH, cfg.TRAIN.SYN_HEIGHT)
 
     # prepare network
     if args.pretrained:

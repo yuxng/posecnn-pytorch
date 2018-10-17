@@ -4,7 +4,7 @@ set -x
 set -e
 
 export PYTHONUNBUFFERED="True"
-#export CUDA_VISIBLE_DEVICES=$1
+export CUDA_VISIBLE_DEVICES=0,1
 
 LOG="experiments/logs/ycb_video_train.txt.`date +'%Y-%m-%d_%H-%M-%S'`"
 exec &> >(tee -a "$LOG")
