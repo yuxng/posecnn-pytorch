@@ -46,26 +46,24 @@ class ImageListener:
 
         # run network
         im = self.cv_bridge.imgmsg_to_cv2(rgb, 'bgr8')
-        labels = self.test_image(im, depth_cv)
-
-        im_label = self.dataset.labels_to_image(labels)
+        im_output = self.test_image(im, depth_cv)
 
         # publish
-        label_msg = self.cv_bridge.cv2_to_imgmsg(im_label)
+        label_msg = self.cv_bridge.cv2_to_imgmsg(im_output)
         label_msg.header.stamp = rospy.Time.now()
         label_msg.header.frame_id = rgb.header.frame_id
         label_msg.encoding = 'rgb8'
         self.label_pub.publish(label_msg)
 
 
-    def test_image(self, im, im_depth):
+    def test_image(self, im_color, im_depth):
         """segment image
         """
 
         num_classes = self.dataset.num_classes
 
         # compute image blob
-        im = im.astype(np.float32, copy=True)
+        im = im_color.astype(np.float32, copy=True)
         im -= cfg.PIXEL_MEANS
         height = im.shape[0]
         width = im.shape[1]
@@ -108,11 +106,46 @@ class ImageListener:
                 q = out_quaternion[j, 4*cls:4*cls+4]
                 poses[j, :4] = q / np.linalg.norm(q)
 
-        label_pred = out_label.detach().cpu().numpy()[0]
+        im_output = self.overlay_image(im_color, rois, poses)
 
-        # self.vis_test(im, label_pred, out_vertex, rois, poses)
+        return im_output
 
-        return label_pred
+
+    def overlay_image(self, im, rois, poses):
+
+        im = im[:, :, (2, 1, 0)]
+        classes = self.dataset._classes
+        class_colors = self.dataset._class_colors
+        points = self.dataset._points_all
+        intrinsic_matrix = self.dataset._intrinsic_matrix
+        height = im.shape[0]
+        width = im.shape[1]
+
+        for j in xrange(rois.shape[0]):
+            cls = int(rois[j, 1])
+            print classes[cls], rois[j, -1]
+            if cls > 0 and rois[j, -1] > 0.01:
+                # extract 3D points
+                x3d = np.ones((4, points.shape[1]), dtype=np.float32)
+                x3d[0, :] = points[cls,:,0]
+                x3d[1, :] = points[cls,:,1]
+                x3d[2, :] = points[cls,:,2]
+
+                # projection
+                RT = np.zeros((3, 4), dtype=np.float32)
+                RT[:3, :3] = quat2mat(poses[j, :4])
+                RT[:, 3] = poses[j, 4:7]
+                x2d = np.matmul(intrinsic_matrix, np.matmul(RT, x3d))
+                x = np.round(np.divide(x2d[0, :], x2d[2, :]))
+                y = np.round(np.divide(x2d[1, :], x2d[2, :]))
+                index = np.where((x >= 0) & (x < width) & (y >= 0) & (y < height))[0]
+                x = x[index].astype(np.int32)
+                y = y[index].astype(np.int32)
+                im[y, x, 0] = class_colors[cls][0]
+                im[y, x, 1] = class_colors[cls][1]
+                im[y, x, 2] = class_colors[cls][2]
+
+        return im
 
 
     def vis_test(self, im, label, out_vertex, rois, poses):

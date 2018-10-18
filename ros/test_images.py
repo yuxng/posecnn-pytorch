@@ -22,10 +22,9 @@ import numpy as np
 
 import _init_paths
 from fcn.train_test import test
-from fcn.config import cfg, cfg_from_file, get_output_dir
+from fcn.config import cfg, cfg_from_file, get_output_dir, write_selected_class_file
 from datasets.factory import get_dataset
 import networks
-
 import rospy
 from listener import ImageListener
 
