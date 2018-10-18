@@ -93,3 +93,8 @@ If you find PoseCNN useful in your research, please consider citing:
     ./experiments/scripts/ycb_video_test.sh $GPU_ID
 
     ```
+### Running with ROS
+    ```Shell
+    source /opt/ros/kinetic/setup.bash
+    roslaunch openni_launch openni.launch depth_registration:=true
+    ```

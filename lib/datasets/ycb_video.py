@@ -638,3 +638,15 @@ class YCBVideo(data.Dataset, datasets.imdb):
                 'meta_data': metadata_path,
                 'video_id': video_id,
                 'flipped': False}
+
+
+    def labels_to_image(self, labels):
+
+        height = labels.shape[0]
+        width = labels.shape[1]
+        im_label = np.zeros((height, width, 3), dtype=np.uint8)
+        for i in range(self.num_classes):
+            I = np.where(labels == i)
+            im_label[I[0], I[1], :] = self._class_colors[i]
+
+        return im_label
