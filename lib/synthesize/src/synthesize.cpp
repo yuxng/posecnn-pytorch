@@ -330,7 +330,7 @@ void Synthesizer::render(int width, int height, float fx, float fy, float px, fl
               float* color, float* vertmap, float* class_indexes, 
               float *poses_return, float* centers_return, int is_sampling_object, int is_sampling_pose, int is_display)
 {
-  float threshold = 0.2;
+  float threshold = 0.02;
   float std_rot = std_rotation * M_PI / 180.0;
 
   pangolin::OpenGlMatrixSpec projectionMatrix_reverse = 
@@ -396,19 +396,25 @@ void Synthesizer::render(int width, int height, float fx, float fy, float px, fl
 
       // translation
       Sophus::SE3f::Point translation;
-      translation(0) = pose[4] + dgauss(0, std_translation);
-      translation(1) = pose[5] + dgauss(0, std_translation);
 
       if (is_sampling_pose)
+      {
+        translation(0) = pose[4] + dgauss(0, std_translation);
+        translation(1) = pose[5] + dgauss(0, std_translation);
         translation(2) = pose[6] + dgauss(0, std_translation);
+      }
       else
+      {
+        translation(0) = drand(-0.1, 0.1);
+        translation(1) = drand(-0.1, 0.1);
         translation(2) = drand(tnear, tfar);
+      }
 
       int flag = 1;
       for (int j = 0; j < i; j++)
       {
         Sophus::SE3f::Point T = poses[j].translation() - translation;
-        if (T.norm() < threshold)
+        if (fabs(T(0)) < threshold || fabs(T(1)) < threshold || fabs(T(2)) < 5 * threshold)
         {
           flag = 0;
           break;
@@ -476,7 +482,7 @@ void Synthesizer::render(int width, int height, float fx, float fy, float px, fl
   std::vector<df::Light> lights;
 
   df::Light spotlight;
-  float light_intensity = drand(0.5, 2);
+  float light_intensity = drand(0.5, 1.5);
   spotlight.position = Eigen::Vector4f(drand(-2, 2), drand(-2, 2), 0, 1);
   spotlight.intensities = Eigen::Vector3f(light_intensity, light_intensity, light_intensity); //strong white light
   spotlight.attenuation = 0.01f;

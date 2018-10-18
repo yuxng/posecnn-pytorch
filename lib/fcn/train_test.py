@@ -266,7 +266,7 @@ def _vis_minibatch(inputs, labels, vertex_targets, sample, class_colors):
             y1 = np.min(x2d[1, :])
             y2 = np.max(x2d[1, :])
             plt.gca().add_patch(
-                plt.Rectangle((x1, y1), x2-x1, y2-y1, fill=False, edgecolor='g', linewidth=3))
+                plt.Rectangle((x1, y1), x2-x1, y2-y1, fill=False, edgecolor='g', linewidth=3, clip_on=False))
 
         # show gt boxes
         ax = fig.add_subplot(2, 3, 2)
@@ -281,7 +281,7 @@ def _vis_minibatch(inputs, labels, vertex_targets, sample, class_colors):
             x2 = boxes[j, 2]
             y2 = boxes[j, 3]
             plt.gca().add_patch(
-                plt.Rectangle((x1, y1), x2-x1, y2-y1, fill=False, edgecolor='g', linewidth=3))
+                plt.Rectangle((x1, y1), x2-x1, y2-y1, fill=False, edgecolor='g', linewidth=3, clip_on=False))
 
         # show label
         label = label_blob[i, :, :, :]
