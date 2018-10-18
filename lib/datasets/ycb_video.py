@@ -82,7 +82,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
         else:
             is_display = 0
 
-        parameters = np.zeros((14, ), dtype=np.float32)
+        parameters = np.zeros((17, ), dtype=np.float32)
         parameters[0] = self._width
         parameters[1] = self._height
         parameters[2] = fx
@@ -91,12 +91,15 @@ class YCBVideo(data.Dataset, datasets.imdb):
         parameters[5] = py
         parameters[6] = znear
         parameters[7] = zfar
-        parameters[8] = cfg.TRAIN.SYN_MIN_OBJECT
-        parameters[9] = cfg.TRAIN.SYN_MAX_OBJECT
-        parameters[10] = cfg.TRAIN.SYN_STD_ROTATION
-        parameters[11] = cfg.TRAIN.SYN_STD_TRANSLATION
-        parameters[12] = cfg.TRAIN.SYN_SAMPLE_OBJECT
-        parameters[13] = is_display
+        parameters[8] = cfg.TRAIN.SYN_TNEAR
+        parameters[9] = cfg.TRAIN.SYN_TFAR
+        parameters[10] = cfg.TRAIN.SYN_MIN_OBJECT
+        parameters[11] = cfg.TRAIN.SYN_MAX_OBJECT
+        parameters[12] = cfg.TRAIN.SYN_STD_ROTATION
+        parameters[13] = cfg.TRAIN.SYN_STD_TRANSLATION
+        parameters[14] = cfg.TRAIN.SYN_SAMPLE_OBJECT
+        parameters[15] = cfg.TRAIN.SYN_SAMPLE_POSE
+        parameters[16] = is_display
 
         # render image
         im = np.zeros((self._height, self._width, 3), dtype=np.float32)
@@ -160,7 +163,11 @@ class YCBVideo(data.Dataset, datasets.imdb):
             cls = int(class_indexes[i])
             pose_blob[i, 0] = 1
             pose_blob[i, 1] = cls
-            pose_blob[i, 2:] = poses[i, :]
+            qt = poses[i, :4]
+            if qt[0] < 0:
+                qt = -1 * qt
+            pose_blob[i, 2:6] = qt
+            pose_blob[i, 6:] = poses[i, 4:]
 
             # compute box
             x3d = np.ones((4, self._points_all.shape[1]), dtype=np.float32)
@@ -348,7 +355,10 @@ class YCBVideo(data.Dataset, datasets.imdb):
                 T = poses[:, 3, i]
                 pose_blob[count, 0] = 1
                 pose_blob[count, 1] = ind
-                pose_blob[count, 2:6] = mat2quat(R)
+                qt = mat2quat(R)
+                if qt[0] < 0:
+                    qt = -1 * qt
+                pose_blob[count, 2:6] = qt
                 pose_blob[count, 6:] = T
                 gt_boxes[count, :4] =  boxes[i, :] * im_scale
                 gt_boxes[count, 4] =  ind

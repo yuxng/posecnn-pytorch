@@ -307,25 +307,28 @@ void Synthesizer::render_python(np::ndarray const & parameters,
   float py = meta[5];
   float znear = meta[6];
   float zfar = meta[7];
-  int min_object = int(meta[8]);
-  int max_object = int(meta[9]);
-  float std_rotation = meta[10];
-  float std_translation = meta[11];
-  int is_sampling_object = int(meta[12]);
-  int is_display = int(meta[13]);
+  float tnear = meta[8];
+  float tfar = meta[9];
+  int min_object = int(meta[10]);
+  int max_object = int(meta[11]);
+  float std_rotation = meta[12];
+  float std_translation = meta[13];
+  int is_sampling_object = int(meta[14]);
+  int is_sampling_pose = int(meta[15]);
+  int is_display = int(meta[16]);
 
-  render(width, height, fx, fy, px, py, znear, zfar, min_object, max_object, std_rotation, std_translation,
+  render(width, height, fx, fy, px, py, znear, zfar, tnear, tfar, min_object, max_object, std_rotation, std_translation,
     reinterpret_cast<float*>(color.get_data()), reinterpret_cast<float*>(vertmap.get_data()),
     reinterpret_cast<float*>(class_indexes.get_data()),
     reinterpret_cast<float*>(poses.get_data()), reinterpret_cast<float*>(centers.get_data()),
-    is_sampling_object, is_display);
+    is_sampling_object, is_sampling_pose, is_display);
 }
 
 
-void Synthesizer::render(int width, int height, float fx, float fy, float px, float py, float znear, float zfar,
+void Synthesizer::render(int width, int height, float fx, float fy, float px, float py, float znear, float zfar, float tnear, float tfar,
               int min_object, int max_object, float std_rotation, float std_translation,
               float* color, float* vertmap, float* class_indexes, 
-              float *poses_return, float* centers_return, int is_sampling_object, int is_display)
+              float *poses_return, float* centers_return, int is_sampling_object, int is_sampling_pose, int is_display)
 {
   float threshold = 0.2;
   float std_rot = std_rotation * M_PI / 180.0;
@@ -395,7 +398,11 @@ void Synthesizer::render(int width, int height, float fx, float fy, float px, fl
       Sophus::SE3f::Point translation;
       translation(0) = pose[4] + dgauss(0, std_translation);
       translation(1) = pose[5] + dgauss(0, std_translation);
-      translation(2) = pose[6] + dgauss(0, std_translation);
+
+      if (is_sampling_pose)
+        translation(2) = pose[6] + dgauss(0, std_translation);
+      else
+        translation(2) = drand(tnear, tfar);
 
       int flag = 1;
       for (int j = 0; j < i; j++)
@@ -412,27 +419,50 @@ void Synthesizer::render(int width, int height, float fx, float fy, float px, fl
       {
         // quaternion
         Eigen::Quaternionf quaternion;
-        quaternion.w() = pose[0];
-        quaternion.x() = pose[1];
-        quaternion.y() = pose[2];
-        quaternion.z() = pose[3];
 
-        Eigen::Vector3f euler = quaternion.toRotationMatrix().eulerAngles(0, 1, 2);
-        euler(0) += dgauss(0, std_rot);
-        euler(1) += dgauss(0, std_rot);
-        euler(2) += dgauss(0, std_rot);
-        Eigen::Quaternionf quaternion_new = Eigen::AngleAxisf(euler(0), Eigen::Vector3f::UnitX())
-                                          * Eigen::AngleAxisf(euler(1), Eigen::Vector3f::UnitY())
-                                          * Eigen::AngleAxisf(euler(2), Eigen::Vector3f::UnitZ());
+        if (is_sampling_pose)
+        {
+          quaternion.w() = pose[0];
+          quaternion.x() = pose[1];
+          quaternion.y() = pose[2];
+          quaternion.z() = pose[3];
 
-        const Sophus::SE3f T_co(quaternion_new, translation);
+          Eigen::Vector3f euler = quaternion.toRotationMatrix().eulerAngles(0, 1, 2);
+          euler(0) += dgauss(0, std_rot);
+          euler(1) += dgauss(0, std_rot);
+          euler(2) += dgauss(0, std_rot);
+          Eigen::Quaternionf q = Eigen::AngleAxisf(euler(0), Eigen::Vector3f::UnitX())
+                               * Eigen::AngleAxisf(euler(1), Eigen::Vector3f::UnitY())
+                               * Eigen::AngleAxisf(euler(2), Eigen::Vector3f::UnitZ());
+
+          quaternion.w() = q.w();
+          quaternion.x() = q.x();
+          quaternion.y() = q.y();
+          quaternion.z() = q.z();
+        }
+        else
+        {
+          double roll = drand(0, 360);
+          double pitch = drand(0, 360);
+          double yaw = drand(0, 360);
+          Eigen::Quaternionf q = Eigen::AngleAxisf(roll * M_PI / 180.0, Eigen::Vector3f::UnitX())
+                               * Eigen::AngleAxisf(pitch * M_PI / 180.0, Eigen::Vector3f::UnitY())
+                               * Eigen::AngleAxisf(yaw * M_PI / 180.0, Eigen::Vector3f::UnitZ());
+
+          quaternion.w() = q.w();
+          quaternion.x() = q.x();
+          quaternion.y() = q.y();
+          quaternion.z() = q.z();
+        }
+
+        const Sophus::SE3f T_co(quaternion, translation);
         poses[i] = T_co;
         if (poses_return)
         {
-          poses_return[i * 7 + 0] = quaternion_new.w();
-          poses_return[i * 7 + 1] = quaternion_new.x();
-          poses_return[i * 7 + 2] = quaternion_new.y();
-          poses_return[i * 7 + 3] = quaternion_new.z();
+          poses_return[i * 7 + 0] = quaternion.w();
+          poses_return[i * 7 + 1] = quaternion.x();
+          poses_return[i * 7 + 2] = quaternion.y();
+          poses_return[i * 7 + 3] = quaternion.z();
           poses_return[i * 7 + 4] = translation(0);
           poses_return[i * 7 + 5] = translation(1);
           poses_return[i * 7 + 6] = translation(2);

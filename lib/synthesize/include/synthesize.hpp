@@ -55,10 +55,10 @@ class Synthesizer
     pangolin::GlBuffer & vertices, pangolin::GlBuffer & canonicalVertices, pangolin::GlBuffer & colors, pangolin::GlBuffer & normals,
     pangolin::GlBuffer & indices, pangolin::GlBuffer & texCoords, pangolin::GlTexture & texture, bool is_textured, int max_vertices);
 
-  void render(int width, int height, float fx, float fy, float px, float py, float znear, float zfar,
-    int min_object, int max_object, float std_rotation, float std_translation,
-    float* color, float* vertmap, float* class_indexes, 
-    float *poses_return, float* centers_return, int is_sampling_object, int is_display);
+void render(int width, int height, float fx, float fy, float px, float py, float znear, float zfar, float tnear, float tfar,
+            int min_object, int max_object, float std_rotation, float std_translation,
+            float* color, float* vertmap, float* class_indexes, 
+            float *poses_return, float* centers_return, int is_sampling_object, int is_sampling_pose, int is_display);
 
   void render_python(np::ndarray const & parameters,
     np::ndarray const & color, np::ndarray const & vertmap, np::ndarray const & class_indexes,
