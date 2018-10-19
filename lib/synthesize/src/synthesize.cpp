@@ -96,25 +96,30 @@ void Synthesizer::loadPoses(const std::string filename)
 
     poses_[m] = pose;
     std::cout << model_names[m] << std::endl;
+
+    pose_index_.push_back(0);
+    std::vector<Eigen::Quaternionf> qv = {};
+    poses_uniform_.push_back(qv);
   }
 
   // sample the poses uniformly
-  pose_index_ = 0;
   for (int roll = 0; roll < 360; roll += 15)
   {
     for (int pitch = 0; pitch < 360; pitch += 15)
     {
       for (int yaw = 0; yaw < 360; yaw += 15)
       {
-        Eigen::Quaterniond q = Eigen::AngleAxisd(double(roll) * M_PI / 180.0, Eigen::Vector3d::UnitX())
-                             * Eigen::AngleAxisd(double(pitch) * M_PI / 180.0, Eigen::Vector3d::UnitY())
-                             * Eigen::AngleAxisd(double(yaw) * M_PI / 180.0, Eigen::Vector3d::UnitZ());
-        poses_uniform_.push_back(q);
+        Eigen::Quaternionf q = Eigen::AngleAxisf(double(roll) * M_PI / 180.0, Eigen::Vector3f::UnitX())
+                             * Eigen::AngleAxisf(double(pitch) * M_PI / 180.0, Eigen::Vector3f::UnitY())
+                             * Eigen::AngleAxisf(double(yaw) * M_PI / 180.0, Eigen::Vector3f::UnitZ());
+        for (int i = 0; i < num_models; i++)
+          poses_uniform_[i].push_back(q);
       }
     }
   }
-  std::random_shuffle(poses_uniform_.begin(), poses_uniform_.end());
-  std::cout << poses_uniform_.size() << " poses" << std::endl;
+  for (int i = 0; i < num_models; i++)
+    std::random_shuffle(poses_uniform_[i].begin(), poses_uniform_[i].end());
+  std::cout << poses_uniform_[0].size() << " poses" << std::endl;
 }
 
 // read the 3D models
@@ -332,6 +337,7 @@ void Synthesizer::render(int width, int height, float fx, float fy, float px, fl
 {
   float threshold = 0.02;
   float std_rot = std_rotation * M_PI / 180.0;
+  float std_rot_uniform = 7.5 * M_PI / 180.0;
 
   pangolin::OpenGlMatrixSpec projectionMatrix_reverse = 
     pangolin::ProjectionMatrixRDF_TopLeft(width, height, fx, -fy, px+0.5, height-(py+0.5), znear, zfar);
@@ -448,17 +454,26 @@ void Synthesizer::render(int width, int height, float fx, float fy, float px, fl
         }
         else
         {
-          double roll = drand(0, 360);
-          double pitch = drand(0, 360);
-          double yaw = drand(0, 360);
-          Eigen::Quaternionf q = Eigen::AngleAxisf(roll * M_PI / 180.0, Eigen::Vector3f::UnitX())
-                               * Eigen::AngleAxisf(pitch * M_PI / 180.0, Eigen::Vector3f::UnitY())
-                               * Eigen::AngleAxisf(yaw * M_PI / 180.0, Eigen::Vector3f::UnitZ());
+          Eigen::Quaternionf q = poses_uniform_[class_id][pose_index_[class_id]];
+          pose_index_[class_id]++;
+          if (pose_index_[class_id] >= poses_uniform_[class_id].size())
+          {
+            pose_index_[class_id] = 0;
+            std::random_shuffle(poses_uniform_[class_id].begin(), poses_uniform_[class_id].end());
+          }
 
-          quaternion.w() = q.w();
-          quaternion.x() = q.x();
-          quaternion.y() = q.y();
-          quaternion.z() = q.z();
+          Eigen::Vector3f euler = q.toRotationMatrix().eulerAngles(0, 1, 2);
+          euler(0) += dgauss(0, std_rot_uniform);
+          euler(1) += dgauss(0, std_rot_uniform);
+          euler(2) += dgauss(0, std_rot_uniform);
+          Eigen::Quaternionf qq = Eigen::AngleAxisf(euler(0), Eigen::Vector3f::UnitX())
+                                * Eigen::AngleAxisf(euler(1), Eigen::Vector3f::UnitY())
+                                * Eigen::AngleAxisf(euler(2), Eigen::Vector3f::UnitZ());
+
+          quaternion.w() = qq.w();
+          quaternion.x() = qq.x();
+          quaternion.y() = qq.y();
+          quaternion.z() = qq.z();
         }
 
         const Sophus::SE3f T_co(quaternion, translation);

@@ -23,6 +23,7 @@ class ImageListener:
         # initialize a node
         rospy.init_node("image_listener")
         self.label_pub = rospy.Publisher('posecnn_label', Image, queue_size=1)
+        self.pose_pub = rospy.Publisher('posecnn_pose', Image, queue_size=1)
         rgb_sub = message_filters.Subscriber('/camera/rgb/image_color', Image, queue_size=2)
         depth_sub = message_filters.Subscriber('/camera/depth_registered/image', Image, queue_size=2)
         # depth_sub = message_filters.Subscriber('/camera/depth_registered/sw_registered/image_rect_raw', Image, queue_size=2)
@@ -46,14 +47,20 @@ class ImageListener:
 
         # run network
         im = self.cv_bridge.imgmsg_to_cv2(rgb, 'bgr8')
-        im_output = self.test_image(im, depth_cv)
+        im_pose, im_label = self.test_image(im, depth_cv)
 
         # publish
-        label_msg = self.cv_bridge.cv2_to_imgmsg(im_output)
+        label_msg = self.cv_bridge.cv2_to_imgmsg(im_label)
         label_msg.header.stamp = rospy.Time.now()
         label_msg.header.frame_id = rgb.header.frame_id
         label_msg.encoding = 'rgb8'
         self.label_pub.publish(label_msg)
+
+        pose_msg = self.cv_bridge.cv2_to_imgmsg(im_pose)
+        pose_msg.header.stamp = rospy.Time.now()
+        pose_msg.header.frame_id = rgb.header.frame_id
+        pose_msg.encoding = 'rgb8'
+        self.pose_pub.publish(pose_msg)
 
 
     def test_image(self, im_color, im_depth):
@@ -106,12 +113,13 @@ class ImageListener:
                 q = out_quaternion[j, 4*cls:4*cls+4]
                 poses[j, :4] = q / np.linalg.norm(q)
 
-        im_output = self.overlay_image(im_color, rois, poses)
+        labels = out_label.detach().cpu().numpy()[0]
+        im_pose, im_label = self.overlay_image(im_color, rois, poses, labels)
 
-        return im_output
+        return im_pose, im_label
 
 
-    def overlay_image(self, im, rois, poses):
+    def overlay_image(self, im, rois, poses, labels):
 
         im = im[:, :, (2, 1, 0)]
         classes = self.dataset._classes
@@ -121,10 +129,23 @@ class ImageListener:
         height = im.shape[0]
         width = im.shape[1]
 
+        label_image = self.dataset.labels_to_image(labels)
+        im_label = im.copy()
+        I = np.where(labels != 0)
+        im_label[I[0], I[1], :] = 0.5 * label_image[I[0], I[1], :] + 0.5 * im_label[I[0], I[1], :]
+
         for j in xrange(rois.shape[0]):
             cls = int(rois[j, 1])
             print classes[cls], rois[j, -1]
             if cls > 0 and rois[j, -1] > 0.01:
+
+                # draw roi
+                x1 = rois[j, 2]
+                y1 = rois[j, 3]
+                x2 = rois[j, 4]
+                y2 = rois[j, 5]
+                cv2.rectangle(im_label, (x1, y1), (x2, y2), class_colors[cls], 2)
+
                 # extract 3D points
                 x3d = np.ones((4, points.shape[1]), dtype=np.float32)
                 x3d[0, :] = points[cls,:,0]
@@ -145,7 +166,7 @@ class ImageListener:
                 im[y, x, 1] = class_colors[cls][1]
                 im[y, x, 2] = class_colors[cls][2]
 
-        return im
+        return im, im_label
 
 
     def vis_test(self, im, label, out_vertex, rois, poses):

@@ -73,8 +73,8 @@ void render(int width, int height, float fx, float fy, float px, float py, float
   std::vector<float*> poses_;
   std::vector<int> pose_nums_;
   std::vector<bool> is_textured_;
-  std::vector<Eigen::Quaterniond> poses_uniform_;
-  int pose_index_;
+  std::vector<std::vector<Eigen::Quaternionf> > poses_uniform_;
+  std::vector<int> pose_index_;
 
   // 3D models
   std::vector<aiMesh*> assimpMeshes_;
