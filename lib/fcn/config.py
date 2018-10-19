@@ -233,7 +233,7 @@ __C.TEST.RANSAC = False
 __C.TEST.GAN = False
 __C.TEST.POSE_REG = False
 __C.TEST.POSE_REFINE = False
-__C.TEST.SYNTHETIC = False
+__C.TEST.SYNTHESIZE = False
 
 # Hough voting
 __C.TEST.HOUGH_LABEL_THRESHOLD = 100

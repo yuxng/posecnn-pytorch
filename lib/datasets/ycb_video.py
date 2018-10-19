@@ -56,7 +56,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
         self._image_ext = '.png'
         self._image_index = self._load_image_set_index()
 
-        if cfg.MODE == 'TRAIN' and cfg.TRAIN.SYNTHESIZE:
+        if (cfg.MODE == 'TRAIN' and cfg.TRAIN.SYNTHESIZE) or (cfg.MODE == 'TEST' and cfg.TEST.SYNTHESIZE):
             self._size = len(self._image_index) * (cfg.TRAIN.SYN_RATIO+1)
         else:
             self._size = len(self._image_index)
@@ -231,13 +231,13 @@ class YCBVideo(data.Dataset, datasets.imdb):
     def __getitem__(self, index):
 
         is_syn = 0
-        if cfg.MODE == 'TRAIN' and cfg.TRAIN.SYNTHESIZE and index % (cfg.TRAIN.SYN_RATIO+1) != 0:
+        if ((cfg.MODE == 'TRAIN' and cfg.TRAIN.SYNTHESIZE) or (cfg.MODE == 'TEST' and cfg.TEST.SYNTHESIZE)) and (index % (cfg.TRAIN.SYN_RATIO+1) != 0):
             is_syn = 1
 
         if is_syn:
             return self._render_item()
 
-        if cfg.MODE == 'TRAIN' and cfg.TRAIN.SYNTHESIZE:
+        if (cfg.MODE == 'TRAIN' and cfg.TRAIN.SYNTHESIZE) or (cfg.MODE == 'TEST' and cfg.TEST.SYNTHESIZE):
             index = int((index % self._size) / (cfg.TRAIN.SYN_RATIO+1))
         else:
             index = int(index % self._size)
