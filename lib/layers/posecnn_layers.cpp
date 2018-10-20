@@ -12,7 +12,8 @@
 std::vector<at::Tensor> hard_label_cuda_forward(
     float threshold,
     at::Tensor bottom_prob,
-    at::Tensor bottom_label);
+    at::Tensor bottom_label,
+    at::Tensor bottom_rand);
 
 std::vector<at::Tensor> hard_label_cuda_backward(
     at::Tensor top_diff);
@@ -20,12 +21,14 @@ std::vector<at::Tensor> hard_label_cuda_backward(
 std::vector<at::Tensor> hard_label_forward(
     float threshold,
     at::Tensor bottom_prob,
-    at::Tensor bottom_label)
+    at::Tensor bottom_label,
+    at::Tensor bottom_rand)
 {
   CHECK_INPUT(bottom_prob);
   CHECK_INPUT(bottom_label);
+  CHECK_INPUT(bottom_rand);
 
-  return hard_label_cuda_forward(threshold, bottom_prob, bottom_label);
+  return hard_label_cuda_forward(threshold, bottom_prob, bottom_label, bottom_rand);
 }
 
 std::vector<at::Tensor> hard_label_backward(

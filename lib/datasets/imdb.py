@@ -79,18 +79,30 @@ class imdb(object):
                     backgrounds.append(filename)
 
         # ObjectNet3D
+        '''
         objectnet3d = os.path.join(self.cache_path, '../ObjectNet3D/data')
         files = os.listdir(objectnet3d)
         for i in range(len(files)):
             filename = os.path.join(objectnet3d, files[i])
             backgrounds.append(filename)
+        '''
+
+        # AllenCenter
+        allencenter = os.path.join(self.cache_path, '../AllenCenter/data')
+        subdirs = os.listdir(allencenter)
+        for i in xrange(len(subdirs)):
+            subdir = subdirs[i]
+            files = os.listdir(os.path.join(allencenter, subdir))
+            for j in range(len(files)):
+                filename = os.path.join(allencenter, subdir, files[j])
+                backgrounds.append(filename)
 
         for i in xrange(len(backgrounds)):
             if not os.path.isfile(backgrounds[i]):
                 print 'file not exist {}'.format(backgrounds[i])
 
         self._backgrounds = backgrounds
-        print "build background images finished"
+        print 'build background images finished, {:d} images'.format(len(backgrounds))
 
         with open(cache_file, 'wb') as fid:
             cPickle.dump(backgrounds, fid, cPickle.HIGHEST_PROTOCOL)

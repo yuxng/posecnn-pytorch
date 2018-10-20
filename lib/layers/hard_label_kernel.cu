@@ -12,12 +12,12 @@
 
 template <typename Dtype>
 __global__ void HardLabelForward(const int nthreads, const float threshold,
-    const Dtype* bottom_prob, const Dtype* bottom_label, Dtype* top_data)
+    const Dtype* bottom_prob, const Dtype* bottom_label, const Dtype* bottom_rand, Dtype* top_data)
 {
   CUDA_1D_KERNEL_LOOP(index, nthreads) 
   {
-    if (bottom_label[index] > 0 && bottom_prob[index] < threshold)
-      top_data[index] = 1.0;    
+    if (bottom_label[index] > 0 && (bottom_prob[index] < threshold || bottom_rand[index] > 0.5))
+      top_data[index] = 1.0; 
   }
 }
 
@@ -25,7 +25,8 @@ __global__ void HardLabelForward(const int nthreads, const float threshold,
 std::vector<at::Tensor> hard_label_cuda_forward(
     float threshold,
     at::Tensor bottom_prob,
-    at::Tensor bottom_label) 
+    at::Tensor bottom_label,
+    at::Tensor bottom_rand) 
 {
   // run kernels
   const int kThreadsPerBlock = 1024;
@@ -46,6 +47,7 @@ std::vector<at::Tensor> hard_label_cuda_forward(
         threshold,
         bottom_prob.data<scalar_t>(),
         bottom_label.data<scalar_t>(),
+        bottom_rand.data<scalar_t>(),
         top_data.data<scalar_t>());
 
   }));

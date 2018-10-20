@@ -142,7 +142,7 @@ class PoseCNN(nn.Module):
         out_logsoftmax = log_softmax_high_dimension(out_score)
         out_prob = softmax_high_dimension(out_score)
         out_label = torch.max(out_prob, dim=1)[1].type(torch.IntTensor).cuda()
-        out_weight = self.hard_label(out_prob, label_gt)
+        out_weight = self.hard_label(out_prob, label_gt, torch.rand(out_prob.size()).cuda())
 
         if cfg.TRAIN.VERTEX_REG:
             # center regression branch
@@ -177,7 +177,7 @@ class PoseCNN(nn.Module):
             out_fc8 = self.fc8(out_fc7)
             out_logsoftmax_box = log_softmax_high_dimension(out_fc8)
             bbox_prob = softmax_high_dimension(out_fc8)
-            bbox_label_weights = self.hard_label(bbox_prob, bbox_labels)
+            bbox_label_weights = self.hard_label(bbox_prob, bbox_labels, torch.rand(bbox_prob.size()).cuda())
             bbox_pred = self.fc9(out_fc7)
 
             # rotation regression branch
