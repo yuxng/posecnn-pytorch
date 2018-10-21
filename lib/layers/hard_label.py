@@ -7,8 +7,8 @@ import posecnn_cuda
 
 class HardLabelFunction(Function):
     @staticmethod
-    def forward(ctx, prob, label, rand, threshold):
-        outputs = posecnn_cuda.hard_label_forward(threshold, prob, label, rand)
+    def forward(ctx, prob, label, rand, threshold, sample_percentage):
+        outputs = posecnn_cuda.hard_label_forward(threshold, sample_percentage, prob, label, rand)
         top_data = outputs[0]
         return top_data
 
@@ -16,13 +16,14 @@ class HardLabelFunction(Function):
     def backward(ctx, top_diff):
         outputs = posecnn_cuda.hard_label_backward(top_diff)
         d_prob, d_label = outputs
-        return d_prob, d_label, None, None
+        return d_prob, d_label, None, None, None
 
 
 class HardLabel(nn.Module):
-    def __init__(self, threshold):
+    def __init__(self, threshold, sample_percentage):
         super(HardLabel, self).__init__()
         self.threshold = threshold
+        self.sample_percentage = sample_percentage
 
     def forward(self, prob, label, rand):
-        return HardLabelFunction.apply(prob, label, rand, self.threshold)
+        return HardLabelFunction.apply(prob, label, rand, self.threshold, self.sample_percentage)

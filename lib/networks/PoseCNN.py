@@ -87,7 +87,7 @@ class PoseCNN(nn.Module):
         self.upsample_conv5_embed = upsample(2.0)
         self.upsample_embed = upsample(8.0)
         self.conv_score = conv(num_units, num_classes, kernel_size=1)
-        self.hard_label = HardLabel(threshold=cfg.TRAIN.THRESHOLD_LABEL)
+        self.hard_label = HardLabel(threshold=cfg.TRAIN.HARD_LABEL_THRESHOLD, sample_percentage=cfg.TRAIN.HARD_LABEL_SAMPLING)
         self.dropout = nn.Dropout()
 
         if cfg.TRAIN.VERTEX_REG:

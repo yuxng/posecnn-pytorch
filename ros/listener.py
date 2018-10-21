@@ -137,7 +137,7 @@ class ImageListener:
         for j in xrange(rois.shape[0]):
             cls = int(rois[j, 1])
             print classes[cls], rois[j, -1]
-            if cls > 0 and rois[j, -1] > 0.01:
+            if cls > 0 and rois[j, -1] > 0.2:
 
                 # draw roi
                 x1 = rois[j, 2]

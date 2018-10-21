@@ -11,6 +11,7 @@
 *************************************************************/
 std::vector<at::Tensor> hard_label_cuda_forward(
     float threshold,
+    float sample_percentage,
     at::Tensor bottom_prob,
     at::Tensor bottom_label,
     at::Tensor bottom_rand);
@@ -20,6 +21,7 @@ std::vector<at::Tensor> hard_label_cuda_backward(
 
 std::vector<at::Tensor> hard_label_forward(
     float threshold,
+    float sample_percentage,
     at::Tensor bottom_prob,
     at::Tensor bottom_label,
     at::Tensor bottom_rand)
@@ -28,7 +30,7 @@ std::vector<at::Tensor> hard_label_forward(
   CHECK_INPUT(bottom_label);
   CHECK_INPUT(bottom_rand);
 
-  return hard_label_cuda_forward(threshold, bottom_prob, bottom_label, bottom_rand);
+  return hard_label_cuda_forward(threshold, sample_percentage, bottom_prob, bottom_label, bottom_rand);
 }
 
 std::vector<at::Tensor> hard_label_backward(
