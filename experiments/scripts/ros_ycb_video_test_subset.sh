@@ -12,7 +12,7 @@ echo Logging output to "$LOG"
 
 time ./ros/test_images.py --gpu 0 \
   --network posecnn \
-  --pretrained output_adrian/ycb_video/ycb_video_train/vgg16_ycb_video_can_box_banana_epoch_6.checkpoint.pth \
+  --pretrained output_adrian/ycb_video/ycb_video_train/vgg16_ycb_video_can_box_banana_epoch_10.checkpoint.pth \
   --dataset ycb_video_val \
   --cfg experiments/cfgs/ycb_video_subset.yml \
   --cad data/YCB_Video/models.txt \

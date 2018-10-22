@@ -10,6 +10,49 @@ from cv_bridge import CvBridge, CvBridgeError
 from std_msgs.msg import String
 from sensor_msgs.msg import Image
 from transforms3d.quaternions import mat2quat, quat2mat, qmult
+from scipy.optimize import minimize
+
+
+def optimize_depths(rois, poses, points, intrinsic_matrix):
+
+    num = rois.shape[0]
+    for i in range(num):
+        roi = rois[i, 2:6]
+        cls = int(rois[i, 1])
+
+        RT = np.zeros((3, 4), dtype=np.float32)
+        RT[:3, :3] = quat2mat(poses[i, :4])
+        RT[:, 3] = poses[i, 4:]
+
+        # extract 3D points
+        x3d = np.ones((4, points.shape[1]), dtype=np.float32)
+        x3d[0, :] = points[cls,:,0]
+        x3d[1, :] = points[cls,:,1]
+        x3d[2, :] = points[cls,:,2]
+
+        # optimization
+        x0 = poses[i, 6]
+        res = minimize(objective_depth, x0, args=(roi, RT, x3d, intrinsic_matrix), method='nelder-mead', options={'xtol': 1e-8, 'disp': False})
+        poses[i, 6] = res.x
+
+    return poses
+
+
+def objective_depth(x, roi, RT, x3d, intrinsic_matrix):
+
+    # project points
+    RT[2, 3] = x
+    x2d = np.matmul(intrinsic_matrix, np.matmul(RT, x3d))
+    x2d[0, :] = np.divide(x2d[0, :], x2d[2, :])
+    x2d[1, :] = np.divide(x2d[1, :], x2d[2, :])
+
+    roi_pred = np.zeros((4, ), dtype=np.float32)
+    roi_pred[0] = np.min(x2d[0, :])
+    roi_pred[1] = np.min(x2d[1, :])
+    roi_pred[2] = np.max(x2d[0, :])
+    roi_pred[3] = np.max(x2d[1, :])
+    return np.linalg.norm(roi_pred - roi)
+
 
 class ImageListener:
 
@@ -112,6 +155,9 @@ class ImageListener:
             if cls >= 0:
                 q = out_quaternion[j, 4*cls:4*cls+4]
                 poses[j, :4] = q / np.linalg.norm(q)
+
+        # optimize depths
+        poses = optimize_depths(rois, poses, self.dataset._points_all, self.dataset._intrinsic_matrix)
 
         labels = out_label.detach().cpu().numpy()[0]
         im_pose, im_label = self.overlay_image(im_color, rois, poses, labels)
