@@ -10,6 +10,7 @@
 __sets = {}
 
 import datasets.ycb_video
+import datasets.ycb_object
 import datasets.linemod
 import numpy as np
 
@@ -19,6 +20,13 @@ for split in ['train', 'val', 'keyframe', 'trainval', 'debug']:
     print name
     __sets[name] = (lambda split=split:
             datasets.YCBVideo(split))
+
+# ycb object dataset
+for split in ['train', 'test']:
+    name = 'ycb_object_{}'.format(split)
+    print name
+    __sets[name] = (lambda split=split:
+            datasets.YCBObject(split))
 
 # linemod dataset
 for split in ['train', 'test', 'debug']:

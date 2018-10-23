@@ -7,6 +7,7 @@
 
 from .imdb import imdb
 from .ycb_video import YCBVideo
+from .ycb_object import YCBObject
 from .linemod import linemod
 
 import os.path as osp
