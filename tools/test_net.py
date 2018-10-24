@@ -19,6 +19,7 @@ import pprint
 import time, os, sys
 import os.path as osp
 import numpy as np
+import random
 
 import _init_paths
 from fcn.train_test import test
@@ -107,7 +108,7 @@ if __name__ == '__main__':
         pose_name = write_selected_class_file(args.pose_name, classes)
         cfg.synthesizer = libsynthesizer.Synthesizer(cad_name, pose_name)
         cfg.synthesizer.setup(cfg.TRAIN.SYN_WIDTH, cfg.TRAIN.SYN_HEIGHT)
-        cfg.synthesizer.init_rand(1200)
+        cfg.synthesizer.init_rand(random.randint(1,1200))
 
     # prepare network
     if args.pretrained:
