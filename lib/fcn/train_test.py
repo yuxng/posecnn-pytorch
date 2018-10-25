@@ -130,11 +130,11 @@ def train(train_loader, network, optimizer, epoch):
             num_bg = torch.sum(bbox_labels[:, 0])
             num_fg = torch.sum(torch.sum(bbox_labels[:, 1:], dim=1))
             num_fg_pose = torch.sum(torch.sum(poses_weight[:, 4:], dim=1)) / 4
-            print('epoch:[%d/%d][%d/%d], %.4f, seg1 %.4f, seg2 %.4f, center %.4f, box %.4f (%03d, %03d), loc %.4f, pose %.4f (%03d), lr %.6f, time %.2f' \
+            print('[%d/%d][%d/%d], %.4f, seg1 %.4f, seg2 %.4f, center %.4f, box %.4f (%03d, %03d), loc %.4f, pose %.4f (%03d), lr %.6f, time %.2f' \
                % (epoch, cfg.epochs, i, epoch_size, loss.data, loss_label1.data, loss_label2.data, loss_vertex.data, loss_box.data, num_fg.data, num_bg.data, \
                   loss_location.data, loss_pose.data, num_fg_pose, optimizer.param_groups[0]['lr'], batch_time.val))
         else:
-            print('epoch: [%d/%d][%d/%d], loss %.4f, lr %.6f, time %.2f' \
+            print('[%d/%d][%d/%d], loss %.4f, lr %.6f, time %.2f' \
                % (epoch, cfg.epochs, i, epoch_size, loss, optimizer.param_groups[0]['lr'], batch_time.val))
 
         cfg.TRAIN.ITERS += 1
