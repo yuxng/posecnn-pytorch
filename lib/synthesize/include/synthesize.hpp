@@ -12,7 +12,6 @@
 #include <string>
 #include <cstddef>
 
-#include <pangolin/pangolin.h>
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 #include <assimp/cimport.h>
@@ -24,15 +23,17 @@
 #include <opencv2/opencv.hpp>
 #include <opencv2/opencv_modules.hpp>
 
+#include <boost/python.hpp>
+#include <boost/python/numpy.hpp>
+#include <boost/scoped_array.hpp>
+#include <pangolin/pangolin.h>
+
 #include "glRender.h"
 #include "glRenderTypes.h"
 #include "tensor.h"
 #include "cudaHelpers.h"
 #include "thread_rand.h"
 
-#include <boost/python.hpp>
-#include <boost/python/numpy.hpp>
-#include <boost/scoped_array.hpp>
 namespace np = boost::python::numpy;
 
 class Synthesizer
