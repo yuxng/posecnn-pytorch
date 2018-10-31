@@ -4,6 +4,7 @@ set -x
 set -e
 
 export PYTHONUNBUFFERED="True"
+export PANGOLIN_WINDOW_URI="headless://"
 #export CUDA_VISIBLE_DEVICES=0,3
 
 LOG="experiments/logs/ycb_video_train_subset.txt.`date +'%Y-%m-%d_%H-%M-%S'`"

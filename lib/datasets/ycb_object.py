@@ -110,6 +110,14 @@ class YCBObject(data.Dataset, datasets.imdb):
         filename = self._backgrounds[ind]
         background = cv2.imread(filename, cv2.IMREAD_UNCHANGED)
         try:
+            # randomly crop a region as background
+            bw = background.shape[1]
+            bh = background.shape[0]
+            x1 = npr.randint(0, int(bw/3))
+            y1 = npr.randint(0, int(bh/3))
+            x2 = npr.randint(int(2*bw/3), bw)
+            y2 = npr.randint(int(2*bh/3), bh)
+            background = background[y1:y2, x1:x2]
             background = cv2.resize(background, (self._width, self._height), interpolation=cv2.INTER_LINEAR)
         except:
             background = np.zeros((self._height, self._width, 3), dtype=np.uint8)
