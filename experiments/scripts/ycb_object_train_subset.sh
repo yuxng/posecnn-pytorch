@@ -7,7 +7,7 @@ export PYTHONUNBUFFERED="True"
 #export CUDA_VISIBLE_DEVICES=0,3
 export PANGOLIN_WINDOW_URI="headless://"
 
-LOG="experiments/logs/ycb_video_train_subset.txt.`date +'%Y-%m-%d_%H-%M-%S'`"
+LOG="experiments/logs/ycb_object_train_subset.txt.`date +'%Y-%m-%d_%H-%M-%S'`"
 exec &> >(tee -a "$LOG")
 echo Logging output to "$LOG"
 

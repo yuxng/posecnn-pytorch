@@ -81,22 +81,12 @@ class PoseCNN(nn.Module):
         self.features = nn.ModuleList(features)
         # self.classifier = vgg16.classifier[:-1]
 
-        # embedding
+        # semantic labeling branch
         self.conv4_embed = conv(512, num_units, kernel_size=1)
         self.conv5_embed = conv(512, num_units, kernel_size=1)
         self.upsample_conv5_embed = upsample(2.0)
         self.upsample_embed = upsample(8.0)
-
-        # semantic labeling stage 1
-        self.conv1_stage1 = conv(num_units, num_units, kernel_size=3)
-        self.conv2_stage1 = conv(num_units, num_units, kernel_size=3)
-        self.conv_score1 = conv(num_units, num_classes, kernel_size=1)
-
-        # semantic labeling stage 2
-        self.conv1_stage2 = conv(num_classes, num_units, kernel_size=7)
-        self.conv2_stage2 = conv(num_units, num_units, kernel_size=7)
-        self.conv_score2 = conv(num_units, num_classes, kernel_size=1)
-
+        self.conv_score = conv(num_units, num_classes, kernel_size=1)
         self.hard_label = HardLabel(threshold=cfg.TRAIN.HARD_LABEL_THRESHOLD, sample_percentage=cfg.TRAIN.HARD_LABEL_SAMPLING)
         self.dropout = nn.Dropout()
 
@@ -142,30 +132,17 @@ class PoseCNN(nn.Module):
             if i == 29:
                 out_conv5_3 = x
 
-        # embedding
+        # semantic labeling branch
         out_conv4_embed = self.conv4_embed(out_conv4_3)
         out_conv5_embed = self.conv5_embed(out_conv5_3)
         out_conv5_embed_up = self.upsample_conv5_embed(out_conv5_embed)
         out_embed = self.dropout(out_conv4_embed + out_conv5_embed_up)
         out_embed_up = self.upsample_embed(out_embed)
-
-        # semantic labeling stage 1
-        out_conv1_stage1 = self.conv1_stage1(out_embed_up)
-        out_conv2_stage1 = self.conv2_stage1(out_conv1_stage1)
-        out_score1 = self.conv_score1(out_conv2_stage1)
-        out_logsoftmax1 = log_softmax_high_dimension(out_score1)
-        out_prob1 = softmax_high_dimension(out_score1)
-        out_label1 = torch.max(out_prob1, dim=1)[1].type(torch.IntTensor).cuda()
-        out_weight1 = self.hard_label(out_prob1, label_gt, torch.rand(out_prob1.size()).cuda())
-
-        # semantic labeling stage 2
-        out_conv1_stage2 = self.conv1_stage2(out_score1)
-        out_conv2_stage2 = self.conv2_stage2(out_conv1_stage2)
-        out_score2 = self.conv_score2(out_conv2_stage2)
-        out_logsoftmax2 = log_softmax_high_dimension(out_score2)
-        out_prob2 = softmax_high_dimension(out_score2)
-        out_label2 = torch.max(out_prob2, dim=1)[1].type(torch.IntTensor).cuda()
-        out_weight2 = self.hard_label(out_prob2, label_gt, torch.rand(out_prob2.size()).cuda())
+        out_score = self.conv_score(out_embed_up)
+        out_logsoftmax = log_softmax_high_dimension(out_score)
+        out_prob = softmax_high_dimension(out_score)
+        out_label = torch.max(out_prob, dim=1)[1].type(torch.IntTensor).cuda()
+        out_weight = self.hard_label(out_prob, label_gt, torch.rand(out_prob.size()).cuda())
 
         if cfg.TRAIN.VERTEX_REG:
             # center regression branch
@@ -187,7 +164,7 @@ class PoseCNN(nn.Module):
                 self.hough_voting.label_threshold=cfg.TEST.HOUGH_LABEL_THRESHOLD
                 self.hough_voting.voting_threshold=cfg.TEST.HOUGH_VOTING_THRESHOLD
                 self.hough_voting.skip_pixels=cfg.TEST.HOUGH_SKIP_PIXELS
-            out_box, out_pose = self.hough_voting(out_label2, out_vertex, meta_data, extents)
+            out_box, out_pose = self.hough_voting(out_label, out_vertex, meta_data, extents)
 
             # bounding box classification and regression branch
             bbox_labels, bbox_targets, bbox_inside_weights, bbox_outside_weights = roi_target_layer(out_box, gt_boxes)
@@ -218,10 +195,10 @@ class PoseCNN(nn.Module):
 
         if self.training:
             if cfg.TRAIN.VERTEX_REG:
-                return out_logsoftmax1, out_logsoftmax2, out_weight1, out_weight2, out_vertex, out_logsoftmax_box, bbox_label_weights, \
+                return out_logsoftmax, out_weight, out_vertex, out_logsoftmax_box, bbox_label_weights, \
                        bbox_pred, bbox_targets, bbox_inside_weights, loss_pose, poses_weight
             else:
-                return out_logsoftmax1, out_logsoftmax2, out_weight1, out_weight2
+                return out_logsoftmax, out_weight
         else:
             if cfg.TRAIN.VERTEX_REG:
                 return out_label2, out_vertex, rois, out_pose, out_quaternion
