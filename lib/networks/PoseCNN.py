@@ -201,9 +201,9 @@ class PoseCNN(nn.Module):
                 return out_logsoftmax, out_weight
         else:
             if cfg.TRAIN.VERTEX_REG:
-                return out_label2, out_vertex, rois, out_pose, out_quaternion
+                return out_label, out_vertex, rois, out_pose, out_quaternion
             else:
-                return out_label2
+                return out_label
 
     def weight_parameters(self):
         return [param for name, param in self.named_parameters() if 'weight' in name]
