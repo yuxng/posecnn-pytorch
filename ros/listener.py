@@ -11,6 +11,7 @@ from std_msgs.msg import String
 from sensor_msgs.msg import Image
 from transforms3d.quaternions import mat2quat, quat2mat, qmult
 from scipy.optimize import minimize
+from utils.blob import pad_im, chromatic_transform, add_noise
 
 
 def optimize_depths(rois, poses, points, intrinsic_matrix):

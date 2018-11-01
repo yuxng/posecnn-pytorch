@@ -126,6 +126,6 @@ def add_noise(image):
         kernel_motion_blur = kernel_motion_blur / size
         noisy = cv2.filter2D(image, -1, kernel_motion_blur)
 
-    return noisy
+    return noisy.astype('uint8')
 
 
