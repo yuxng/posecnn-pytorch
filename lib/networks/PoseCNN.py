@@ -81,12 +81,18 @@ class PoseCNN(nn.Module):
         self.features = nn.ModuleList(features)
         # self.classifier = vgg16.classifier[:-1]
 
-        # semantic labeling branch
+        # semantic labeling branch conv4
         self.conv4_embed = conv(512, num_units, kernel_size=1)
+        self.conv4_score = conv(num_units, num_classes, kernel_size=1)
+        self.upsample_conv4 = upsample(8.0)
+
+        # semantic labeling branch conv5
         self.conv5_embed = conv(512, num_units, kernel_size=1)
-        self.upsample_conv5_embed = upsample(2.0)
-        self.upsample_embed = upsample(8.0)
-        self.conv_score = conv(num_units, num_classes, kernel_size=1)
+        self.conv5_score = conv(num_units, num_classes, kernel_size=1)
+        self.upsample_conv5 = upsample(16.0)
+
+        # semantic labeling branch fusion
+        self.conv_score = conv(2 * num_classes, num_classes, kernel_size=1)
         self.hard_label = HardLabel(threshold=cfg.TRAIN.HARD_LABEL_THRESHOLD, sample_percentage=cfg.TRAIN.HARD_LABEL_SAMPLING)
         self.dropout = nn.Dropout()
 
@@ -132,17 +138,34 @@ class PoseCNN(nn.Module):
             if i == 29:
                 out_conv5_3 = x
 
-        # semantic labeling branch
+        # semantic labeling branch conv4
         out_conv4_embed = self.conv4_embed(out_conv4_3)
+        out_conv4_score = self.conv4_score(out_conv4_embed)
+        out_conv4_score_up = self.upsample_conv4(out_conv4_score)
+        out_logsoftmax_conv4 = log_softmax_high_dimension(out_conv4_score_up)
+        out_prob_conv4 = softmax_high_dimension(out_conv4_score_up)
+        out_label_conv4 = torch.max(out_prob_conv4, dim=1)[1].type(torch.IntTensor).cuda()
+        out_weight_conv4 = self.hard_label(out_prob_conv4, label_gt, torch.rand(out_prob_conv4.size()).cuda())
+
+        # semantic labeling branch conv5
         out_conv5_embed = self.conv5_embed(out_conv5_3)
-        out_conv5_embed_up = self.upsample_conv5_embed(out_conv5_embed)
-        out_embed = self.dropout(out_conv4_embed + out_conv5_embed_up)
-        out_embed_up = self.upsample_embed(out_embed)
-        out_score = self.conv_score(out_embed_up)
-        out_logsoftmax = log_softmax_high_dimension(out_score)
-        out_prob = softmax_high_dimension(out_score)
-        out_label = torch.max(out_prob, dim=1)[1].type(torch.IntTensor).cuda()
-        out_weight = self.hard_label(out_prob, label_gt, torch.rand(out_prob.size()).cuda())
+        out_conv5_score = self.conv5_score(out_conv5_embed)
+        out_conv5_score_up = self.upsample_conv5(out_conv5_score)
+        out_logsoftmax_conv5 = log_softmax_high_dimension(out_conv5_score_up)
+        out_prob_conv5 = softmax_high_dimension(out_conv5_score_up)
+        out_label_conv5 = torch.max(out_prob_conv5, dim=1)[1].type(torch.IntTensor).cuda()
+        out_weight_conv5 = self.hard_label(out_prob_conv5, label_gt, torch.rand(out_prob_conv5.size()).cuda())
+
+        # semantic labeling branch fusion
+        out_score_cat = torch.cat((out_conv4_score_up, out_conv5_score_up), dim=1)
+        out_score_fuse = self.conv_score(out_score_cat)
+        out_logsoftmax_fuse = log_softmax_high_dimension(out_score_fuse)
+        out_prob_fuse = softmax_high_dimension(out_score_fuse)
+        out_label_fuse = torch.max(out_prob_fuse, dim=1)[1].type(torch.IntTensor).cuda()
+        out_weight_fuse = self.hard_label(out_prob_fuse, label_gt, torch.rand(out_prob_fuse.size()).cuda())
+
+        out_logsoftmax = [out_logsoftmax_conv4, out_logsoftmax_conv5, out_logsoftmax_fuse]
+        out_weight = [out_weight_conv4, out_weight_conv5, out_weight_fuse]
 
         if cfg.TRAIN.VERTEX_REG:
             # center regression branch
