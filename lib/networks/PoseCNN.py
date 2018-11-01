@@ -166,6 +166,7 @@ class PoseCNN(nn.Module):
 
         out_logsoftmax = [out_logsoftmax_conv4, out_logsoftmax_conv5, out_logsoftmax_fuse]
         out_weight = [out_weight_conv4, out_weight_conv5, out_weight_fuse]
+        out_label = out_label_fuse
 
         if cfg.TRAIN.VERTEX_REG:
             # center regression branch

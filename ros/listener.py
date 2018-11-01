@@ -143,22 +143,27 @@ class ImageListener:
         points = torch.from_numpy(self.dataset._point_blob).cuda()
         symmetry = torch.from_numpy(self.dataset._symmetry).cuda()
 
-        out_label, out_vertex, rois, out_pose, out_quaternion = self.net(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
+        if cfg.TRAIN.VERTEX_REG:
+            out_label, out_vertex, rois, out_pose, out_quaternion = self.net(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
 
-        # combine poses
-        rois = rois.detach().cpu().numpy()
-        out_pose = out_pose.detach().cpu().numpy()
-        out_quaternion = out_quaternion.detach().cpu().numpy()
-        num = rois.shape[0]
-        poses = out_pose.copy()
-        for j in xrange(num):
-            cls = int(rois[j, 1])
-            if cls >= 0:
-                q = out_quaternion[j, 4*cls:4*cls+4]
-                poses[j, :4] = q / np.linalg.norm(q)
+            # combine poses
+            rois = rois.detach().cpu().numpy()
+            out_pose = out_pose.detach().cpu().numpy()
+            out_quaternion = out_quaternion.detach().cpu().numpy()
+            num = rois.shape[0]
+            poses = out_pose.copy()
+            for j in xrange(num):
+                cls = int(rois[j, 1])
+                if cls >= 0:
+                    q = out_quaternion[j, 4*cls:4*cls+4]
+                    poses[j, :4] = q / np.linalg.norm(q)
 
-        # optimize depths
-        poses = optimize_depths(rois, poses, self.dataset._points_all, self.dataset._intrinsic_matrix)
+            # optimize depths
+            poses = optimize_depths(rois, poses, self.dataset._points_all, self.dataset._intrinsic_matrix)
+        else:
+            out_label = self.net(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
+            rois = np.zeros((0, 7), dtype=np.float32)
+            poses = []
 
         labels = out_label.detach().cpu().numpy()[0]
         im_pose, im_label = self.overlay_image(im_color, rois, poses, labels)
