@@ -134,13 +134,14 @@ class YCBObject(data.Dataset, datasets.imdb):
         margin = 10
         for i in range(centers.shape[0]):
             I = np.where(im_label == class_indexes[i])
-            y1 = np.max((np.round(np.min(I[0])) - margin, 0))
-            x1 = np.max((np.round(np.min(I[1])) - margin, 0))
-            y2 = np.min((np.round(np.max(I[0])) + margin, self._height-1))
-            x2 = np.min((np.round(np.max(I[1])) + margin, self._width-1))
-            foreground = im[y1:y2, x1:x2].astype(np.uint8)
-            mask = 255 * np.ones((foreground.shape[0], foreground.shape[1]), dtype=np.uint8)
-            background = cv2.seamlessClone(foreground, background, mask, ((x1+x2)/2, (y1+y2)/2), cv2.NORMAL_CLONE)
+            if len(I[0]) > 0:
+                y1 = np.max((np.round(np.min(I[0])) - margin, 0))
+                x1 = np.max((np.round(np.min(I[1])) - margin, 0))
+                y2 = np.min((np.round(np.max(I[0])) + margin, self._height-1))
+                x2 = np.min((np.round(np.max(I[1])) + margin, self._width-1))
+                foreground = im[y1:y2, x1:x2].astype(np.uint8)
+                mask = 255 * np.ones((foreground.shape[0], foreground.shape[1]), dtype=np.uint8)
+                background = cv2.seamlessClone(foreground, background, mask, ((x1+x2)/2, (y1+y2)/2), cv2.NORMAL_CLONE)
         im = background
 
         # chromatic transform
