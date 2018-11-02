@@ -104,7 +104,11 @@ def train(train_loader, network, optimizer, epoch):
                 bbox_labels, bbox_pred, bbox_targets, bbox_inside_weights, loss_pose_tensor, poses_weight \
                 = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
 
-            loss_label = loss_cross_entropy(out_logsoftmax, out_weight)
+            loss0 = loss_cross_entropy(out_logsoftmax[0], out_weight[0])
+            loss1 = loss_cross_entropy(out_logsoftmax[1], out_weight[1])
+            loss2 = loss_cross_entropy(out_logsoftmax[2], out_weight[2])
+            loss_label = (loss0 + loss1 + loss2) / 3
+
             loss_vertex = smooth_l1_loss(out_vertex, vertex_targets, vertex_weights)
             loss_box = loss_cross_entropy(out_logsoftmax_box, bbox_labels)
             loss_location = smooth_l1_loss(bbox_pred, bbox_targets, bbox_inside_weights)
