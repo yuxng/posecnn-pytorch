@@ -104,11 +104,7 @@ def train(train_loader, network, optimizer, epoch):
                 bbox_labels, bbox_pred, bbox_targets, bbox_inside_weights, loss_pose_tensor, poses_weight \
                 = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
 
-            loss0 = loss_cross_entropy(out_logsoftmax[0], out_weight[0])
-            loss1 = loss_cross_entropy(out_logsoftmax[1], out_weight[1])
-            loss2 = loss_cross_entropy(out_logsoftmax[2], out_weight[2])
-            loss_label = (loss0 + loss1 + loss2) / 3
-
+            loss_label = loss_cross_entropy(out_logsoftmax, out_weight)
             loss_vertex = smooth_l1_loss(out_vertex, vertex_targets, vertex_weights)
             loss_box = loss_cross_entropy(out_logsoftmax_box, bbox_labels)
             loss_location = smooth_l1_loss(bbox_pred, bbox_targets, bbox_inside_weights)
@@ -116,10 +112,7 @@ def train(train_loader, network, optimizer, epoch):
             loss = loss_label + loss_vertex + loss_box + loss_location + loss_pose
         else:
             out_logsoftmax, out_weight = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
-            loss0 = loss_cross_entropy(out_logsoftmax[0], out_weight[0])
-            loss1 = loss_cross_entropy(out_logsoftmax[1], out_weight[1])
-            loss2 = loss_cross_entropy(out_logsoftmax[2], out_weight[2])
-            loss = (loss0 + loss1 + loss2) / 3
+            loss = loss_cross_entropy(out_logsoftmax, out_weight)
 
         # record loss
         losses.update(loss.data, inputs.size(0))
@@ -140,8 +133,8 @@ def train(train_loader, network, optimizer, epoch):
                % (epoch, cfg.epochs, i, epoch_size, loss.data, loss_label.data, loss_vertex.data, loss_box.data, num_fg.data, num_bg.data, \
                   loss_location.data, loss_pose.data, num_fg_pose, optimizer.param_groups[0]['lr'], batch_time.val))
         else:
-            print('[%d/%d][%d/%d], loss %.4f, conv4 %.4f, conv5 %.4f, fuse %.4f, lr %.6f, time %.2f' \
-               % (epoch, cfg.epochs, i, epoch_size, loss, loss0.data, loss1.data, loss2.data, optimizer.param_groups[0]['lr'], batch_time.val))
+            print('[%d/%d][%d/%d], loss %.4f, lr %.6f, time %.2f' \
+               % (epoch, cfg.epochs, i, epoch_size, loss, optimizer.param_groups[0]['lr'], batch_time.val))
 
         cfg.TRAIN.ITERS += 1
 
