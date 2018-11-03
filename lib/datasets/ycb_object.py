@@ -31,7 +31,7 @@ class YCBObject(data.Dataset, datasets.imdb):
                          '051_large_clamp', '052_extra_large_clamp', '061_foam_brick')
         self._num_classes_all = len(self._classes_all)
         self._class_colors_all = [(255, 255, 255), (255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (255, 0, 255), (0, 255, 255), \
-                              (128, 0, 0), (0, 128, 0), (0, 0, 128), (128, 128, 0), (128, 0, 128), (0, 128, 128), \
+                              (0, 0, 128), (0, 128, 0), (128, 0, 0), (128, 128, 0), (128, 0, 128), (0, 128, 128), \
                               (64, 0, 0), (0, 64, 0), (0, 0, 64), (64, 64, 0), (64, 0, 64), (0, 64, 64), 
                               (192, 0, 0), (0, 192, 0), (0, 0, 192)]
         self._symmetry_all = np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]).astype(np.float32)
@@ -110,6 +110,7 @@ class YCBObject(data.Dataset, datasets.imdb):
         filename = self._backgrounds[ind]
         background = cv2.imread(filename, cv2.IMREAD_UNCHANGED)
         try:
+            '''
             # randomly crop a region as background
             bw = background.shape[1]
             bh = background.shape[0]
@@ -118,6 +119,7 @@ class YCBObject(data.Dataset, datasets.imdb):
             x2 = npr.randint(int(2*bw/3), bw)
             y2 = npr.randint(int(2*bh/3), bh)
             background = background[y1:y2, x1:x2]
+            '''
             background = cv2.resize(background, (self._width, self._height), interpolation=cv2.INTER_LINEAR)
         except:
             background = np.zeros((self._height, self._width, 3), dtype=np.uint8)
@@ -145,10 +147,10 @@ class YCBObject(data.Dataset, datasets.imdb):
         im = background
 
         # chromatic transform
-        if cfg.TRAIN.CHROMATIC and cfg.MODE == 'TRAIN':
+        if cfg.TRAIN.CHROMATIC and cfg.MODE == 'TRAIN' and np.random.rand(1) > 0.1:
             im = chromatic_transform(im)
 
-        if cfg.TRAIN.ADD_NOISE and cfg.MODE == 'TRAIN':
+        if cfg.TRAIN.ADD_NOISE and cfg.MODE == 'TRAIN' and np.random.rand(1) > 0.1:
             im = add_noise(im)
 
         im = im.astype(np.float32)
