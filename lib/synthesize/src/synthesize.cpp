@@ -273,7 +273,7 @@ void Synthesizer::initializeBuffers(int model_index, aiMesh* assimpMesh, std::st
 
     std::vector<float2> texCoords2(assimpMesh->mNumVertices);
     for (std::size_t i = 0; i < assimpMesh->mNumVertices; ++i)
-      texCoords2[i] = make_float2(assimpMesh->mTextureCoords[0][i].x,1.0 - assimpMesh->mTextureCoords[0][i].y);
+      texCoords2[i] = make_float2(assimpMesh->mTextureCoords[0][i].x, 1.0 - assimpMesh->mTextureCoords[0][i].y);
     texCoords.Upload(texCoords2.data(),assimpMesh->mNumVertices*sizeof(float)*2);
   }
   else

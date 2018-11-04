@@ -1,4 +1,4 @@
- #!/bin/bash
+#!/bin/bash
 
 set -x
 set -e
@@ -13,7 +13,7 @@ echo Logging output to "$LOG"
 
 time ./tools/test_net.py --gpu 0 \
   --network posecnn \
-  --pretrained output/ycb_object/ycb_object_train/vgg16_ycb_object_pose_epoch_8.checkpoint.pth \
+  --pretrained output/ycb_object/ycb_object_train/vgg16_ycb_object_labeling_epoch_3.checkpoint.pth \
   --dataset ycb_object_test \
   --cfg experiments/cfgs/ycb_object_subset.yml \
   --cad data/YCB_Video/models.txt \
