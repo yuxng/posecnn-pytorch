@@ -26,6 +26,7 @@ If you find PoseCNN useful in your research, please consider citing:
 ### Installation
 
 1. Install [PyTorch](https://pytorch.org/).
+   git submodule update --init --recursive
 
 2. Compile the new layers under $ROOT/lib/layers we introduce in PoseCNN.
     ```Shell

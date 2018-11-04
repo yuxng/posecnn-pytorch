@@ -20,5 +20,8 @@ this_dir = osp.dirname(__file__)
 lib_path = osp.join(this_dir, '..', 'lib')
 add_path(lib_path)
 
+lib_path = osp.join(this_dir, '..', 'ycb_render')
+add_path(lib_path)
+
 lib_path = osp.join(this_dir, '..', 'lib', 'synthesize', 'build')
 add_path(lib_path)
