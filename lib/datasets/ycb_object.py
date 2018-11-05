@@ -15,6 +15,7 @@ import datasets
 from fcn.config import cfg
 from utils.blob import pad_im, chromatic_transform, add_noise
 from transforms3d.quaternions import mat2quat, quat2mat
+from transforms3d.euler import euler2quat
 
 class YCBObject(data.Dataset, datasets.imdb):
     def __init__(self, image_set, ycb_object_path = None):
@@ -94,8 +95,11 @@ class YCBObject(data.Dataset, datasets.imdb):
             cls = int(cls_indexes[i])
             if self.pose_indexes[cls] >= len(self.pose_lists[cls]):
                 self.pose_indexes[cls] = 0
-                self.pose_lists[cls] = np.random.permutation(np.arange(len(self.quaternions)))
-            qt[3:] = self.quaternions[self.pose_lists[cls][self.pose_indexes[cls]]]
+                self.pose_lists[cls] = np.random.permutation(np.arange(len(self.eulers)))
+            roll = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][0] + 15 * np.random.randn()
+            pitch = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][1] + 15 * np.random.randn()
+            yaw = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][2] + 15 * np.random.randn()
+            qt[3:] = euler2quat(roll * math.pi / 180.0, pitch * math.pi / 180.0, yaw * math.pi / 180.0)
             self.pose_indexes[cls] += 1
             # translation
             qt[0] = np.random.uniform(-0.2, 0.2)

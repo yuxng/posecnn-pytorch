@@ -11,7 +11,6 @@ import numpy as np
 import datasets
 import cPickle
 import math
-from transforms3d.euler import euler2quat
 
 class imdb(object):
     """Image database."""
@@ -48,15 +47,14 @@ class imdb(object):
 
     def _build_uniform_poses(self):
 
-        self.quaternions = []
+        self.eulers = []
         for roll in range(0, 360, 15):
             for pitch in range(0, 360, 15):
                 for yaw in range(0, 360, 15):
-                    qt = euler2quat(roll * math.pi / 180.0, pitch * math.pi / 180.0, yaw * math.pi / 180.0)
-                    self.quaternions.append(qt)
+                    self.eulers.append([roll, pitch, yaw])
 
         # sample indexes
-        num_poses = len(self.quaternions)
+        num_poses = len(self.eulers)
         num_classes = self.num_classes - 1 # no background
         self.pose_indexes = np.zeros((num_classes, ), dtype=np.int32)
         self.pose_lists = []
