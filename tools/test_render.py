@@ -126,7 +126,7 @@ if __name__ == '__main__':
         ax.set_title('color') 
 
         ax = fig.add_subplot(1, 3, 2)
-        plt.imshow(im_syn)
+        plt.imshow(im_syn[:,:,(2, 1, 0)])
         ax.set_title('render')
 
         ax = fig.add_subplot(1, 3, 3)
