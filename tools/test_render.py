@@ -58,6 +58,7 @@ if __name__ == '__main__':
     filename = os.path.join(root, 'data', seq_id, '000001-meta.mat')
     metadata = scipy.io.loadmat(filename)
     cls_indexes = metadata['cls_indexes'].flatten()
+    num_classes = len(cls_indexes)
     intrinsic_matrix = metadata['intrinsic_matrix']
 
     obj_paths = [
@@ -86,6 +87,7 @@ if __name__ == '__main__':
         # load meta data
         filename = os.path.join(root, 'data', seq_id, '{:06d}-meta.mat'.format(i+1))
         meta_data = scipy.io.loadmat(filename)
+        cls_indexes = np.arange(num_classes)
 
         # prepare data
         poses = meta_data['poses']
@@ -104,7 +106,7 @@ if __name__ == '__main__':
         print poses_all
         renderer.set_poses(poses_all)
         renderer.set_light_pos([0, 0, 0])
-        frame = renderer.render()
+        frame = renderer.render(cls_indexes)
         im_syn = frame[0][:, :, :3] * 255
         im_syn = np.clip(im_syn, 0, 255)
         im_syn = im_syn.astype(np.uint8)

@@ -10,6 +10,8 @@ import os.path as osp
 import numpy as np
 import datasets
 import cPickle
+import math
+from transforms3d.euler import euler2quat
 
 class imdb(object):
     """Image database."""
@@ -42,6 +44,25 @@ class imdb(object):
         if not os.path.exists(cache_path):
             os.makedirs(cache_path)
         return cache_path
+
+
+    def _build_uniform_poses(self):
+
+        self.quaternions = []
+        for roll in range(0, 360, 15):
+            for pitch in range(0, 360, 15):
+                for yaw in range(0, 360, 15):
+                    qt = euler2quat(roll * math.pi / 180.0, pitch * math.pi / 180.0, yaw * math.pi / 180.0)
+                    self.quaternions.append(qt)
+
+        # sample indexes
+        num_poses = len(self.quaternions)
+        num_classes = self.num_classes - 1 # no background
+        self.pose_indexes = np.zeros((num_classes, ), dtype=np.int32)
+        self.pose_lists = []
+        for i in range(num_classes):
+            self.pose_lists.append(np.random.permutation(np.arange(num_poses)))
+
 
     def _build_background_images(self):
 

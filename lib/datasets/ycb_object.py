@@ -23,6 +23,7 @@ class YCBObject(data.Dataset, datasets.imdb):
         self._image_set = image_set
         self._ycb_object_path = self._get_default_path() if ycb_object_path is None \
                             else ycb_object_path
+        self.root_path = self._ycb_object_path
 
         # define all the classes
         self._classes_all = ('__background__', '002_master_chef_can', '003_cracker_box', '004_sugar_box', '005_tomato_soup_can', '006_mustard_bottle', \
@@ -51,9 +52,15 @@ class YCBObject(data.Dataset, datasets.imdb):
         self._extents = self._extents_all[cfg.TRAIN.CLASSES]
         self._points, self._points_all, self._point_blob = self._load_object_points()
 
+        # 3D model paths
+        self.model_mesh_paths = ['{}/models/{}/textured_simple.obj'.format(self._ycb_object_path, cls) for cls in self._classes[1:]]
+        self.model_texture_paths = ['{}/models/{}/texture_map.png'.format(self._ycb_object_path, cls) for cls in self._classes[1:]]
+        self.model_colors = [np.array(self._class_colors_all[i]) / 255.0 for i in cfg.TRAIN.CLASSES[1:]]
+
         self._class_to_ind = dict(zip(self._classes, xrange(self._num_classes)))
         self._size = cfg.TRAIN.SYNNUM
         self._build_background_images()
+        self._build_uniform_poses()
 
         assert os.path.exists(self._ycb_object_path), \
                 'ycb_object path does not exist: {}'.format(self._ycb_object_path)
@@ -61,56 +68,70 @@ class YCBObject(data.Dataset, datasets.imdb):
 
     def _render_item(self):
 
+        height = cfg.TRAIN.SYN_HEIGHT
+        width = cfg.TRAIN.SYN_WIDTH
         fx = self._intrinsic_matrix[0, 0]
         fy = self._intrinsic_matrix[1, 1]
         px = self._intrinsic_matrix[0, 2]
         py = self._intrinsic_matrix[1, 2]
         zfar = 6.0
         znear = 0.25
-        if cfg.TRAIN.ITERS % 100 == 0:
-            is_display = 1
+
+        # sample objects
+        if cfg.TRAIN.SYN_SAMPLE_OBJECT:
+            num = np.random.randint(cfg.TRAIN.SYN_MIN_OBJECT, cfg.TRAIN.SYN_MAX_OBJECT+1)
+            perm = np.random.permutation(np.arange(self.num_classes-1))
+            cls_indexes = perm[:num]
         else:
-            is_display = 0
+            num = self.num_classes - 1
+            cls_indexes = np.arrage(num)
 
-        parameters = np.zeros((17, ), dtype=np.float32)
-        parameters[0] = self._width
-        parameters[1] = self._height
-        parameters[2] = fx
-        parameters[3] = fy
-        parameters[4] = px
-        parameters[5] = py
-        parameters[6] = znear
-        parameters[7] = zfar
-        parameters[8] = cfg.TRAIN.SYN_TNEAR
-        parameters[9] = cfg.TRAIN.SYN_TFAR
-        parameters[10] = cfg.TRAIN.SYN_MIN_OBJECT
-        parameters[11] = cfg.TRAIN.SYN_MAX_OBJECT
-        parameters[12] = cfg.TRAIN.SYN_STD_ROTATION
-        parameters[13] = cfg.TRAIN.SYN_STD_TRANSLATION
-        parameters[14] = cfg.TRAIN.SYN_SAMPLE_OBJECT
-        parameters[15] = cfg.TRAIN.SYN_SAMPLE_POSE
-        parameters[16] = is_display
+        # sample poses
+        poses_all = []
+        for i in range(num):
+            qt = np.zeros((7, ), dtype=np.float32)
+            # rotation
+            cls = int(cls_indexes[i])
+            if self.pose_indexes[cls] >= len(self.pose_lists[cls]):
+                self.pose_indexes[cls] = 0
+                self.pose_lists[cls] = np.random.permutation(np.arange(len(self.quaternions)))
+            qt[3:] = self.quaternions[self.pose_lists[cls][self.pose_indexes[cls]]]
+            self.pose_indexes[cls] += 1
+            # translation
+            qt[0] = np.random.uniform(-0.2, 0.2)
+            qt[1] = np.random.uniform(-0.2, 0.2)
+            qt[2] = np.random.uniform(cfg.TRAIN.SYN_TNEAR, cfg.TRAIN.SYN_TFAR)
+            poses_all.append(qt)
+        cfg.renderer.set_poses(poses_all)
 
-        # render image
-        im = np.zeros((self._height, self._width, 3), dtype=np.float32)
-        vertmap = np.zeros((self._height, self._width, 3), dtype=np.float32)
-        class_indexes = np.zeros((self.num_classes, ), dtype=np.float32)
-        poses = np.zeros((self.num_classes, 7), dtype=np.float32)
-        centers = np.zeros((self.num_classes, 2), dtype=np.float32)
-        cfg.synthesizer.render_python(parameters, im, vertmap, class_indexes, poses, centers)
+        # sample lighting
+        cfg.renderer.set_light_pos(np.random.uniform(-0.5, 0.5, 3))
 
-        index = np.where(class_indexes > 0)[0]
-        class_indexes = class_indexes[index]
-        poses = poses[index, :]
-        centers = centers[index, :]
-        im_label = np.round(vertmap[:, :, 0])
+        intensity = np.random.uniform(0.8, 2)
+        light_color = intensity * np.random.uniform(0.9, 1.1, 3)
+        cfg.renderer.set_light_color(light_color)
+            
+        # rendering
+        cfg.renderer.set_projection_matrix(width, height, fx, fy, px, py, znear, zfar)
+        frame = cfg.renderer.render(cls_indexes)
+        im = frame[0][:, :, :3] * 255
+        im = im.astype(np.uint8)
+
+        im_label = frame[1][:, :, :3] * 255
+        im_label = im_label.astype(np.uint8)
+        im_label = self.process_label_image(im_label)
+
+        centers = np.zeros((num, 2), dtype=np.float32)
+        rcenters = cfg.renderer.get_centers()
+        for i in range(num):
+            centers[i, 0] = rcenters[i][1] * width
+            centers[i, 1] = rcenters[i][0] * height
 
         # add background to the image
         ind = np.random.randint(len(self._backgrounds), size=1)[0]
         filename = self._backgrounds[ind]
         background = cv2.imread(filename, cv2.IMREAD_UNCHANGED)
         try:
-            '''
             # randomly crop a region as background
             bw = background.shape[1]
             bh = background.shape[0]
@@ -119,7 +140,6 @@ class YCBObject(data.Dataset, datasets.imdb):
             x2 = npr.randint(int(2*bw/3), bw)
             y2 = npr.randint(int(2*bh/3), bh)
             background = background[y1:y2, x1:x2]
-            '''
             background = cv2.resize(background, (self._width, self._height), interpolation=cv2.INTER_LINEAR)
         except:
             background = np.zeros((self._height, self._width, 3), dtype=np.uint8)
@@ -135,7 +155,7 @@ class YCBObject(data.Dataset, datasets.imdb):
         im = im.astype(np.uint8)
         margin = 10
         for i in range(centers.shape[0]):
-            I = np.where(im_label == class_indexes[i])
+            I = np.where(im_label == cls_indexes[i]+1)
             if len(I[0]) > 0:
                 y1 = np.max((np.round(np.min(I[0])) - margin, 0))
                 x1 = np.max((np.round(np.min(I[1])) - margin, 0))
@@ -168,18 +188,17 @@ class YCBObject(data.Dataset, datasets.imdb):
                 label_blob[0, I[0], I[1]] = 0.0
 
         # poses and boxes
-        num = poses.shape[0]
         pose_blob = np.zeros((self.num_classes, 9), dtype=np.float32)
         gt_boxes = np.zeros((self.num_classes, 5), dtype=np.float32)
         for i in xrange(num):
-            cls = int(class_indexes[i])
+            cls = int(cls_indexes[i])+1
             pose_blob[i, 0] = 1
             pose_blob[i, 1] = cls
-            qt = poses[i, :4]
+            qt = poses_all[i][3:]
             if qt[0] < 0:
                 qt = -1 * qt
             pose_blob[i, 2:6] = qt
-            pose_blob[i, 6:] = poses[i, 4:]
+            pose_blob[i, 6:] = poses_all[i][:3]
 
             # compute box
             x3d = np.ones((4, self._points_all.shape[1]), dtype=np.float32)
@@ -215,7 +234,7 @@ class YCBObject(data.Dataset, datasets.imdb):
 
         # vertex regression target
         if cfg.TRAIN.VERTEX_REG:
-            vertex_targets, vertex_weights = self._generate_vertex_targets(im_label, class_indexes, centers, poses, classes, self.num_classes)
+            vertex_targets, vertex_weights = self._generate_vertex_targets(im_label, cls_indexes+1, centers, poses_all, classes, self.num_classes)
         else:
             vertex_targets = []
             vertex_weights = []
@@ -265,10 +284,7 @@ class YCBObject(data.Dataset, datasets.imdb):
             if len(x) > 0 and len(ind) > 0:
                 c[0] = center[ind, 0]
                 c[1] = center[ind, 1]
-                if len(poses.shape) == 3:
-                    z = poses[2, 3, ind]
-                else:
-                    z = poses[ind, -1]
+                z = poses[int(ind)][2]
                 R = np.tile(c, (1, len(x))) - np.vstack((x, y))
                 # compute the norm
                 N = np.linalg.norm(R, axis=0) + 1e-10
@@ -347,3 +363,22 @@ class YCBObject(data.Dataset, datasets.imdb):
             im_label[I[0], I[1], :] = self._class_colors[i]
 
         return im_label
+
+
+    def process_label_image(self, label_image):
+        """
+        change label image to label index
+        """
+        height = label_image.shape[0]
+        width = label_image.shape[1]
+        labels = np.zeros((height, width), dtype=np.int32)
+
+        # label image is in BGR order
+        index = label_image[:,:,2] + 256*label_image[:,:,1] + 256*256*label_image[:,:,0]
+        for i in xrange(1, len(self._class_colors)):
+            color = self._class_colors[i]
+            ind = color[0] + 256*color[1] + 256*256*color[2]
+            I = np.where(index == ind)
+            labels[I[0], I[1]] = i
+
+        return labels

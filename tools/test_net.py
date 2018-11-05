@@ -26,7 +26,7 @@ from fcn.train_test import test
 from fcn.config import cfg, cfg_from_file, get_output_dir, write_selected_class_file
 from datasets.factory import get_dataset
 import networks
-import libsynthesizer
+from ycb_renderer import YCBRenderer
 
 def parse_args():
     """
@@ -102,13 +102,11 @@ if __name__ == '__main__':
         os.makedirs(output_dir)
 
     if cfg.TEST.SYNTHESIZE:
-        # select a subset
-        classes = np.array(cfg.TRAIN.CLASSES[1:]) - 1
-        cad_name = write_selected_class_file(args.cad_name, classes)
-        pose_name = write_selected_class_file(args.pose_name, classes)
-        cfg.synthesizer = libsynthesizer.Synthesizer(cad_name, pose_name)
-        cfg.synthesizer.setup(cfg.TRAIN.SYN_WIDTH, cfg.TRAIN.SYN_HEIGHT)
-        cfg.synthesizer.init_rand(random.randint(1,1200))
+        print 'loading 3D models'
+        cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, render_marker=True)
+        cfg.renderer.load_objects(dataset.model_mesh_paths, dataset.model_texture_paths, dataset.model_colors)
+        cfg.renderer.set_camera_default()
+        print dataset.model_mesh_paths
 
     # prepare network
     if args.pretrained:
