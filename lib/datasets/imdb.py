@@ -11,6 +11,7 @@ import numpy as np
 import datasets
 import cPickle
 import math
+from fcn.config import cfg
 
 class imdb(object):
     """Image database."""
@@ -64,65 +65,58 @@ class imdb(object):
 
     def _build_background_images(self):
 
-        cache_file = os.path.join(self.cache_path, 'backgrounds.pkl')
-        if os.path.exists(cache_file):
-            with open(cache_file, 'rb') as fid:
-                self._backgrounds = cPickle.load(fid)
-            print '{} backgrounds loaded from {}'.format(self._name, cache_file)
-            return
-
         backgrounds = []
 
-        '''
-        # SUN 2012
-        root = os.path.join(self.cache_path, '../SUN2012/data/Images')
-        subdirs = os.listdir(root)
-
-        for i in xrange(len(subdirs)):
-            subdir = subdirs[i]
-            names = os.listdir(os.path.join(root, subdir))
-
-            for j in xrange(len(names)):
-                name = names[j]
-                if os.path.isdir(os.path.join(root, subdir, name)):
-                    files = os.listdir(os.path.join(root, subdir, name))
-                    for k in range(len(files)):
-                        if os.path.isdir(os.path.join(root, subdir, name, files[k])):
-                            filenames = os.listdir(os.path.join(root, subdir, name, files[k]))
-                            for l in range(len(filenames)):
-                               filename = os.path.join(root, subdir, name, files[k], filenames[l])
-                               backgrounds.append(filename)
-                        else:
-                            filename = os.path.join(root, subdir, name, files[k])
-                            backgrounds.append(filename)
-                else:
-                    filename = os.path.join(root, subdir, name)
-                    backgrounds.append(filename)
-
-        # ObjectNet3D
-        objectnet3d = os.path.join(self.cache_path, '../ObjectNet3D/data')
-        files = os.listdir(objectnet3d)
-        for i in range(len(files)):
-            filename = os.path.join(objectnet3d, files[i])
-            backgrounds.append(filename)
-
-        # AllenCenter
-        allencenter = os.path.join(self.cache_path, '../AllenCenter/data')
-        subdirs = os.listdir(allencenter)
-        for i in xrange(len(subdirs)):
-            subdir = subdirs[i]
-            files = os.listdir(os.path.join(allencenter, subdir))
-            for j in range(len(files)):
-                filename = os.path.join(allencenter, subdir, files[j])
+        if cfg.TRAIN.SYN_BACKGROUND_SPECIFIC:
+            # Kinect
+            kinect = os.path.join(self.cache_path, '../Kinect')
+            files = os.listdir(kinect)
+            for i in range(len(files)):
+                filename = os.path.join(kinect, files[i])
                 backgrounds.append(filename)
-        '''
+        else:
 
-        # Kinect
-        kinect = os.path.join(self.cache_path, '../Kinect')
-        files = os.listdir(kinect)
-        for i in range(len(files)):
-            filename = os.path.join(kinect, files[i])
-            backgrounds.append(filename)
+            # SUN 2012
+            root = os.path.join(self.cache_path, '../SUN2012/data/Images')
+            subdirs = os.listdir(root)
+
+            for i in xrange(len(subdirs)):
+                subdir = subdirs[i]
+                names = os.listdir(os.path.join(root, subdir))
+
+                for j in xrange(len(names)):
+                    name = names[j]
+                    if os.path.isdir(os.path.join(root, subdir, name)):
+                        files = os.listdir(os.path.join(root, subdir, name))
+                        for k in range(len(files)):
+                            if os.path.isdir(os.path.join(root, subdir, name, files[k])):
+                                filenames = os.listdir(os.path.join(root, subdir, name, files[k]))
+                                for l in range(len(filenames)):
+                                    filename = os.path.join(root, subdir, name, files[k], filenames[l])
+                                    backgrounds.append(filename)
+                            else:
+                                filename = os.path.join(root, subdir, name, files[k])
+                                backgrounds.append(filename)
+                    else:
+                        filename = os.path.join(root, subdir, name)
+                        backgrounds.append(filename)
+
+            # ObjectNet3D
+            objectnet3d = os.path.join(self.cache_path, '../ObjectNet3D/data')
+            files = os.listdir(objectnet3d)
+            for i in range(len(files)):
+                filename = os.path.join(objectnet3d, files[i])
+                backgrounds.append(filename)
+
+            # AllenCenter
+            allencenter = os.path.join(self.cache_path, '../AllenCenter/data')
+            subdirs = os.listdir(allencenter)
+            for i in xrange(len(subdirs)):
+                subdir = subdirs[i]
+                files = os.listdir(os.path.join(allencenter, subdir))
+                for j in range(len(files)):
+                    filename = os.path.join(allencenter, subdir, files[j])
+                    backgrounds.append(filename)
 
         for i in xrange(len(backgrounds)):
             if not os.path.isfile(backgrounds[i]):
@@ -130,7 +124,3 @@ class imdb(object):
 
         self._backgrounds = backgrounds
         print 'build background images finished, {:d} images'.format(len(backgrounds))
-
-        with open(cache_file, 'wb') as fid:
-            cPickle.dump(backgrounds, fid, cPickle.HIGHEST_PROTOCOL)
-        print 'wrote backgrounds to {}'.format(cache_file)

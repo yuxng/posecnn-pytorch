@@ -81,9 +81,10 @@ class PoseCNN(nn.Module):
         self.features = nn.ModuleList(features)
         
         # freeze some layers
-        # for i in [0, 2, 5, 7]:
-        #    self.features[i].weight.requires_grad = False
-        #    self.features[i].bias.requires_grad = False
+        print self.features
+        for i in [0, 2, 5, 7, 10, 12, 14]:
+            self.features[i].weight.requires_grad = False
+            self.features[i].bias.requires_grad = False
 
         # self.classifier = vgg16.classifier[:-1]
 
