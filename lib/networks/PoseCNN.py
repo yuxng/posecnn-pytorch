@@ -79,6 +79,12 @@ class PoseCNN(nn.Module):
         # conv features
         features = list(vgg16.features)[:30]
         self.features = nn.ModuleList(features)
+        
+        # freeze some layers
+        for i in [0, 2, 5, 7]:
+            self.features[i].weight.requires_grad = False
+            self.features[i].bias.requires_grad = False
+
         # self.classifier = vgg16.classifier[:-1]
 
         # semantic labeling branch
