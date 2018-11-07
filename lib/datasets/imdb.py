@@ -69,11 +69,21 @@ class imdb(object):
 
         if cfg.TRAIN.SYN_BACKGROUND_SPECIFIC:
             # Kinect
-            kinect = os.path.join(self.cache_path, '../Kinect')
-            files = os.listdir(kinect)
-            for i in range(len(files)):
-                filename = os.path.join(kinect, files[i])
-                backgrounds.append(filename)
+            # kinect = os.path.join(self.cache_path, '../Kinect')
+            # files = os.listdir(kinect)
+            # for i in range(len(files)):
+            #    filename = os.path.join(kinect, files[i])
+            #    backgrounds.append(filename)
+
+            # AllenCenter
+            allencenter = os.path.join(self.cache_path, '../AllenCenter/data')
+            subdirs = os.listdir(allencenter)
+            for i in xrange(len(subdirs)):
+                subdir = subdirs[i]
+                files = os.listdir(os.path.join(allencenter, subdir))
+                for j in range(len(files)):
+                    filename = os.path.join(allencenter, subdir, files[j])
+                    backgrounds.append(filename)
         else:
 
             # SUN 2012
