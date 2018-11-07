@@ -199,11 +199,15 @@ def optimize_depths(rois, poses, points, intrinsic_matrix):
     num = rois.shape[0]
     for i in range(num):
         roi = rois[i, 2:6]
+        width = roi[2] - roi[0]
+        height = roi[3] - roi[1]
         cls = int(rois[i, 1])
 
         RT = np.zeros((3, 4), dtype=np.float32)
         RT[:3, :3] = quat2mat(poses[i, :4])
-        RT[:, 3] = poses[i, 4:]
+        RT[0, 3] = poses[i, 4] * poses[i, 6]
+        RT[1, 3] = poses[i, 5] * poses[i, 6]
+        RT[2, 3] = poses[i, 6]
 
         # extract 3D points
         x3d = np.ones((4, points.shape[1]), dtype=np.float32)
@@ -213,12 +217,15 @@ def optimize_depths(rois, poses, points, intrinsic_matrix):
 
         # optimization
         x0 = poses[i, 6]
-        res = minimize(objective_depth, x0, args=(roi, RT, x3d, intrinsic_matrix), method='nelder-mead', options={'xtol': 1e-8, 'disp': False})
+        res = minimize(objective_depth, x0, args=(width, height, RT, x3d, intrinsic_matrix), method='nelder-mead', options={'xtol': 1e-8, 'disp': False})
+        poses[i, 4] *= res.x 
+        poses[i, 5] *= res.x
         poses[i, 6] = res.x
+
     return poses
 
 
-def objective_depth(x, roi, RT, x3d, intrinsic_matrix):
+def objective_depth(x, width, height, RT, x3d, intrinsic_matrix):
 
     # project points
     RT[2, 3] = x
@@ -231,7 +238,9 @@ def objective_depth(x, roi, RT, x3d, intrinsic_matrix):
     roi_pred[1] = np.min(x2d[1, :])
     roi_pred[2] = np.max(x2d[0, :])
     roi_pred[3] = np.max(x2d[1, :])
-    return np.linalg.norm(roi_pred - roi)
+    w = roi_pred[2] - roi_pred[0]
+    h = roi_pred[3] - roi_pred[1]
+    return np.abs(w * h - width * height)
 
 
 def _get_bb3D(extent):
@@ -494,7 +503,7 @@ def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, sample, points
             for j in xrange(rois.shape[0]):
                 cls = int(rois[j, 1])
                 print classes[cls], rois[j, -1]
-                if cls > 0 and rois[j, -1] > 0.01:
+                if cls > 0 and rois[j, -1] > 0.1:
                     # extract 3D points
                     x3d = np.ones((4, points.shape[1]), dtype=np.float32)
                     x3d[0, :] = points[cls,:,0]

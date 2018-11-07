@@ -1,4 +1,5 @@
 import rospy
+import tf
 import message_filters
 import cv2
 import numpy as np
@@ -19,11 +20,15 @@ def optimize_depths(rois, poses, points, intrinsic_matrix):
     num = rois.shape[0]
     for i in range(num):
         roi = rois[i, 2:6]
+        width = roi[2] - roi[0]
+        height = roi[3] - roi[1]
         cls = int(rois[i, 1])
 
         RT = np.zeros((3, 4), dtype=np.float32)
         RT[:3, :3] = quat2mat(poses[i, :4])
-        RT[:, 3] = poses[i, 4:]
+        RT[0, 3] = poses[i, 4] * poses[i, 6]
+        RT[1, 3] = poses[i, 5] * poses[i, 6]
+        RT[2, 3] = poses[i, 6]
 
         # extract 3D points
         x3d = np.ones((4, points.shape[1]), dtype=np.float32)
@@ -33,13 +38,15 @@ def optimize_depths(rois, poses, points, intrinsic_matrix):
 
         # optimization
         x0 = poses[i, 6]
-        res = minimize(objective_depth, x0, args=(roi, RT, x3d, intrinsic_matrix), method='nelder-mead', options={'xtol': 1e-8, 'disp': False})
+        res = minimize(objective_depth, x0, args=(width, height, RT, x3d, intrinsic_matrix), method='nelder-mead', options={'xtol': 1e-8, 'disp': False})
+        poses[i, 4] *= res.x 
+        poses[i, 5] *= res.x
         poses[i, 6] = res.x
 
     return poses
 
 
-def objective_depth(x, roi, RT, x3d, intrinsic_matrix):
+def objective_depth(x, width, height, RT, x3d, intrinsic_matrix):
 
     # project points
     RT[2, 3] = x
@@ -52,7 +59,9 @@ def objective_depth(x, roi, RT, x3d, intrinsic_matrix):
     roi_pred[1] = np.min(x2d[1, :])
     roi_pred[2] = np.max(x2d[0, :])
     roi_pred[3] = np.max(x2d[1, :])
-    return np.linalg.norm(roi_pred - roi)
+    w = roi_pred[2] - roi_pred[0]
+    h = roi_pred[3] - roi_pred[1]
+    return np.abs(w * h - width * height)
 
 
 class ImageListener:
@@ -63,9 +72,11 @@ class ImageListener:
         self.dataset = dataset
         self.cv_bridge = CvBridge()
         self.count = 0
+        self.threshold_detection = 0.1
 
         # initialize a node
         rospy.init_node("image_listener")
+        self.br = tf.TransformBroadcaster()
         self.label_pub = rospy.Publisher('posecnn_label', Image, queue_size=1)
         self.pose_pub = rospy.Publisher('posecnn_pose', Image, queue_size=1)
         rgb_sub = message_filters.Subscriber('/camera/rgb/image_color', Image, queue_size=2)
@@ -91,7 +102,7 @@ class ImageListener:
 
         # run network
         im = self.cv_bridge.imgmsg_to_cv2(rgb, 'bgr8')
-        im_pose, im_label = self.test_image(im, depth_cv)
+        im_pose, im_label, rois, poses = self.test_image(im, depth_cv)
 
         # publish
         label_msg = self.cv_bridge.cv2_to_imgmsg(im_label)
@@ -105,6 +116,12 @@ class ImageListener:
         pose_msg.header.frame_id = rgb.header.frame_id
         pose_msg.encoding = 'rgb8'
         self.pose_pub.publish(pose_msg)
+
+        # poses
+        for i in range(rois.shape[0]):
+            cls = int(rois[i, 1])
+            if cls > 0 and rois[i, -1] > self.threshold_detection:
+                self.br.sendTransform(poses[i, 4:7], poses[i, :4], rospy.Time.now(), self.dataset.classes[cls], "camera_depth_optical_frame")
 
 
     def test_image(self, im_color, im_depth):
@@ -163,12 +180,12 @@ class ImageListener:
         else:
             out_label = self.net(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
             rois = np.zeros((0, 7), dtype=np.float32)
-            poses = []
+            poses = np.zeros((0, 7), dtype=np.float32)
 
         labels = out_label.detach().cpu().numpy()[0]
         im_pose, im_label = self.overlay_image(im_color, rois, poses, labels)
 
-        return im_pose, im_label
+        return im_pose, im_label, rois, poses
 
 
     def overlay_image(self, im, rois, poses, labels):
@@ -189,7 +206,7 @@ class ImageListener:
         for j in xrange(rois.shape[0]):
             cls = int(rois[j, 1])
             print classes[cls], rois[j, -1]
-            if cls > 0 and rois[j, -1] > 0.2:
+            if cls > 0 and rois[j, -1] > self.threshold_detection:
 
                 # draw roi
                 x1 = rois[j, 2]

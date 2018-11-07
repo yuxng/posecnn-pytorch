@@ -274,8 +274,8 @@ __global__ void compute_rois_kernel(const int nthreads, float* top_box, float* t
         top_pose[(roi_index + j) * 7 + 1] = 0;
         top_pose[(roi_index + j) * 7 + 2] = 0;
         top_pose[(roi_index + j) * 7 + 3] = 0;
-        top_pose[(roi_index + j) * 7 + 4] = rx * bb_distance;
-        top_pose[(roi_index + j) * 7 + 5] = ry * bb_distance;
+        top_pose[(roi_index + j) * 7 + 4] = rx;
+        top_pose[(roi_index + j) * 7 + 5] = ry;
         top_pose[(roi_index + j) * 7 + 6] = bb_distance;
       }
 
@@ -382,8 +382,8 @@ __global__ void compute_rois_kernel(const int nthreads, float* top_box, float* t
       top_pose[roi_index * 7 + 1] = 0;
       top_pose[roi_index * 7 + 2] = 0;
       top_pose[roi_index * 7 + 3] = 0;
-      top_pose[roi_index * 7 + 4] = rx * bb_distance;
-      top_pose[roi_index * 7 + 5] = ry * bb_distance;
+      top_pose[roi_index * 7 + 4] = rx;
+      top_pose[roi_index * 7 + 5] = ry;
       top_pose[roi_index * 7 + 6] = bb_distance;
     }
   }
