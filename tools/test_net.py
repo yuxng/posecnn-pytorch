@@ -89,6 +89,7 @@ if __name__ == '__main__':
     # prepare dataset
     if cfg.TEST.VISUALIZE:
         shuffle = True
+        np.random.seed()
     else:
         shuffle = False
     cfg.MODE = 'TEST'
