@@ -79,10 +79,8 @@ class ImageListener:
         self.br = tf.TransformBroadcaster()
         self.label_pub = rospy.Publisher('posecnn_label', Image, queue_size=1)
         self.pose_pub = rospy.Publisher('posecnn_pose', Image, queue_size=1)
-        #rgb_sub = message_filters.Subscriber('/camera/rgb/image_color', Image, queue_size=2)
-        #depth_sub = message_filters.Subscriber('/camera/depth_registered/image', Image, queue_size=2)
-        rgb_sub = message_filters.Subscriber('/kinect1/rgb/image_color', Image, queue_size=2)
-        depth_sub = message_filters.Subscriber('/kinect1/depth_registered/image', Image, queue_size=2)
+        rgb_sub = message_filters.Subscriber('/%s/rgb/image_color' % (cfg.TEST.ROS_CAMERA), Image, queue_size=2)
+        depth_sub = message_filters.Subscriber('/%s/depth_registered/image' % (cfg.TEST.ROS_CAMERA), Image, queue_size=2)
 
         queue_size = 1
         slop_seconds = 0.025
@@ -119,10 +117,11 @@ class ImageListener:
         self.pose_pub.publish(pose_msg)
 
         # poses
+        frame = '%s_depth_optical_frame' % (cfg.TEST.ROS_CAMERA)
         for i in range(rois.shape[0]):
             cls = int(rois[i, 1])
             if cls > 0 and rois[i, -1] > self.threshold_detection:
-                self.br.sendTransform(poses[i, 4:7], poses[i, :4], rospy.Time.now(), self.dataset.classes[cls], "kinect1_depth_optical_frame")
+                self.br.sendTransform(poses[i, 4:7], poses[i, :4], rospy.Time.now(), self.dataset.classes[cls], frame)
 
 
     def test_image(self, im_color, im_depth):

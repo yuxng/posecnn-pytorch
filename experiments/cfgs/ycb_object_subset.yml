@@ -49,3 +49,4 @@ TEST:
   SCALES_BASE: !!python/tuple [1.0]
   VISUALIZE: True
   SYNTHESIZE: True
+  ROS_CAMERA: kinect1

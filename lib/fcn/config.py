@@ -236,6 +236,7 @@ __C.TEST.GAN = False
 __C.TEST.POSE_REG = False
 __C.TEST.POSE_REFINE = False
 __C.TEST.SYNTHESIZE = False
+__C.TEST.ROS_CAMERA = 'camera'
 
 # Hough voting
 __C.TEST.HOUGH_LABEL_THRESHOLD = 100
