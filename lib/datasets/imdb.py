@@ -69,15 +69,16 @@ class imdb(object):
 
         if cfg.TRAIN.SYN_BACKGROUND_SPECIFIC:
             # NVIDIA
-            nvidia = os.path.join(self.cache_path, '../NVIDIA/data')
-            subdirs = os.listdir(nvidia)
+            allencenter = os.path.join(self.cache_path, '../AllenCenter/data')
+            subdirs = os.listdir(allencenter)
             for i in xrange(len(subdirs)):
                 subdir = subdirs[i]
-                files = os.listdir(os.path.join(nvidia, subdir))
+                files = os.listdir(os.path.join(allencenter, subdir))
                 for j in range(len(files)):
-                    filename = os.path.join(nvidia, subdir, files[j])
+                    filename = os.path.join(allencenter, subdir, files[j])
                     backgrounds.append(filename)
         else:
+
             # SUN 2012
             root = os.path.join(self.cache_path, '../SUN2012/data/Images')
             subdirs = os.listdir(root)
