@@ -26,39 +26,21 @@ If you find PoseCNN useful in your research, please consider citing:
 ### Installation
 
 1. Install [PyTorch](https://pytorch.org/).
-   git submodule update --init --recursive
 
-2. Compile the new layers under $ROOT/lib/layers we introduce in PoseCNN.
+2. Initialize all submodules
+   ```Shell
+   git submodule update --init --recursive
+   ```
+
+3. Compile the new layers under $ROOT/lib/layers we introduce in PoseCNN.
     ```Shell
     cd $ROOT/lib/layers
     python setup.py install
     ```
 
-3. Download the VGG16 weights from [here](https://drive.google.com/file/d/1tTd64s1zNnjONlXvTFDZAf4E68Pupc_S/view?usp=sharing) (528M). Put the weight file to $ROOT/data/checkpoints.
+4. Download the VGG16 weights from [here](https://drive.google.com/file/d/1tTd64s1zNnjONlXvTFDZAf4E68Pupc_S/view?usp=sharing) (528M). Put the weight file to $ROOT/data/checkpoints.
 
-4. Compile lib/synthesize with cmake (optional). This package contains a few useful tools such as generating synthetic images for training and ICP.
-
-   Install dependencies:
-   - [Pangolin](https://github.com/stevenlovegrove/Pangolin)
-   - [Eigen](https://eigen.tuxfamily.org)
-   - [boost](https://www.boost.org/)
-   - [Sophus](https://github.com/strasdat/Sophus)
-   - [nanoflann](https://github.com/jlblancoc/nanoflann)
-   - libsuitesparse-dev
-
-   We use Boost.Python library to link tensorflow with the c++ code. Make sure you have it in your Boost. The tested Boost version is 1.66.0.
-
-   Change hard coded pathes in CMakeLists.txt.
-
-   The Pangolin branch I use: c2a6ef524401945b493f14f8b5b8aa76cc7d71a9
-
-    ```Shell
-    cd $ROOT/lib/synthesize
-    mkdir build
-    cd build
-    cmake ..
-    make
-    ```
+5. Compile the ycb_render in $ROOT/ycb_render
 
 ### Required environment
 - Ubuntu 16.04
@@ -99,4 +81,6 @@ If you find PoseCNN useful in your research, please consider citing:
     ```Shell
     source /opt/ros/kinetic/setup.bash
     roslaunch openni_launch openni.launch depth_registration:=true
+    rosrun rviz rviz
+    ./experiments/scripts/experiments/scripts/ros_ycb_object_test_subset.sh $GPU_ID
     ```
