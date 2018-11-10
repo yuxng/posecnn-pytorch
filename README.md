@@ -79,6 +79,7 @@ If you find PoseCNN useful in your research, please consider citing:
 
 ### Running with ROS
     ```Shell
+    export ROS_MASTER_URI=http://palladino:11311/
     source /opt/ros/kinetic/setup.bash
     roslaunch openni_launch openni.launch depth_registration:=true
     rosrun rviz rviz
