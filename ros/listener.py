@@ -148,7 +148,7 @@ class ImageListener:
 
         # compute the 3D points
         X = np.multiply(np.tile(depth.reshape(1, width*height), (3, 1)), R)
-        return np.array(X)
+        return np.array(X).transpose()
 
 
     def test_image(self, im_color, im_depth):
