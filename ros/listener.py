@@ -128,16 +128,17 @@ class ImageListener:
         for i in range(rois.shape[0]):
             cls = int(rois[i, 1])
             if cls > 0 and rois[i, -1] > self.threshold_detection:
-                self.br.sendTransform(poses[i, 4:7], poses[i, :4], rospy.Time.now(), self.dataset.classes[cls], frame)
+                quat = [poses[i, 1], poses[i, 2], poses[i, 3], poses[i, 0]]
+                self.br.sendTransform(poses[i, 4:7], quat, rospy.Time.now(), self.dataset.classes[cls], frame)
 
                 # create pose msg
                 msg = PoseStamped()
                 msg.header.stamp = rospy.Time.now()
                 msg.header.frame_id = frame
-                msg.pose.orientation.x = poses[i, 0]
-                msg.pose.orientation.y = poses[i, 1]
-                msg.pose.orientation.z = poses[i, 2]
-                msg.pose.orientation.w = poses[i, 3]
+                msg.pose.orientation.x = poses[i, 1]
+                msg.pose.orientation.y = poses[i, 2]
+                msg.pose.orientation.z = poses[i, 3]
+                msg.pose.orientation.w = poses[i, 0]
                 msg.pose.position.x = poses[i, 4]
                 msg.pose.position.y = poses[i, 5]
                 msg.pose.position.z = poses[i, 6]
