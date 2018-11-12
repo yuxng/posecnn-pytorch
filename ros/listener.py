@@ -13,7 +13,7 @@ from sensor_msgs.msg import Image
 from transforms3d.quaternions import mat2quat, quat2mat, qmult
 from scipy.optimize import minimize
 from utils.blob import pad_im, chromatic_transform, add_noise
-
+from geometry_msgs.msg import PoseStamped
 
 def optimize_depths(rois, poses, points, intrinsic_matrix):
 
@@ -82,6 +82,11 @@ class ImageListener:
         rgb_sub = message_filters.Subscriber('/%s/rgb/image_color' % (cfg.TEST.ROS_CAMERA), Image, queue_size=2)
         depth_sub = message_filters.Subscriber('/%s/depth_registered/image' % (cfg.TEST.ROS_CAMERA), Image, queue_size=2)
 
+        # Create publisher for each known object class
+        self.pubs = []
+        for cls in self.dataset.classes:
+            self.pubs.append(rospy.Publisher("/objects/prior_pose/" + cls, PoseStamped, queue_size=1)
+
         queue_size = 1
         slop_seconds = 0.1
         ts = message_filters.ApproximateTimeSynchronizer([rgb_sub, depth_sub], queue_size, slop_seconds)
@@ -123,6 +128,12 @@ class ImageListener:
             cls = int(rois[i, 1])
             if cls > 0 and rois[i, -1] > self.threshold_detection:
                 self.br.sendTransform(poses[i, 4:7], poses[i, :4], rospy.Time.now(), self.dataset.classes[cls], frame)
+
+            # Look up correct topic
+            # create msg
+            msg = PoseStamped()
+            pub = self.pubs[cls]
+            pub.publish(msg)
 
 
     # backproject pixels into 3D points in camera's coordinate system
