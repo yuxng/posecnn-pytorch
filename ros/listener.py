@@ -83,7 +83,7 @@ class ImageListener:
         depth_sub = message_filters.Subscriber('/%s/depth_registered/image' % (cfg.TEST.ROS_CAMERA), Image, queue_size=2)
 
         queue_size = 1
-        slop_seconds = 0.025
+        slop_seconds = 0.1
         ts = message_filters.ApproximateTimeSynchronizer([rgb_sub, depth_sub], queue_size, slop_seconds)
         ts.registerCallback(self.callback)
 
