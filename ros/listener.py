@@ -82,10 +82,11 @@ class ImageListener:
         rgb_sub = message_filters.Subscriber('/%s/rgb/image_color' % (cfg.TEST.ROS_CAMERA), Image, queue_size=2)
         depth_sub = message_filters.Subscriber('/%s/depth_registered/image' % (cfg.TEST.ROS_CAMERA), Image, queue_size=2)
 
-        # Create publisher for each known object class
+        # create pose publisher for each known object class
         self.pubs = []
-        for cls in self.dataset.classes:
-            self.pubs.append(rospy.Publisher("/objects/prior_pose/" + cls, PoseStamped, queue_size=1)
+        for i in range(1, self.dataset.num_classes):
+            cls = self.dataset.classes[i]
+            self.pubs.append(rospy.Publisher("/objects/prior_pose/" + cls, PoseStamped, queue_size=1))
 
         queue_size = 1
         slop_seconds = 0.1
@@ -129,11 +130,19 @@ class ImageListener:
             if cls > 0 and rois[i, -1] > self.threshold_detection:
                 self.br.sendTransform(poses[i, 4:7], poses[i, :4], rospy.Time.now(), self.dataset.classes[cls], frame)
 
-            # Look up correct topic
-            # create msg
-            msg = PoseStamped()
-            pub = self.pubs[cls]
-            pub.publish(msg)
+                # create pose msg
+                msg = PoseStamped()
+                msg.header.stamp = rospy.Time.now()
+                msg.header.frame_id = frame
+                msg.pose.orientation.x = poses[i, 0]
+                msg.pose.orientation.y = poses[i, 1]
+                msg.pose.orientation.z = poses[i, 2]
+                msg.pose.orientation.w = poses[i, 3]
+                msg.pose.position.x = poses[i, 4]
+                msg.pose.position.y = poses[i, 5]
+                msg.pose.position.z = poses[i, 6]
+                pub = self.pubs[cls - 1]
+                pub.publish(msg)
 
 
     # backproject pixels into 3D points in camera's coordinate system
