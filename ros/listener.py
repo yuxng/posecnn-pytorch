@@ -85,7 +85,7 @@ class ImageListener:
         # create pose publisher for each known object class
         self.pubs = []
         for i in range(1, self.dataset.num_classes):
-            cls = self.dataset.classes[i]
+            cls = self.dataset.classes[i][4:]
             self.pubs.append(rospy.Publisher("/objects/prior_pose/" + cls, PoseStamped, queue_size=1))
 
         queue_size = 1
