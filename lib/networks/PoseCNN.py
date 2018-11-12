@@ -16,7 +16,7 @@ __all__ = [
     'posecnn',
 ]
 
-vgg16 = models.vgg16(pretrained=True)
+vgg16 = models.vgg16(pretrained=False)
 
 def conv(in_planes, out_planes, kernel_size=3, stride=1, relu=True):
     if relu:

@@ -115,22 +115,32 @@ if __name__ == '__main__':
         im_label = np.clip(im_label, 0, 255)
         im_label = im_label.astype(np.uint8)
 
+        pcloud = frame[2].reshape((-1, 3))
+        index = np.where(pcloud[:, 0] != 0)[0]
+        perm = np.random.permutation(np.arange(len(index)))
+        index = index[perm[:3000]]
+        pcloud = pcloud[index, :]
+
         # show images
         import matplotlib.pyplot as plt
+        from mpl_toolkits.mplot3d import Axes3D
         fig = plt.figure()
-        ax = fig.add_subplot(1, 3, 1)
+        ax = fig.add_subplot(2, 2, 1)
         filename = os.path.join(root, 'data', seq_id, '{:06d}-color.png'.format(i+1))
         im = cv2.imread(filename, cv2.IMREAD_UNCHANGED)
         im = im[:, :, (2, 1, 0)]
         plt.imshow(im)
         ax.set_title('color') 
 
-        ax = fig.add_subplot(1, 3, 2)
+        ax = fig.add_subplot(2, 2, 2)
         plt.imshow(im_syn[:,:,(2, 1, 0)])
         ax.set_title('render')
 
-        ax = fig.add_subplot(1, 3, 3)
+        ax = fig.add_subplot(2, 2, 3)
         plt.imshow(im_label[:,:,(2, 1, 0)])
-        ax.set_title('render')  
+        ax.set_title('label')
+
+        ax = fig.add_subplot(2, 2, 4, projection='3d')
+        ax.scatter(pcloud[:, 0], pcloud[:, 1], pcloud[:, 2], color='green')
 
         plt.show()

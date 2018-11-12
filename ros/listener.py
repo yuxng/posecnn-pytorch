@@ -92,10 +92,11 @@ class ImageListener:
         ts = message_filters.ApproximateTimeSynchronizer([rgb_sub, depth_sub], queue_size, slop_seconds)
         ts.registerCallback(self.callback)
 
+
     def callback(self, rgb, depth):
+
         if depth.encoding == '32FC1':
-            depth_32 = self.cv_bridge.imgmsg_to_cv2(depth) * 1000
-            depth_cv = np.array(depth_32, dtype=np.uint16)
+            depth_cv = self.cv_bridge.imgmsg_to_cv2(depth)
         elif depth.encoding == '16UC1':
             depth_cv = self.cv_bridge.imgmsg_to_cv2(depth)
         else:
@@ -133,6 +134,32 @@ class ImageListener:
             msg = PoseStamped()
             pub = self.pubs[cls]
             pub.publish(msg)
+
+
+    # backproject pixels into 3D points in camera's coordinate system
+    def backproject(self, depth_cv):
+
+        depth = depth_cv.astype(np.float32, copy=True)
+
+        # get intrinsic matrix
+        K = self.dataset._intrinsic_matrix
+        Kinv = np.linalg.inv(K)
+
+        # compute the 3D points
+        width = depth.shape[1]
+        height = depth.shape[0]
+
+        # construct the 2D points matrix
+        x, y = np.meshgrid(np.arange(width), np.arange(height))
+        ones = np.ones((height, width), dtype=np.float32)
+        x2d = np.stack((x, y, ones), axis=2).reshape(width*height, 3)
+
+        # backprojection
+        R = np.dot(Kinv, x2d.transpose())
+
+        # compute the 3D points
+        X = np.multiply(np.tile(depth.reshape(1, width*height), (3, 1)), R)
+        return np.array(X).transpose()
 
 
     def test_image(self, im_color, im_depth):
@@ -173,6 +200,7 @@ class ImageListener:
 
         if cfg.TRAIN.VERTEX_REG:
             out_label, out_vertex, rois, out_pose, out_quaternion = self.net(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
+            labels = out_label.detach().cpu().numpy()[0]
 
             # combine poses
             rois = rois.detach().cpu().numpy()
@@ -190,10 +218,10 @@ class ImageListener:
             poses = optimize_depths(rois, poses, self.dataset._points_all, self.dataset._intrinsic_matrix)
         else:
             out_label = self.net(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
+            labels = out_label.detach().cpu().numpy()[0]
             rois = np.zeros((0, 7), dtype=np.float32)
             poses = np.zeros((0, 7), dtype=np.float32)
 
-        labels = out_label.detach().cpu().numpy()[0]
         im_pose, im_label = self.overlay_image(im_color, rois, poses, labels)
 
         return im_pose, im_label, rois, poses
