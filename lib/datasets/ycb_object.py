@@ -102,8 +102,8 @@ class YCBObject(data.Dataset, datasets.imdb):
             qt[3:] = euler2quat(roll * math.pi / 180.0, pitch * math.pi / 180.0, yaw * math.pi / 180.0)
             self.pose_indexes[cls] += 1
             # translation
-            qt[0] = np.random.uniform(-0.2, 0.2)
-            qt[1] = np.random.uniform(-0.2, 0.2)
+            qt[0] = np.random.uniform(-0.15, 0.15)
+            qt[1] = np.random.uniform(-0.15, 0.15)
             qt[2] = np.random.uniform(cfg.TRAIN.SYN_TNEAR, cfg.TRAIN.SYN_TFAR)
             poses_all.append(qt)
         cfg.renderer.set_poses(poses_all)
@@ -334,7 +334,7 @@ class YCBObject(data.Dataset, datasets.imdb):
         point_blob = points_all.copy()
         for i in xrange(1, self._num_classes):
             # compute the rescaling factor for the points
-            weight = 10.0 / np.amax(self._extents[i, :])
+            weight = 5.0 / np.amax(self._extents[i, :])
             if weight < 10:
                 weight = 10
             if self._symmetry[i] > 0:
