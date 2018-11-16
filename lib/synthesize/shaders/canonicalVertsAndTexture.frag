@@ -16,12 +16,15 @@ uniform struct Light {
 
 in vec3 fragPosition;
 in vec3 fragCanonicalPosition;
+in vec3 fragPositionCam;
 in vec2 fragTexCoord;
 in vec3 fragNormal;
 
 layout (location = 0) out vec3 fragOutput0;
 layout (location = 1) out vec4 fragOutput1;
 layout (location = 2) out vec3 fragOutput2;
+layout (location = 3) out vec3 fragOutput3;
+layout (location = 3) out vec3 fragOutput4;
 
 
 vec3 ApplyLight(Light light, vec3 surfaceColor, vec3 normal, vec3 surfacePos, vec3 surfaceToCamera) 
@@ -59,7 +62,6 @@ vec3 ApplyLight(Light light, vec3 surfaceColor, vec3 normal, vec3 surfacePos, ve
 
 void main()
 {
-
     if (isnan(fragCanonicalPosition.x)) {
         discard;
     }
@@ -82,7 +84,12 @@ void main()
     //final color
     fragOutput1 = vec4(linearColor, surfaceColor.a);
 
-    // depth
-    fragOutput2 = vec3(gl_FragCoord.z);
+    // 3D point
+    fragOutput2 = fragPosition;
 
+    // camera point
+    fragOutput3 = fragPositionCam;
+
+    // normal
+    fragOutput4 = fragNormal;
 }

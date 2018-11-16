@@ -114,9 +114,9 @@ struct CanonicalVertAndTextureRenderType {
         static const char name[] = "canonicalVertsAndTexture.frag";
         return std::string(name);
     }
-    static constexpr int numTextures = 3;
+    static constexpr int numTextures = 5;
     static const GLenum * textureFormats() {
-        static const GLenum formats[numTextures] = { GL_RGBA32F, GL_RGBA32F, GL_RGBA32F};
+        static const GLenum formats[numTextures] = {GL_RGBA32F, GL_RGBA32F, GL_RGBA32F, GL_RGBA32F, GL_RGBA32F};
         return formats;
     }
     static constexpr int numVertexAttributes = 4;

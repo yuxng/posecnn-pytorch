@@ -1,3 +1,6 @@
 [submodule "ycb_render"]
 	path = ycb_render
 	url = https://github.com/yuxng/ycb_render.git
+[submodule "Pangolin_egl"]
+	path = Pangolin_egl
+	url = https://github.com/yuxng/Pangolin_egl.git

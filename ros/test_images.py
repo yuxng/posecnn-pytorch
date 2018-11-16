@@ -91,6 +91,10 @@ if __name__ == '__main__':
     cfg.MODE == 'TEST'
     dataset = get_dataset(args.dataset_name)
 
+    if cfg.TEST.POSE_REFINE:
+        cfg.cad_name = write_selected_class_file(args.cad_name, cfg.TRAIN.CLASSES)
+        cfg.pose_name = write_selected_class_file(args.pose_name, cfg.TRAIN.CLASSES)
+
     # prepare network
     if args.pretrained:
         network_data = torch.load(args.pretrained)

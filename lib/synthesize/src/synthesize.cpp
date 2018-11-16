@@ -10,17 +10,28 @@ Synthesizer::Synthesizer(std::string model_file, std::string pose_file)
   setup_ = 0;
 }
 
-void Synthesizer::setup(int width, int height)
+void Synthesizer::setup(int width, int height, std::string window_title)
 {
   if (setup_ == 0)
   {
-    create_window(width, height);
+    create_window(width, height, window_title);
 
     loadModels(model_file_);
     std::cout << "loaded models" << std::endl;
 
     loadPoses(pose_file_);
     std::cout << "loaded poses" << std::endl;
+
+    label_map_ = new ManagedTensor<2, int>({width, height});
+    label_map_device_ = new ManagedTensor<2, int, DeviceResident>({width, height});
+    depth_map_ = new ManagedTensor<2, float>({width, height});
+    depth_map_device_ = new ManagedTensor<2, float, DeviceResident>({width, height});
+    vertex_map_device_ = new ManagedDeviceTensor2<Vec3>({width, height});
+    vertex_map_ = new ManagedHostTensor2<Vec3>({width, height});
+    predicted_verts_device_ = new ManagedDeviceTensor2<Eigen::UnalignedVec4<float> > ({width, height});
+    predicted_normals_device_ = new ManagedDeviceTensor2<Eigen::UnalignedVec4<float> > ({width, height});
+    predicted_verts_ = new ManagedHostTensor2<Eigen::UnalignedVec4<float> >({width, height});
+    predicted_normals_ = new ManagedHostTensor2<Eigen::UnalignedVec4<float> >({width, height});
 
     setup_ = 1;
   }
@@ -37,10 +48,10 @@ Synthesizer::~Synthesizer()
 }
 
 // create window
-void Synthesizer::create_window(int width, int height)
+void Synthesizer::create_window(int width, int height, std::string window_title)
 {
-  pangolin::CreateWindowAndBind("Synthesizer", width, height);
-  gtView_ = &pangolin::Display("gt").SetAspect(float(width)/float(height));
+  pangolin::CreateWindowAndBind(window_title, width, height);
+  // gtView_ = &pangolin::Display("gt").SetAspect(float(width)/float(height));
 
   // create render
   renderer_texture_ = new df::GLRenderer<df::CanonicalVertAndTextureRenderType>(width, height);
@@ -607,5 +618,212 @@ void Synthesizer::render(int width, int height, float fx, float fy, float px, fl
     else
       renderer_color_->texture(1).RenderToViewportFlipY();
     pangolin::FinishFrame();
+  }
+}
+
+
+void Synthesizer::icp_python(np::ndarray& labelmap, np::ndarray& depth, np::ndarray& parameters, 
+  np::ndarray& rois, np::ndarray& poses, np::ndarray& outputs)
+{
+  float* meta = reinterpret_cast<float*>(parameters.get_data());
+  int width = int(meta[0]);
+  int height = int(meta[1]);
+  int num_roi = int(meta[2]);
+  int channel_roi = int(meta[3]);
+  int num_classes = int(meta[4]);
+  float fx = meta[5];
+  float fy = meta[6];
+  float px = meta[7];
+  float py = meta[8];
+  float znear = meta[9];
+  float zfar = meta[10];
+  float maxError = meta[11];
+
+  solveICP(reinterpret_cast<int*>(labelmap.get_data()), reinterpret_cast<float*>(depth.get_data()),
+    height, width, fx, fy, px, py, znear, zfar, num_roi, channel_roi, num_classes,
+    reinterpret_cast<float*>(rois.get_data()), reinterpret_cast<float*>(poses.get_data()),
+    reinterpret_cast<float*>(outputs.get_data()), maxError);
+}
+
+
+// ICP
+void Synthesizer::solveICP(const int* labelmap, const float* depth, int height, int width, float fx, float fy, float px, float py, 
+  float znear, float zfar, int num_roi, int channel_roi, int num_classes, const float* rois, const float* poses, 
+  float* outputs, float maxError)
+{
+  memcpy(label_map_->data(), labelmap, sizeof(int) * width * height);
+  label_map_device_->copyFrom(*label_map_);
+
+  // build the camera paramters
+  Eigen::Matrix<float,7,1,Eigen::DontAlign> params;
+  params[0] = fx;
+  params[1] = fy;
+  params[2] = px;
+  params[3] = py;
+  params[4] = 0;
+  params[5] = 0;
+  params[6] = 0;
+  df::Poly3CameraModel<float> model(params);
+
+  // backprojection
+  memcpy(depth_map_->data(), depth, sizeof(float) * width * height);
+  depth_map_device_->copyFrom(*depth_map_);
+  backproject<float, Poly3CameraModel>(*depth_map_device_, *vertex_map_device_, model);
+  vertex_map_->copyFrom(*vertex_map_device_);
+
+  // setup rendering
+  pangolin::OpenGlMatrixSpec projectionMatrix = pangolin::ProjectionMatrixRDF_TopLeft(width, height, fx, -fy, px+0.5, height-(py+0.5), znear, zfar);
+  renderer_texture_->setProjectionMatrix(projectionMatrix);
+
+  std::vector<df::Light> lights;
+  df::Light spotlight;
+  float light_intensity = 1.0;
+  spotlight.position = Eigen::Vector4f(0, 0, 0, 1);
+  spotlight.intensities = Eigen::Vector3f(light_intensity, light_intensity, light_intensity);
+  spotlight.attenuation = 0.01f;
+  spotlight.ambientCoefficient = 0.5f;
+  lights.push_back(spotlight);
+
+  std::vector<Eigen::Matrix4f> transforms(num_roi);
+  std::vector<std::vector<pangolin::GlBuffer *> > attributeBuffers(num_roi);
+  std::vector<pangolin::GlBuffer*> modelIndexBuffers(num_roi);
+  std::vector<pangolin::GlTexture*> textureBuffers(num_roi);
+  std::vector<float> materialShininesses(num_roi);
+
+  // for each object
+  for(int i = 0; i < num_roi; i++)
+  {
+    // pose
+    const float* pose = poses + i * 7;
+    Eigen::Quaternionf quaternion(pose[0], pose[1], pose[2], pose[3]);
+    Sophus::SE3f::Point translation(pose[4], pose[5], pose[6]);
+    Sophus::SE3f T_co(quaternion, translation);
+
+    int class_id = int(rois[i * channel_roi + 1]) - 1;
+    transforms[i] = T_co.matrix().cast<float>();
+    materialShininesses[i] = 1000.0;
+    attributeBuffers[i].push_back(&texturedVertices_[class_id]);
+    attributeBuffers[i].push_back(&canonicalVertices_[class_id]);
+    attributeBuffers[i].push_back(&texturedCoords_[class_id]);
+    attributeBuffers[i].push_back(&vertexNormals_[class_id]);
+    modelIndexBuffers[i] = &texturedIndices_[class_id];
+    textureBuffers[i] = &texturedTextures_[class_id];
+  }
+
+  // rendering
+  glClearColor(std::nanf(""), std::nanf(""), std::nanf(""), std::nanf(""));
+  renderer_texture_->render(attributeBuffers, modelIndexBuffers, textureBuffers, transforms, lights, materialShininesses);
+
+  // model vertices
+  std::vector<float3> vertmap(width * height);
+  renderer_texture_->texture(2).Download(vertmap.data(), GL_RGB, GL_FLOAT);
+
+  // 3D points and normals
+  const pangolin::GlTextureCudaArray & vertTex = renderer_texture_->texture(3);
+  const pangolin::GlTextureCudaArray & normTex = renderer_texture_->texture(4);
+
+  // copy predicted normals
+  {
+    pangolin::CudaScopedMappedArray scopedArray(normTex);
+    cudaMemcpy2DFromArray(predicted_normals_device_->data(), normTex.width*4*sizeof(float), *scopedArray, 0, 0, normTex.width*4*sizeof(float), normTex.height, cudaMemcpyDeviceToDevice);
+    predicted_normals_->copyFrom(*predicted_normals_device_);
+  }
+
+  // copy predicted vertices
+  {
+    pangolin::CudaScopedMappedArray scopedArray(vertTex);
+    cudaMemcpy2DFromArray(predicted_verts_device_->data(), vertTex.width*4*sizeof(float), *scopedArray, 0, 0, vertTex.width*4*sizeof(float), vertTex.height, cudaMemcpyDeviceToDevice);
+    predicted_verts_->copyFrom(*predicted_verts_device_);
+  }
+
+  // build label indexes
+  std::vector< std::vector<int> > label_indexes(num_classes);
+  for (int i = 0; i < width * height; i++)
+  {
+    if (labelmap[i] > 0)
+      label_indexes[labelmap[i]].push_back(i);
+  }
+
+  // for each object
+  for(int i = 0; i < num_roi; i++)
+  {
+    int objID = int(rois[i * channel_roi + 1]);
+    const float* pose = poses + i * 7;
+    Eigen::Quaternionf quaternion(pose[0], pose[1], pose[2], pose[3]);
+    Sophus::SE3f::Point translation(pose[4], pose[5], pose[6]);
+    Sophus::SE3f T_co(quaternion, translation);
+
+    // compute object center using depth and vertmap
+    float Tx = 0;
+    float Ty = 0;
+    float Tz = 0;
+    int c = 0;
+    for (int j = 0; j < label_indexes[objID].size(); j++)
+    {
+      int x = label_indexes[objID][j] % width;
+      int y = label_indexes[objID][j] / width;
+
+      if (depth[y * width + x] > 0)
+      {
+        float vx = vertmap[y * width + x].x;
+        float vy = vertmap[y * width + x].y;
+        float vz = vertmap[y * width + x].z;
+
+        if (std::isnan(vx) == 0 && std::isnan(vy) == 0 && std::isnan(vz) == 0)
+        {
+          Eigen::UnalignedVec4<float> normal = (*predicted_normals_)(x, y);
+          Eigen::UnalignedVec4<float> vertex = (*predicted_verts_)(x, y);
+          Vec3 dpoint = (*vertex_map_)(x, y);
+          float error = normal.head<3>().dot(dpoint - vertex.head<3>());
+          if (fabs(error) < maxError)
+          {
+            Tx += (dpoint(0) - vx);
+            Ty += (dpoint(1) - vy);
+            Tz += (dpoint(2) - vz);
+            c++;
+          }         
+        }
+      }
+    }
+
+    float rx = 0;
+    float ry = 0;
+    if (pose[6])
+    {
+      rx = pose[4] / pose[6];
+      ry = pose[5] / pose[6];
+    }
+    if (c > 0)
+    {
+      Tx /= c;
+      Ty /= c;
+      Tz /= c;
+      // std::cout << "Center with " << c << " points: " << Tx << " " << Ty << " " << Tz << std::endl;
+
+      // modify translation
+      T_co.translation()(0) = rx * Tz;
+      T_co.translation()(1) = ry * Tz;
+      T_co.translation()(2) = Tz;
+      // std::cout << "Translation " << T_co.translation()(0) << " " << T_co.translation()(1) << " " << T_co.translation()(2) << std::endl;
+    }
+
+    // run ICP
+    Eigen::Vector2f depthRange(znear, zfar);
+    int iterations = 8;
+    Sophus::SE3f update = icp(*vertex_map_device_, *predicted_verts_device_, *predicted_normals_device_, *label_map_device_,
+                              model, T_co, depthRange, maxError, objID, iterations);
+    T_co = update * T_co;
+
+    // set output
+    Eigen::Quaternionf quaternion_new = T_co.unit_quaternion();
+    Sophus::SE3f::Point translation_new = T_co.translation();
+
+    outputs[i * 7 + 0] = quaternion_new.w();
+    outputs[i * 7 + 1] = quaternion_new.x();
+    outputs[i * 7 + 2] = quaternion_new.y();
+    outputs[i * 7 + 3] = quaternion_new.z();
+    outputs[i * 7 + 4] = translation_new(0);
+    outputs[i * 7 + 5] = translation_new(1);
+    outputs[i * 7 + 6] = translation_new(2);
   }
 }

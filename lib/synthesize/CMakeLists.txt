@@ -16,6 +16,11 @@ add_definitions(-fPIC)
 set(compileDirectory \"${PROJECT_SOURCE_DIR}\")
 add_definitions(-DCOMPILE_DIR=${compileDirectory})
 
+option(BUILD_POLY3 "build for poly3 camera model" on)
+if(BUILD_POLY3)
+  add_definitions(-DBUILD_POLY3)
+endif()
+
 find_package(CUDA REQUIRED)
 find_package(Pangolin REQUIRED)
 find_package(Eigen3 REQUIRED)
@@ -49,6 +54,15 @@ set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS};-std=c++11;--expt-relaxed-constexpr;-O3;
 cuda_add_library(
   synthesizer
   SHARED
+  src/backprojection.cu
+  src/icp.cu
   src/synthesize.cpp
   src/thread_rand.cpp
+  src/backprojection.cpp
+  src/icp.cpp
+  src/camera.cpp
+  src/cameraFactory.cpp
+  src/poly3.cpp
+  src/linear.cpp
+  src/rig.cpp
 )
