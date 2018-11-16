@@ -55,14 +55,10 @@ cuda_add_library(
   synthesizer
   SHARED
   src/backprojection.cu
-  src/icp.cu
   src/synthesize.cpp
   src/thread_rand.cpp
   src/backprojection.cpp
-  src/icp.cpp
   src/camera.cpp
   src/cameraFactory.cpp
   src/poly3.cpp
-  src/linear.cpp
-  src/rig.cpp
 )

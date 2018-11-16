@@ -236,9 +236,8 @@ class ImageListener:
         py = self.dataset._intrinsic_matrix[1, 2]
         zfar = 6.0
         znear = 0.25
-        maxError = 0.01
 
-        parameters = np.zeros((12, ), dtype=np.float32)
+        parameters = np.zeros((11, ), dtype=np.float32)
         parameters[0] = width
         parameters[1] = height
         parameters[2] = rois.shape[0]
@@ -250,12 +249,11 @@ class ImageListener:
         parameters[8] = py
         parameters[9] = znear
         parameters[10] = zfar
-        parameters[11] = maxError
 
         # render image
         thread_name = threading.current_thread().name
         poses_new = np.zeros_like(poses)
-        self.renders[thread_name].icp_python(labels, depths, parameters, rois, poses, poses_new)
+        self.renders[thread_name].refine_pose_python(labels, depths, parameters, rois, poses, poses_new)
 
         return poses_new
 

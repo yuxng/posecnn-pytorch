@@ -622,7 +622,7 @@ void Synthesizer::render(int width, int height, float fx, float fy, float px, fl
 }
 
 
-void Synthesizer::icp_python(np::ndarray& labelmap, np::ndarray& depth, np::ndarray& parameters, 
+void Synthesizer::refine_pose_python(np::ndarray& labelmap, np::ndarray& depth, np::ndarray& parameters, 
   np::ndarray& rois, np::ndarray& poses, np::ndarray& outputs)
 {
   float* meta = reinterpret_cast<float*>(parameters.get_data());
@@ -637,23 +637,19 @@ void Synthesizer::icp_python(np::ndarray& labelmap, np::ndarray& depth, np::ndar
   float py = meta[8];
   float znear = meta[9];
   float zfar = meta[10];
-  float maxError = meta[11];
 
-  solveICP(reinterpret_cast<int*>(labelmap.get_data()), reinterpret_cast<float*>(depth.get_data()),
+  refine_pose(reinterpret_cast<int*>(labelmap.get_data()), reinterpret_cast<float*>(depth.get_data()),
     height, width, fx, fy, px, py, znear, zfar, num_roi, channel_roi, num_classes,
     reinterpret_cast<float*>(rois.get_data()), reinterpret_cast<float*>(poses.get_data()),
-    reinterpret_cast<float*>(outputs.get_data()), maxError);
+    reinterpret_cast<float*>(outputs.get_data()));
 }
 
 
-// ICP
-void Synthesizer::solveICP(const int* labelmap, const float* depth, int height, int width, float fx, float fy, float px, float py, 
+// refine translation with depth
+void Synthesizer::refine_pose(const int* labelmap, const float* depth, int height, int width, float fx, float fy, float px, float py, 
   float znear, float zfar, int num_roi, int channel_roi, int num_classes, const float* rois, const float* poses, 
-  float* outputs, float maxError)
+  float* outputs)
 {
-  memcpy(label_map_->data(), labelmap, sizeof(int) * width * height);
-  label_map_device_->copyFrom(*label_map_);
-
   // build the camera paramters
   Eigen::Matrix<float,7,1,Eigen::DontAlign> params;
   params[0] = fx;
@@ -718,24 +714,6 @@ void Synthesizer::solveICP(const int* labelmap, const float* depth, int height, 
   std::vector<float3> vertmap(width * height);
   renderer_texture_->texture(2).Download(vertmap.data(), GL_RGB, GL_FLOAT);
 
-  // 3D points and normals
-  const pangolin::GlTextureCudaArray & vertTex = renderer_texture_->texture(3);
-  const pangolin::GlTextureCudaArray & normTex = renderer_texture_->texture(4);
-
-  // copy predicted normals
-  {
-    pangolin::CudaScopedMappedArray scopedArray(normTex);
-    cudaMemcpy2DFromArray(predicted_normals_device_->data(), normTex.width*4*sizeof(float), *scopedArray, 0, 0, normTex.width*4*sizeof(float), normTex.height, cudaMemcpyDeviceToDevice);
-    predicted_normals_->copyFrom(*predicted_normals_device_);
-  }
-
-  // copy predicted vertices
-  {
-    pangolin::CudaScopedMappedArray scopedArray(vertTex);
-    cudaMemcpy2DFromArray(predicted_verts_device_->data(), vertTex.width*4*sizeof(float), *scopedArray, 0, 0, vertTex.width*4*sizeof(float), vertTex.height, cudaMemcpyDeviceToDevice);
-    predicted_verts_->copyFrom(*predicted_verts_device_);
-  }
-
   // build label indexes
   std::vector< std::vector<int> > label_indexes(num_classes);
   for (int i = 0; i < width * height; i++)
@@ -768,20 +746,13 @@ void Synthesizer::solveICP(const int* labelmap, const float* depth, int height, 
         float vx = vertmap[y * width + x].x;
         float vy = vertmap[y * width + x].y;
         float vz = vertmap[y * width + x].z;
-
         if (std::isnan(vx) == 0 && std::isnan(vy) == 0 && std::isnan(vz) == 0)
         {
-          Eigen::UnalignedVec4<float> normal = (*predicted_normals_)(x, y);
-          Eigen::UnalignedVec4<float> vertex = (*predicted_verts_)(x, y);
           Vec3 dpoint = (*vertex_map_)(x, y);
-          float error = normal.head<3>().dot(dpoint - vertex.head<3>());
-          if (fabs(error) < maxError)
-          {
-            Tx += (dpoint(0) - vx);
-            Ty += (dpoint(1) - vy);
-            Tz += (dpoint(2) - vz);
-            c++;
-          }         
+          Tx += (dpoint(0) - vx);
+          Ty += (dpoint(1) - vy);
+          Tz += (dpoint(2) - vz);
+          c++;
         }
       }
     }
@@ -798,21 +769,12 @@ void Synthesizer::solveICP(const int* labelmap, const float* depth, int height, 
       Tx /= c;
       Ty /= c;
       Tz /= c;
-      // std::cout << "Center with " << c << " points: " << Tx << " " << Ty << " " << Tz << std::endl;
 
       // modify translation
       T_co.translation()(0) = rx * Tz;
       T_co.translation()(1) = ry * Tz;
       T_co.translation()(2) = Tz;
-      // std::cout << "Translation " << T_co.translation()(0) << " " << T_co.translation()(1) << " " << T_co.translation()(2) << std::endl;
     }
-
-    // run ICP
-    Eigen::Vector2f depthRange(znear, zfar);
-    int iterations = 8;
-    Sophus::SE3f update = icp(*vertex_map_device_, *predicted_verts_device_, *predicted_normals_device_, *label_map_device_,
-                              model, T_co, depthRange, maxError, objID, iterations);
-    T_co = update * T_co;
 
     // set output
     Eigen::Quaternionf quaternion_new = T_co.unit_quaternion();

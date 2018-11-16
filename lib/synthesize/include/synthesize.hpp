@@ -35,7 +35,6 @@
 #include "thread_rand.h"
 #include "poly3.h"
 #include "backprojection.h"
-#include "icp.h"
 
 namespace np = boost::python::numpy;
 typedef Eigen::Matrix<float,3,1,Eigen::DontAlign> Vec3;
@@ -69,12 +68,12 @@ class Synthesizer
     np::ndarray const & color, np::ndarray const & vertmap, np::ndarray const & class_indexes,
     np::ndarray const & poses, np::ndarray const & center);
 
-  void icp_python(np::ndarray& labelmap, np::ndarray& depth, np::ndarray& parameters, 
+  void refine_pose_python(np::ndarray& labelmap, np::ndarray& depth, np::ndarray& parameters, 
     np::ndarray& rois, np::ndarray& poses, np::ndarray& outputs);
 
-  void solveICP(const int* labelmap, const float* depth, int height, int width, float fx, float fy, float px, float py, 
+  void refine_pose(const int* labelmap, const float* depth, int height, int width, float fx, float fy, float px, float py, 
     float znear, float zfar, int num_roi, int channel_roi, int num_classes, const float* rois, const float* poses, 
-    float* outputs, float maxError);
+    float* outputs);
 
  private:
   int counter_;
@@ -126,6 +125,6 @@ BOOST_PYTHON_MODULE(libsynthesizer)
     .def("setup", &Synthesizer::setup)
     .def("init_rand", &Synthesizer::init_rand)
     .def("render_python", &Synthesizer::render_python)
-    .def("icp_python", &Synthesizer::icp_python)
+    .def("refine_pose_python", &Synthesizer::refine_pose_python)
   ;
 }

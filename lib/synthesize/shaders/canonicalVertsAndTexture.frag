@@ -24,7 +24,7 @@ layout (location = 0) out vec3 fragOutput0;
 layout (location = 1) out vec4 fragOutput1;
 layout (location = 2) out vec3 fragOutput2;
 layout (location = 3) out vec3 fragOutput3;
-layout (location = 3) out vec3 fragOutput4;
+layout (location = 4) out vec3 fragOutput4;
 
 
 vec3 ApplyLight(Light light, vec3 surfaceColor, vec3 normal, vec3 surfacePos, vec3 surfaceToCamera) 
@@ -91,5 +91,11 @@ void main()
     fragOutput3 = fragPositionCam;
 
     // normal
-    fragOutput4 = fragNormal;
+    vec3 rawNormal = vec3(modelViewMatrix*vec4(fragNormal,0.0));
+    float rawLength = length(rawNormal);
+    if (rawLength > 0) {
+        fragOutput4 = rawNormal / rawLength;
+    } else {
+        fragOutput4 = rawNormal;
+    }
 }

@@ -19,14 +19,7 @@ void main()
     fragPosition = vertexPosition;
     fragCanonicalPosition = vertexCanonicalPosition;
     fragTexCoord = vertexTexCoord;
-
-    vec3 rawNormal = vec3(modelViewMatrix*vec4(vertexNormal,0.0));
-    float rawLength = length(rawNormal);
-    if (rawLength > 0) {
-        fragNormal = rawNormal / rawLength;
-    } else {
-        fragNormal = rawNormal;
-    }
+    fragNormal = vertexNormal;
 
     vec4 vertexPositionCam = modelViewMatrix*vec4(vertexPosition,1.0);
 
