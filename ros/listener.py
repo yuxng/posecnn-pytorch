@@ -15,7 +15,7 @@ from transforms3d.quaternions import mat2quat, quat2mat, qmult
 from scipy.optimize import minimize
 from utils.blob import pad_im, chromatic_transform, add_noise
 from geometry_msgs.msg import PoseStamped
-import libsynthesizer
+from ycb_renderer import YCBRenderer
 
 def optimize_depths(rois, poses, points, intrinsic_matrix):
 
@@ -105,8 +105,12 @@ class ImageListener:
             thread_name = threading.current_thread().name
             if not thread_name in self.renders:
                 print(thread_name)
-                self.renders[thread_name] = libsynthesizer.Synthesizer(cfg.cad_name, cfg.pose_name)
-                self.renders[thread_name].setup(cfg.TRAIN.SYN_WIDTH, cfg.TRAIN.SYN_HEIGHT, thread_name)
+                self.renders[thread_name] = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, render_marker=True)
+                self.renders[thread_name].load_objects(self.dataset.model_mesh_paths, self.dataset.model_texture_paths, self.dataset.model_colors)
+                self.renders[thread_name].set_camera_default()
+                self.renders[thread_name].set_light_pos([0, 0, 0])
+                self.renders[thread_name].set_light_color([1, 1, 1])
+                print self.dataset.model_mesh_paths
 
         if depth.encoding == '32FC1':
             depth_cv = self.cv_bridge.imgmsg_to_cv2(depth)
@@ -156,6 +160,32 @@ class ImageListener:
                 msg.pose.position.z = poses[i, 6]
                 pub = self.pubs[cls - 1]
                 pub.publish(msg)
+
+
+    # backproject pixels into 3D points in camera's coordinate system
+    def backproject(self, depth_cv):
+
+        depth = depth_cv.astype(np.float32, copy=True)
+
+        # get intrinsic matrix
+        K = self.dataset._intrinsic_matrix
+        Kinv = np.linalg.inv(K)
+
+        # compute the 3D points
+        width = depth.shape[1]
+        height = depth.shape[0]
+
+        # construct the 2D points matrix
+        x, y = np.meshgrid(np.arange(width), np.arange(height))
+        ones = np.ones((height, width), dtype=np.float32)
+        x2d = np.stack((x, y, ones), axis=2).reshape(width*height, 3)
+
+        # backprojection
+        R = np.dot(Kinv, x2d.transpose())
+
+        # compute the 3D points
+        X = np.multiply(np.tile(depth.reshape(1, width*height), (3, 1)), R)
+        return np.array(X).transpose()
 
 
     def test_image(self, im_color, im_depth):
@@ -211,10 +241,10 @@ class ImageListener:
                     poses[j, :4] = q / np.linalg.norm(q)
 
             # optimize depths
-            poses = optimize_depths(rois, poses, self.dataset._points_all, self.dataset._intrinsic_matrix)
-
             if cfg.TEST.POSE_REFINE:
-                poses = self.icp(labels, im_depth, rois, poses)
+                poses = self.refine_pose(labels, im_depth, rois, poses)
+            else:
+                poses = optimize_depths(rois, poses, self.dataset._points_all, self.dataset._intrinsic_matrix)
         else:
             out_label = self.net(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
             labels = out_label.detach().cpu().numpy()[0]
@@ -226,36 +256,52 @@ class ImageListener:
         return im_pose, im_label, rois, poses
 
 
-    def icp(self, labels, depths, rois, poses):
+    def refine_pose(self, im_label, im_depth, rois, poses):
 
-        width = labels.shape[1]
-        height = labels.shape[0]
+        # backprojection
+        dpoints = self.backproject(im_depth)
+
+        # renderer
+        num = rois.shape[0]
+        width = im_label.shape[1]
+        height = im_label.shape[0]
+        labels = im_label.reshape((width * height, ))
         fx = self.dataset._intrinsic_matrix[0, 0]
         fy = self.dataset._intrinsic_matrix[1, 1]
         px = self.dataset._intrinsic_matrix[0, 2]
         py = self.dataset._intrinsic_matrix[1, 2]
         zfar = 6.0
         znear = 0.25
-
-        parameters = np.zeros((11, ), dtype=np.float32)
-        parameters[0] = width
-        parameters[1] = height
-        parameters[2] = rois.shape[0]
-        parameters[3] = rois.shape[1]
-        parameters[4] = self.dataset.num_classes
-        parameters[5] = fx
-        parameters[6] = fy
-        parameters[7] = px
-        parameters[8] = py
-        parameters[9] = znear
-        parameters[10] = zfar
-
-        # render image
+        cls_indexes = rois[:, 1].astype(np.int32) - 1
         thread_name = threading.current_thread().name
-        poses_new = np.zeros_like(poses)
-        self.renders[thread_name].refine_pose_python(labels, depths, parameters, rois, poses, poses_new)
+        renderer = self.renders[thread_name]
 
-        return poses_new
+        # poses
+        poses_all = []
+        for i in range(num):
+            qt = np.zeros((7, ), dtype=np.float32)
+            qt[3:] = poses[i, :4]
+            qt[0] = poses[i, 4] * poses[i, 6]
+            qt[1] = poses[i, 5] * poses[i, 6]
+            qt[2] = poses[i, 6]
+            poses_all.append(qt)
+        renderer.set_poses(poses_all)
+            
+        # rendering
+        renderer.set_projection_matrix(width, height, fx, fy, px, py, znear, zfar)
+        frame = renderer.render(cls_indexes)
+        pcloud = frame[2].reshape((-1, 3))
+
+        # refine pose
+        for i in range(num):
+            cls = int(rois[i, 1])
+            index = np.where((labels == cls) & np.isfinite(dpoints[:, 0]) & (pcloud[:, 0] != 0))
+            T = np.mean(dpoints[index, :] - pcloud[index, :], axis=1)
+            poses[i, 4] *= T[0, 2]
+            poses[i, 5] *= T[0, 2]
+            poses[i, 6] = T[0, 2]
+
+        return poses
 
 
     def overlay_image(self, im, rois, poses, labels):
