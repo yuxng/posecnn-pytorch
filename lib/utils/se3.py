@@ -6,7 +6,8 @@
 # --------------------------------------------------------
 
 import numpy as np
-from transforms3d.quaternions import mat2quat, quat2mat
+from transforms3d.quaternions import mat2quat, quat2mat, qmult, qinverse
+from transforms3d.euler import quat2euler, mat2euler, euler2quat
 
 # RT is a 3x4 matrix
 def se3_inverse(RT):
@@ -29,6 +30,22 @@ def se3_mul(RT1, RT2):
     T_new = np.dot(R1, T2) + T1
     RT_new[0:3, 3] = T_new.reshape((3))
     return RT_new
+
+
+def egocentric2allocentric(qt, T):
+    dx = np.arctan2(T[0], -T[2])
+    dy = np.arctan2(T[1], -T[2])
+    quat = euler2quat(-dy, -dx, 0, axes='sxyz')
+    quat = qmult(qinverse(quat), qt)
+    return quat
+
+
+def allocentric2egocentric(qt, T):
+    dx = np.arctan2(T[0], -T[2])
+    dy = np.arctan2(T[1], -T[2])
+    quat = euler2quat(-dy, -dx, 0, axes='sxyz')
+    quat = qmult(quat, qt)
+    return quat
 
 
 def T_inv_transform(T_src, T_tgt):

@@ -16,6 +16,7 @@ from fcn.config import cfg
 from utils.blob import pad_im, chromatic_transform, add_noise
 from transforms3d.quaternions import mat2quat, quat2mat
 from transforms3d.euler import euler2quat
+from utils.se3 import *
 
 class YCBObject(data.Dataset, datasets.imdb):
     def __init__(self, image_set, ycb_object_path = None):
@@ -198,11 +199,15 @@ class YCBObject(data.Dataset, datasets.imdb):
             cls = int(cls_indexes[i])+1
             pose_blob[i, 0] = 1
             pose_blob[i, 1] = cls
+            T = poses_all[i][:3]
             qt = poses_all[i][3:]
-            if qt[0] < 0:
-                qt = -1 * qt
-            pose_blob[i, 2:6] = qt
-            pose_blob[i, 6:] = poses_all[i][:3]
+
+            # egocentric to allocentric
+            qt_allocentric = egocentric2allocentric(qt, T)
+            if qt_allocentric[0] < 0:
+                qt_allocentric = -1 * qt_allocentric
+            pose_blob[i, 2:6] = qt_allocentric
+            pose_blob[i, 6:] = T
 
             # compute box
             x3d = np.ones((4, self._points_all.shape[1]), dtype=np.float32)
@@ -210,8 +215,8 @@ class YCBObject(data.Dataset, datasets.imdb):
             x3d[1, :] = self._points_all[cls,:,1]
             x3d[2, :] = self._points_all[cls,:,2]
             RT = np.zeros((3, 4), dtype=np.float32)
-            RT[:3, :3] = quat2mat(pose_blob[i, 2:6])
-            RT[:, 3] = pose_blob[i, 6:]
+            RT[:3, :3] = quat2mat(qt)
+            RT[:, 3] = T
             x2d = np.matmul(self._intrinsic_matrix, np.matmul(RT, x3d))
             x2d[0, :] = np.divide(x2d[0, :], x2d[2, :])
             x2d[1, :] = np.divide(x2d[1, :], x2d[2, :])

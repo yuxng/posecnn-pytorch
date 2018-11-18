@@ -16,6 +16,7 @@ from scipy.optimize import minimize
 from utils.blob import pad_im, chromatic_transform, add_noise
 from geometry_msgs.msg import PoseStamped
 from ycb_renderer import YCBRenderer
+from utils.se3 import *
 
 def optimize_depths(rois, poses, points, intrinsic_matrix):
 
@@ -237,8 +238,11 @@ class ImageListener:
             for j in xrange(num):
                 cls = int(rois[j, 1])
                 if cls >= 0:
-                    q = out_quaternion[j, 4*cls:4*cls+4]
-                    poses[j, :4] = q / np.linalg.norm(q)
+                    qt = out_quaternion[j, 4*cls:4*cls+4]
+                    qt = qt / np.linalg.norm(qt)
+                    # allocentric to egocentric
+                    T = poses[j, 4:]
+                    poses[j, :4] = allocentric2egocentric(qt, T)
 
             # optimize depths
             if cfg.TEST.POSE_REFINE:

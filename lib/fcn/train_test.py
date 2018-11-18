@@ -15,7 +15,7 @@ import numpy as np
 
 from fcn.config import cfg
 from transforms3d.quaternions import mat2quat, quat2mat, qmult
-from utils.se3 import T_inv_transform
+from utils.se3 import *
 from utils.pose_error import re, te
 from scipy.optimize import minimize
 
@@ -173,8 +173,11 @@ def test(test_loader, network):
             for j in xrange(num):
                 cls = int(rois[j, 1])
                 if cls >= 0:
-                    q = out_quaternion[j, 4*cls:4*cls+4]
-                    poses[j, :4] = q / np.linalg.norm(q)
+                    qt = out_quaternion[j, 4*cls:4*cls+4]
+                    qt = qt / np.linalg.norm(qt)
+                    # allocentric to egocentric
+                    T = poses[j, 4:]
+                    poses[j, :4] = allocentric2egocentric(qt, T)
 
             # optimize depths
             poses = optimize_depths(rois, poses, test_loader.dataset._points_all, test_loader.dataset._intrinsic_matrix)
