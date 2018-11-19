@@ -32,7 +32,7 @@ if __name__ == '__main__':
     filename = os.path.join(root, 'data', '0000', '000001-meta.mat')
     metadata = scipy.io.loadmat(filename)
     intrinsic_matrix = metadata['intrinsic_matrix']
-    cls_indexes = [2]
+    cls_indexes = [5]
     num_classes = len(cls_indexes)
 
     obj_paths = [
@@ -60,7 +60,7 @@ if __name__ == '__main__':
     poses = []
     for i in np.arange(-2, 2, 0.4):
         for j in np.arange(-2, 2, 0.4):
-            quat = [1, 0, 0, 0]
+            quat = [1, 1, 0, 0]
             poses.append(np.array([i, j, z] + list(quat)))
 
     renderer.set_allocentric_poses(poses)
@@ -70,6 +70,7 @@ if __name__ == '__main__':
     im_syn0 = im_syn0.astype(np.uint8)
 
     # egocentric
+    '''
     poses_new = []
     poses = renderer.get_poses()
     for i in range(len(poses)):
@@ -78,6 +79,8 @@ if __name__ == '__main__':
         poses_new.append(np.array(list(T) + list(quat)))
 
     renderer.set_allocentric_poses(poses_new)
+    '''   
+    renderer.set_poses(poses)
     frame = renderer.render([0] * len(poses))
     im_syn1 = frame[0][:, :, :3] * 255
     im_syn1 = np.clip(im_syn1, 0, 255)
