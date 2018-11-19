@@ -249,6 +249,9 @@ class ImageListener:
                 poses = self.refine_pose(labels, im_depth, rois, poses)
             else:
                 poses = optimize_depths(rois, poses, self.dataset._points_all, self.dataset._intrinsic_matrix)
+
+            if cfg.TEST.VISUALIZE:
+                self.vis_test(im, labels, out_vertex, rois, poses)
         else:
             out_label = self.net(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
             labels = out_label.detach().cpu().numpy()[0]
