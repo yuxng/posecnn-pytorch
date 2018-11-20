@@ -31,13 +31,13 @@ class YCBObject(data.Dataset, datasets.imdb):
         self._classes_all = ('__background__', '002_master_chef_can', '003_cracker_box', '004_sugar_box', '005_tomato_soup_can', '006_mustard_bottle', \
                          '007_tuna_fish_can', '008_pudding_box', '009_gelatin_box', '010_potted_meat_can', '011_banana', '019_pitcher_base', \
                          '021_bleach_cleanser', '024_bowl', '025_mug', '035_power_drill', '036_wood_block', '037_scissors', '040_large_marker', \
-                         '051_large_clamp', '052_extra_large_clamp', '061_foam_brick')
+                         '051_large_clamp', '052_extra_large_clamp', '061_foam_brick', 'holiday_cup1', 'holiday_cup2', 'sanning_mug')
         self._num_classes_all = len(self._classes_all)
         self._class_colors_all = [(255, 255, 255), (255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (255, 0, 255), (0, 255, 255), \
                               (0, 0, 128), (0, 128, 0), (128, 0, 0), (128, 128, 0), (128, 0, 128), (0, 128, 128), \
                               (64, 0, 0), (0, 64, 0), (0, 0, 64), (64, 64, 0), (64, 0, 64), (0, 64, 64), 
-                              (192, 0, 0), (0, 192, 0), (0, 0, 192)]
-        self._symmetry_all = np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]).astype(np.float32)
+                              (192, 0, 0), (0, 192, 0), (0, 0, 192), (192, 192, 0), (192, 0, 192), (0, 192, 192)]
+        self._symmetry_all = np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0]).astype(np.float32)
         self._extents_all = self._load_object_extents()
 
         self._width = 640
@@ -81,7 +81,8 @@ class YCBObject(data.Dataset, datasets.imdb):
 
         # sample objects
         if cfg.TRAIN.SYN_SAMPLE_OBJECT:
-            num = np.random.randint(cfg.TRAIN.SYN_MIN_OBJECT, cfg.TRAIN.SYN_MAX_OBJECT+1)
+            maxnum = np.minimum(self.num_classes-1, cfg.TRAIN.SYN_MAX_OBJECT)
+            num = np.random.randint(cfg.TRAIN.SYN_MIN_OBJECT, maxnum+1)
             perm = np.random.permutation(np.arange(self.num_classes-1))
             cls_indexes = perm[:num]
         else:
@@ -315,7 +316,7 @@ class YCBObject(data.Dataset, datasets.imdb):
         """
         Return the default path where ycb_object is expected to be installed.
         """
-        return os.path.join(datasets.ROOT_DIR, 'data', 'YCB_Video')
+        return os.path.join(datasets.ROOT_DIR, 'data', 'YCB_Object')
 
 
     def _load_object_points(self):

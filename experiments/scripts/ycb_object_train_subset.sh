@@ -16,7 +16,5 @@ time ./tools/train_net.py \
   --pretrained data/checkpoints/vgg16-397923af.pth \
   --dataset ycb_object_train \
   --cfg experiments/cfgs/ycb_object_subset.yml \
-  --cad data/YCB_Video/models.txt \
-  --pose data/YCB_Video/poses.txt \
   --solver sgd \
   --epochs 16
