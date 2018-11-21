@@ -103,10 +103,36 @@ class YCBObject(data.Dataset, datasets.imdb):
             yaw = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][2] + 15 * np.random.randn()
             qt[3:] = euler2quat(roll * math.pi / 180.0, pitch * math.pi / 180.0, yaw * math.pi / 180.0)
             self.pose_indexes[cls] += 1
+
             # translation
-            qt[0] = np.random.uniform(-0.15, 0.15)
-            qt[1] = np.random.uniform(-0.15, 0.15)
-            qt[2] = np.random.uniform(cfg.TRAIN.SYN_TNEAR, cfg.TRAIN.SYN_TFAR)
+            bound = 0.2
+            if i == 0:
+                qt[0] = np.random.uniform(-bound, bound)
+                qt[1] = np.random.uniform(-bound, bound)
+                qt[2] = np.random.uniform(cfg.TRAIN.SYN_TNEAR, cfg.TRAIN.SYN_TFAR)
+            else:
+                # sample an object nearby
+                object_id = i - 1
+                extent = np.mean(self._extents[cls+1, :])
+
+                flag = np.random.randint(0, 2)
+                if flag == 0:
+                    flag = -1
+                qt[0] = poses_all[object_id][0] + flag * extent * np.random.uniform(1.0, 1.5)
+                if np.absolute(qt[0]) > bound:
+                    qt[0] = poses_all[object_id][0] - flag * extent * np.random.uniform(1.0, 1.5)
+
+                flag = np.random.randint(0, 2)
+                if flag == 0:
+                    flag = -1
+                qt[1] = poses_all[object_id][1] + flag * extent * np.random.uniform(1.0, 1.5)
+                if np.absolute(qt[1]) > bound:
+                    qt[1] = poses_all[object_id][1] - flag * extent * np.random.uniform(1.0, 1.5)
+
+                qt[2] = poses_all[object_id][2] - extent * np.random.uniform(2.0, 4.0)
+                if qt[2] < cfg.TRAIN.SYN_TNEAR:
+                    qt[2] = poses_all[object_id][2] + extent * np.random.uniform(2.0, 4.0)
+
             poses_all.append(qt)
         cfg.renderer.set_poses(poses_all)
 

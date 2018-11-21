@@ -77,7 +77,7 @@ class ImageListener:
         self.count = 0
         self.threshold_detection = 0.1
 
-        if cfg.TEST.POSE_REFINE:
+        if cfg.TRAIN.VERTEX_REG and cfg.TEST.POSE_REFINE:
             self.renders = dict()
 
         # initialize a node
@@ -102,7 +102,7 @@ class ImageListener:
 
     def callback(self, rgb, depth):
 
-        if cfg.TEST.POSE_REFINE:
+        if cfg.TRAIN.VERTEX_REG and cfg.TEST.POSE_REFINE:
             thread_name = threading.current_thread().name
             if not thread_name in self.renders:
                 print(thread_name)
