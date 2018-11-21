@@ -191,7 +191,8 @@ class PoseCNN(nn.Module):
             out_quaternion = self.fc10(out_qt_fc7)
             # point matching loss
             poses_pred = nn.functional.normalize(torch.mul(out_quaternion, poses_weight))
-            loss_pose = self.pml(poses_pred, poses_target, poses_weight, points, symmetry)
+            if self.training:
+                loss_pose = self.pml(poses_pred, poses_target, poses_weight, points, symmetry)
 
         if self.training:
             if cfg.TRAIN.VERTEX_REG:

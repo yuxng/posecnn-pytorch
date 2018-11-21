@@ -37,7 +37,7 @@ class YCBObject(data.Dataset, datasets.imdb):
                               (0, 0, 128), (0, 128, 0), (128, 0, 0), (128, 128, 0), (128, 0, 128), (0, 128, 128), \
                               (64, 0, 0), (0, 64, 0), (0, 0, 64), (64, 64, 0), (64, 0, 64), (0, 64, 64), 
                               (192, 0, 0), (0, 192, 0), (0, 0, 192), (192, 192, 0), (192, 0, 192), (0, 192, 192)]
-        self._symmetry_all = np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0]).astype(np.float32)
+        self._symmetry_all = np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0]).astype(np.float32)
         self._extents_all = self._load_object_extents()
 
         self._width = 640
@@ -87,7 +87,7 @@ class YCBObject(data.Dataset, datasets.imdb):
             cls_indexes = perm[:num]
         else:
             num = self.num_classes - 1
-            cls_indexes = np.arrage(num)
+            cls_indexes = np.arange(num)
 
         # sample poses
         poses_all = []
@@ -105,7 +105,7 @@ class YCBObject(data.Dataset, datasets.imdb):
             self.pose_indexes[cls] += 1
 
             # translation
-            bound = 0.2
+            bound = 0.3
             if i == 0:
                 qt[0] = np.random.uniform(-bound, bound)
                 qt[1] = np.random.uniform(-bound, bound)
