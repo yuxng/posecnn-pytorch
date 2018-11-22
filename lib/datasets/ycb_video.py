@@ -15,6 +15,7 @@ import datasets
 from fcn.config import cfg
 from utils.blob import pad_im, chromatic_transform, add_noise
 from transforms3d.quaternions import mat2quat, quat2mat
+from utils.se3 import *
 
 class YCBVideo(data.Dataset, datasets.imdb):
     def __init__(self, image_set, ycb_video_path = None):
@@ -52,6 +53,11 @@ class YCBVideo(data.Dataset, datasets.imdb):
         self._extents = self._extents_all[cfg.TRAIN.CLASSES]
         self._points, self._points_all, self._point_blob = self._load_object_points()
 
+        # 3D model paths
+        self.model_mesh_paths = ['{}/models/{}/textured_simple.obj'.format(self._ycb_video_path, cls) for cls in self._classes[1:]]
+        self.model_texture_paths = ['{}/models/{}/texture_map.png'.format(self._ycb_video_path, cls) for cls in self._classes[1:]]
+        self.model_colors = [np.array(self._class_colors_all[i]) / 255.0 for i in cfg.TRAIN.CLASSES[1:]]
+
         self._class_to_ind = dict(zip(self._classes, xrange(self._num_classes)))
         self._image_ext = '.png'
         self._image_index = self._load_image_set_index()
@@ -62,6 +68,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
             self._size = len(self._image_index)
         self._roidb = self.gt_roidb()
         self._build_background_images()
+        self._build_uniform_poses()
 
         assert os.path.exists(self._ycb_video_path), \
                 'ycb_video path does not exist: {}'.format(self._ycb_video_path)
@@ -71,49 +78,94 @@ class YCBVideo(data.Dataset, datasets.imdb):
 
     def _render_item(self):
 
+        height = cfg.TRAIN.SYN_HEIGHT
+        width = cfg.TRAIN.SYN_WIDTH
         fx = self._intrinsic_matrix[0, 0]
         fy = self._intrinsic_matrix[1, 1]
         px = self._intrinsic_matrix[0, 2]
         py = self._intrinsic_matrix[1, 2]
         zfar = 6.0
         znear = 0.25
-        if cfg.TRAIN.ITERS % 100 == 0:
-            is_display = 1
+
+        # sample objects
+        if cfg.TRAIN.SYN_SAMPLE_OBJECT:
+            maxnum = np.minimum(self.num_classes-1, cfg.TRAIN.SYN_MAX_OBJECT)
+            num = np.random.randint(cfg.TRAIN.SYN_MIN_OBJECT, maxnum+1)
+            perm = np.random.permutation(np.arange(self.num_classes-1))
+            cls_indexes = perm[:num]
         else:
-            is_display = 0
+            num = self.num_classes - 1
+            cls_indexes = np.arange(num)
 
-        parameters = np.zeros((17, ), dtype=np.float32)
-        parameters[0] = self._width
-        parameters[1] = self._height
-        parameters[2] = fx
-        parameters[3] = fy
-        parameters[4] = px
-        parameters[5] = py
-        parameters[6] = znear
-        parameters[7] = zfar
-        parameters[8] = cfg.TRAIN.SYN_TNEAR
-        parameters[9] = cfg.TRAIN.SYN_TFAR
-        parameters[10] = cfg.TRAIN.SYN_MIN_OBJECT
-        parameters[11] = cfg.TRAIN.SYN_MAX_OBJECT
-        parameters[12] = cfg.TRAIN.SYN_STD_ROTATION
-        parameters[13] = cfg.TRAIN.SYN_STD_TRANSLATION
-        parameters[14] = cfg.TRAIN.SYN_SAMPLE_OBJECT
-        parameters[15] = cfg.TRAIN.SYN_SAMPLE_POSE
-        parameters[16] = is_display
+        # sample poses
+        poses_all = []
+        for i in range(num):
+            qt = np.zeros((7, ), dtype=np.float32)
+            # rotation
+            cls = int(cls_indexes[i])
+            if self.pose_indexes[cls] >= len(self.pose_lists[cls]):
+                self.pose_indexes[cls] = 0
+                self.pose_lists[cls] = np.random.permutation(np.arange(len(self.eulers)))
+            roll = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][0] + 15 * np.random.randn()
+            pitch = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][1] + 15 * np.random.randn()
+            yaw = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][2] + 15 * np.random.randn()
+            qt[3:] = euler2quat(roll * math.pi / 180.0, pitch * math.pi / 180.0, yaw * math.pi / 180.0)
+            self.pose_indexes[cls] += 1
 
-        # render image
-        im = np.zeros((self._height, self._width, 3), dtype=np.float32)
-        vertmap = np.zeros((self._height, self._width, 3), dtype=np.float32)
-        class_indexes = np.zeros((self.num_classes, ), dtype=np.float32)
-        poses = np.zeros((self.num_classes, 7), dtype=np.float32)
-        centers = np.zeros((self.num_classes, 2), dtype=np.float32)
-        cfg.synthesizer.render_python(parameters, im, vertmap, class_indexes, poses, centers)
+            # translation
+            bound = 0.1
+            if i == 0:
+                qt[0] = np.random.uniform(-bound, bound)
+                qt[1] = np.random.uniform(-bound, bound)
+                qt[2] = np.random.uniform(cfg.TRAIN.SYN_TNEAR, cfg.TRAIN.SYN_TFAR)
+            else:
+                # sample an object nearby
+                object_id = i - 1
+                extent = np.mean(self._extents[cls+1, :])
 
-        index = np.where(class_indexes > 0)[0]
-        class_indexes = class_indexes[index]
-        poses = poses[index, :]
-        centers = centers[index, :]
-        im_label = np.round(vertmap[:, :, 0])
+                flag = np.random.randint(0, 2)
+                if flag == 0:
+                    flag = -1
+                qt[0] = poses_all[object_id][0] + flag * extent * np.random.uniform(1.0, 1.5)
+                if np.absolute(qt[0]) > bound:
+                    qt[0] = poses_all[object_id][0] - flag * extent * np.random.uniform(1.0, 1.5)
+
+                flag = np.random.randint(0, 2)
+                if flag == 0:
+                    flag = -1
+                qt[1] = poses_all[object_id][1] + flag * extent * np.random.uniform(1.0, 1.5)
+                if np.absolute(qt[1]) > bound:
+                    qt[1] = poses_all[object_id][1] - flag * extent * np.random.uniform(1.0, 1.5)
+
+                qt[2] = poses_all[object_id][2] - extent * np.random.uniform(2.0, 4.0)
+                if qt[2] < cfg.TRAIN.SYN_TNEAR:
+                    qt[2] = poses_all[object_id][2] + extent * np.random.uniform(2.0, 4.0)
+
+            poses_all.append(qt)
+        cfg.renderer.set_poses(poses_all)
+
+        # sample lighting
+        cfg.renderer.set_light_pos(np.random.uniform(-0.5, 0.5, 3))
+
+        intensity = np.random.uniform(0.8, 2)
+        light_color = intensity * np.random.uniform(0.9, 1.1, 3)
+        cfg.renderer.set_light_color(light_color)
+            
+        # rendering
+        cfg.renderer.set_projection_matrix(width, height, fx, fy, px, py, znear, zfar)
+        frame = cfg.renderer.render(cls_indexes)
+        im = frame[0][:, :, :3] * 255
+        im = im.astype(np.uint8)
+
+        im_label = frame[1][:, :, :3] * 255
+        im_label = im_label.astype(np.uint8)
+        im_label = self.process_label_image(im_label)
+
+        centers = np.zeros((num, 2), dtype=np.float32)
+        rcenters = cfg.renderer.get_centers()
+        for i in range(num):
+            centers[i, 0] = rcenters[i][1] * width
+            centers[i, 1] = rcenters[i][0] * height
 
         # add background to the image
         ind = np.random.randint(len(self._backgrounds), size=1)[0]
@@ -137,16 +189,28 @@ class YCBVideo(data.Dataset, datasets.imdb):
             background = np.zeros((self._height, self._width, 3), dtype=np.uint8)
             print 'bad background image'
 
-        # add background
+        # paste objects on background
         I = np.where(im_label == 0)
         im[I[0], I[1], :] = background[I[0], I[1], :3]
         im = im.astype(np.uint8)
+        margin = 10
+        for i in range(centers.shape[0]):
+            I = np.where(im_label == cls_indexes[i]+1)
+            if len(I[0]) > 0:
+                y1 = np.max((np.round(np.min(I[0])) - margin, 0))
+                x1 = np.max((np.round(np.min(I[1])) - margin, 0))
+                y2 = np.min((np.round(np.max(I[0])) + margin, self._height-1))
+                x2 = np.min((np.round(np.max(I[1])) + margin, self._width-1))
+                foreground = im[y1:y2, x1:x2].astype(np.uint8)
+                mask = 255 * np.ones((foreground.shape[0], foreground.shape[1]), dtype=np.uint8)
+                background = cv2.seamlessClone(foreground, background, mask, ((x1+x2)/2, (y1+y2)/2), cv2.NORMAL_CLONE)
+        im = background
 
         # chromatic transform
-        if cfg.TRAIN.CHROMATIC and cfg.MODE == 'TRAIN':
+        if cfg.TRAIN.CHROMATIC and cfg.MODE == 'TRAIN' and np.random.rand(1) > 0.1:
             im = chromatic_transform(im)
 
-        if cfg.TRAIN.ADD_NOISE and cfg.MODE == 'TRAIN':
+        if cfg.TRAIN.ADD_NOISE and cfg.MODE == 'TRAIN' and np.random.rand(1) > 0.1:
             im = add_noise(im)
 
         im = im.astype(np.float32)
@@ -164,18 +228,21 @@ class YCBVideo(data.Dataset, datasets.imdb):
                 label_blob[0, I[0], I[1]] = 0.0
 
         # poses and boxes
-        num = poses.shape[0]
         pose_blob = np.zeros((self.num_classes, 9), dtype=np.float32)
         gt_boxes = np.zeros((self.num_classes, 5), dtype=np.float32)
         for i in xrange(num):
-            cls = int(class_indexes[i])
+            cls = int(cls_indexes[i])+1
             pose_blob[i, 0] = 1
             pose_blob[i, 1] = cls
-            qt = poses[i, :4]
-            if qt[0] < 0:
-                qt = -1 * qt
-            pose_blob[i, 2:6] = qt
-            pose_blob[i, 6:] = poses[i, 4:]
+            T = poses_all[i][:3]
+            qt = poses_all[i][3:]
+
+            # egocentric to allocentric
+            qt_allocentric = egocentric2allocentric(qt, T)
+            if qt_allocentric[0] < 0:
+                qt_allocentric = -1 * qt_allocentric
+            pose_blob[i, 2:6] = qt_allocentric
+            pose_blob[i, 6:] = T
 
             # compute box
             x3d = np.ones((4, self._points_all.shape[1]), dtype=np.float32)
@@ -183,8 +250,8 @@ class YCBVideo(data.Dataset, datasets.imdb):
             x3d[1, :] = self._points_all[cls,:,1]
             x3d[2, :] = self._points_all[cls,:,2]
             RT = np.zeros((3, 4), dtype=np.float32)
-            RT[:3, :3] = quat2mat(pose_blob[i, 2:6])
-            RT[:, 3] = pose_blob[i, 6:]
+            RT[:3, :3] = quat2mat(qt)
+            RT[:, 3] = T
             x2d = np.matmul(self._intrinsic_matrix, np.matmul(RT, x3d))
             x2d[0, :] = np.divide(x2d[0, :], x2d[2, :])
             x2d[1, :] = np.divide(x2d[1, :], x2d[2, :])
@@ -211,7 +278,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
 
         # vertex regression target
         if cfg.TRAIN.VERTEX_REG:
-            vertex_targets, vertex_weights = self._generate_vertex_targets(im_label, class_indexes, centers, poses, classes, self.num_classes)
+            vertex_targets, vertex_weights = self._generate_vertex_targets(im_label, cls_indexes+1, centers, poses_all, classes, self.num_classes)
         else:
             vertex_targets = []
             vertex_weights = []
@@ -414,10 +481,13 @@ class YCBVideo(data.Dataset, datasets.imdb):
             if len(x) > 0 and len(ind) > 0:
                 c[0] = center[ind, 0]
                 c[1] = center[ind, 1]
-                if len(poses.shape) == 3:
-                    z = poses[2, 3, ind]
+                if isinstance(poses, list):
+                    z = poses[int(ind)][2]
                 else:
-                    z = poses[ind, -1]
+                    if len(poses.shape) == 3:
+                        z = poses[2, 3, ind]
+                    else:
+                        z = poses[ind, -1]
                 R = np.tile(c, (1, len(x))) - np.vstack((x, y))
                 # compute the norm
                 N = np.linalg.norm(R, axis=0) + 1e-10
@@ -668,3 +738,22 @@ class YCBVideo(data.Dataset, datasets.imdb):
             im_label[I[0], I[1], :] = self._class_colors[i]
 
         return im_label
+
+
+    def process_label_image(self, label_image):
+        """
+        change label image to label index
+        """
+        height = label_image.shape[0]
+        width = label_image.shape[1]
+        labels = np.zeros((height, width), dtype=np.int32)
+
+        # label image is in BGR order
+        index = label_image[:,:,2] + 256*label_image[:,:,1] + 256*256*label_image[:,:,0]
+        for i in xrange(1, len(self._class_colors)):
+            color = self._class_colors[i]
+            ind = color[0] + 256*color[1] + 256*256*color[2]
+            I = np.where(index == ind)
+            labels[I[0], I[1]] = i
+
+        return labels
