@@ -9,6 +9,5 @@
 *.xml
 *.png
 output*
-data/*
 lib/synthesize/build/*
 lib/utils/bbox.c
