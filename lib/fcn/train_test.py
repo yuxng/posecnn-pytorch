@@ -79,7 +79,7 @@ def train(train_loader, network, optimizer, epoch):
 
         end = time.time()
 
-        inputs = sample['image'].cuda()
+        inputs = sample['image']
         labels = sample['label'].cuda()
         meta_data = sample['meta_data'].cuda()
         extents = sample['extents'][0, :, :].repeat(cfg.TRAIN.GPUNUM, 1, 1).cuda()

@@ -130,7 +130,7 @@ if __name__ == '__main__':
         im = cv2.imread(filename, cv2.IMREAD_UNCHANGED)
         im = im[:, :, (2, 1, 0)]
         plt.imshow(im)
-        ax.set_title('color') 
+        ax.set_title('color')
 
         ax = fig.add_subplot(2, 2, 2)
         plt.imshow(im_syn[:,:,(2, 1, 0)])

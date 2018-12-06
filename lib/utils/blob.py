@@ -7,8 +7,10 @@
 
 """Blob helper functions."""
 
+import torch
 import numpy as np
 import cv2
+import random
 
 def im_list_to_blob(ims, num_channels):
     """Convert a list of images into a network input.
@@ -129,3 +131,39 @@ def add_noise(image):
     return noisy.astype('uint8')
 
 
+def add_noise_cuda(image):
+    # random number
+    r = np.random.rand(1)
+
+    # gaussian noise
+    if r < 0.8:
+        noise_level = random.uniform(0, 0.05)
+        gauss = torch.randn_like(image) * noise_level
+        noisy = image + gauss
+        noisy = torch.clamp(noisy, 0, 1.0)
+    else:
+        # motion blur
+        sizes = [3, 5, 7, 9, 11, 15]
+        size = sizes[int(np.random.randint(len(sizes), size=1))]
+        kernel_motion_blur = torch.zeros((size, size))
+        if np.random.rand(1) < 0.5:
+            kernel_motion_blur[int((size-1)/2), :] = torch.ones(size)
+        else:
+            kernel_motion_blur[:, int((size-1)/2)] = torch.ones(size)
+        kernel_motion_blur = kernel_motion_blur.cuda() / size
+        kernel_motion_blur = kernel_motion_blur.view(1, 1, size, size)
+        kernel_motion_blur = kernel_motion_blur.repeat(image.size(2), 1,  1, 1)
+
+        motion_blur_filter = nn.Conv2d(in_channels=image.size(2),
+                                       out_channels=image.size(2),
+                                       kernel_size=size,
+                                       groups=image.size(2),
+                                       bias=False,
+                                       padding=int(size/2))
+
+        motion_blur_filter.weight.data = kernel_motion_blur
+        motion_blur_filter.weight.requires_grad = False
+        noisy = motion_blur_filter(image.permute(2, 0, 1).unsqueeze(0))
+        noisy = noisy.squeeze(0).permute(1, 2, 0)
+
+    return noisy

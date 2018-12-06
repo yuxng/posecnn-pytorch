@@ -296,8 +296,12 @@ class ImageListener:
             
         # rendering
         renderer.set_projection_matrix(width, height, fx, fy, px, py, znear, zfar)
-        frame = renderer.render(cls_indexes)
-        pcloud = frame[2].reshape((-1, 3))
+        image_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
+        seg_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
+        pcloud_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
+        frame = renderer.render(cls_indexes, image_tensor, seg_tensor, pc1_tensor=pcloud_tensor)
+        pcloud_tensor = pcloud_tensor.flip(0)
+        pcloud = pcloud_tensor[:,:,:3].cpu().numpy().reshape((-1, 3))
 
         # refine pose
         for i in range(num):

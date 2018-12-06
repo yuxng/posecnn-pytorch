@@ -28,7 +28,7 @@ TRAIN:
   USE_FLIPPED: False
   CHROMATIC: True
   ADD_NOISE: True
-  VISUALIZE: False
+  VISUALIZE: True
   VERTEX_REG: True
   # synthetic data
   SYNTHESIZE: True
@@ -51,4 +51,4 @@ TEST:
   VISUALIZE: False
   SYNTHESIZE: True
   POSE_REFINE: True
-  ROS_CAMERA: kinect1
+  ROS_CAMERA: camera

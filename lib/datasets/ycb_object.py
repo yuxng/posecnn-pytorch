@@ -13,7 +13,7 @@ import scipy.io
 
 import datasets
 from fcn.config import cfg
-from utils.blob import pad_im, chromatic_transform, add_noise
+from utils.blob import pad_im, chromatic_transform, add_noise, add_noise_cuda
 from transforms3d.quaternions import mat2quat, quat2mat
 from transforms3d.euler import euler2quat
 from utils.se3 import *
@@ -53,6 +53,7 @@ class YCBObject(data.Dataset, datasets.imdb):
         self._symmetry = self._symmetry_all[cfg.TRAIN.CLASSES]
         self._extents = self._extents_all[cfg.TRAIN.CLASSES]
         self._points, self._points_all, self._point_blob = self._load_object_points()
+        self._pixel_mean = torch.tensor(cfg.PIXEL_MEANS / 255.0).cuda().float()
 
         # 3D model paths
         self.model_mesh_paths = ['{}/models/{}/textured_simple.obj'.format(self._ycb_object_path, cls) for cls in self._classes[1:]]
@@ -145,12 +146,22 @@ class YCBObject(data.Dataset, datasets.imdb):
             
         # rendering
         cfg.renderer.set_projection_matrix(width, height, fx, fy, px, py, znear, zfar)
-        frame = cfg.renderer.render(cls_indexes)
-        im = frame[0][:, :, :3] * 255
+        image_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
+        seg_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
+        frame = cfg.renderer.render(cls_indexes, image_tensor, seg_tensor)
+        image_tensor = image_tensor.flip(0)
+        seg_tensor = seg_tensor.flip(0)
+
+        # RGB to BGR order
+        im = image_tensor.cpu().numpy()
+        im = np.clip(im, 0, 1)
+        im = im[:, :, (2, 1, 0)] * 255
         im = im.astype(np.uint8)
 
-        im_label = frame[1][:, :, :3] * 255
-        im_label = im_label.astype(np.uint8)
+        im_label = seg_tensor.cpu().numpy()
+        im_label = im_label[:, :, (2, 1, 0)] * 255
+        im_label = np.round(im_label).astype(np.uint8)
+        im_label = np.clip(im_label, 0, 255)
         im_label = self.process_label_image(im_label)
 
         centers = np.zeros((num, 2), dtype=np.float32)
@@ -202,12 +213,11 @@ class YCBObject(data.Dataset, datasets.imdb):
         if cfg.TRAIN.CHROMATIC and cfg.MODE == 'TRAIN' and np.random.rand(1) > 0.1:
             im = chromatic_transform(im)
 
+        im_cuda = torch.from_numpy(im).cuda().float() / 255.0
         if cfg.TRAIN.ADD_NOISE and cfg.MODE == 'TRAIN' and np.random.rand(1) > 0.1:
-            im = add_noise(im)
-
-        im = im.astype(np.float32)
-        im -= cfg.PIXEL_MEANS
-        im = np.transpose(im / 255.0, (2, 0, 1))
+            im_cuda = add_noise_cuda(im_cuda)
+        im_cuda -= self._pixel_mean
+        im_cuda = im_cuda.permute(2, 0, 1)
 
         # label blob
         classes = np.array(range(self.num_classes))
@@ -277,7 +287,7 @@ class YCBObject(data.Dataset, datasets.imdb):
 
         im_info = np.array([im.shape[1], im.shape[2], cfg.TRAIN.SCALES_BASE[0]], dtype=np.float32)
 
-        sample = {'image': im,
+        sample = {'image': im_cuda,
                   'label': label_blob,
                   'meta_data': meta_data_blob,
                   'poses': pose_blob,
