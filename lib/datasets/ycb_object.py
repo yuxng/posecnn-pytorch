@@ -149,7 +149,7 @@ class YCBObject(data.Dataset, datasets.imdb):
         cfg.renderer.set_projection_matrix(width, height, fx, fy, px, py, znear, zfar)
         image_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
         seg_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
-        frame = cfg.renderer.render(cls_indexes, image_tensor, seg_tensor)
+        cfg.renderer.render(cls_indexes, image_tensor, seg_tensor)
         image_tensor = image_tensor.flip(0)
         seg_tensor = seg_tensor.flip(0)
 
