@@ -62,7 +62,8 @@ class YCBObject(data.Dataset, datasets.imdb):
 
         self._class_to_ind = dict(zip(self._classes, xrange(self._num_classes)))
         self._size = cfg.TRAIN.SYNNUM
-        self._build_background_images()
+        if cfg.MODE == 'TRAIN':
+            self._build_background_images()
         self._build_uniform_poses()
 
         assert os.path.exists(self._ycb_object_path), \
