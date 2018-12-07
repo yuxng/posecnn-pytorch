@@ -42,6 +42,12 @@ If you find PoseCNN useful in your research, please consider citing:
 
 5. Compile the ycb_render in $ROOT/ycb_render
 
+6. Compile cython components
+    ```Shell
+    cd $ROOT/lib
+    python setup.py build_ext --inplace
+    ```
+
 ### Required environment
 - Ubuntu 16.04
 - PyTorch 0.4.1
