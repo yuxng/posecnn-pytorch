@@ -17,6 +17,7 @@ from utils.blob import pad_im, chromatic_transform, add_noise
 from geometry_msgs.msg import PoseStamped
 from ycb_renderer import YCBRenderer
 from utils.se3 import *
+from utils.nms import *
 
 def optimize_depths(rois, poses, points, intrinsic_matrix):
 
@@ -75,7 +76,6 @@ class ImageListener:
         self.dataset = dataset
         self.cv_bridge = CvBridge()
         self.count = 0
-        self.threshold_detection = 0.1
 
         if cfg.TRAIN.VERTEX_REG and cfg.TEST.POSE_REFINE:
             self.renders = dict()
@@ -142,11 +142,17 @@ class ImageListener:
 
         # poses
         frame = '%s_depth_optical_frame' % (cfg.TEST.ROS_CAMERA)
+        indexes = np.zeros((self.dataset.num_classes, ), dtype=np.int32)
+        index = np.argsort(rois[:, 2])
+        rois = rois[index, :]
+        poses = poses[index, :]
         for i in range(rois.shape[0]):
             cls = int(rois[i, 1])
-            if cls > 0 and rois[i, -1] > self.threshold_detection:
+            if cls > 0 and rois[i, -1] > cfg.TEST.DET_THRESHOLD:
                 quat = [poses[i, 1], poses[i, 2], poses[i, 3], poses[i, 0]]
-                self.br.sendTransform(poses[i, 4:7], quat, rospy.Time.now(), self.dataset.classes[cls], frame)
+                name = self.dataset.classes[cls] + '_%02d' % (indexes[cls])
+                indexes[cls] += 1
+                self.br.sendTransform(poses[i, 4:7], quat, rospy.Time.now(), name, frame)
 
                 # create pose msg
                 msg = PoseStamped()
@@ -244,6 +250,16 @@ class ImageListener:
                     T = poses[j, 4:]
                     poses[j, :4] = allocentric2egocentric(qt, T)
 
+            # filter out detections
+            index = np.where(rois[:, -1] > cfg.TEST.DET_THRESHOLD)[0]
+            rois = rois[index, :]
+            poses = poses[index, :]
+
+            # non-maximum suppression within class
+            index = nms(rois, 0.5)
+            rois = rois[index, :]
+            poses = poses[index, :]
+           
             # optimize depths
             if cfg.TEST.POSE_REFINE:
                 poses = self.refine_pose(labels, im_depth, rois, poses)
@@ -272,7 +288,7 @@ class ImageListener:
         num = rois.shape[0]
         width = im_label.shape[1]
         height = im_label.shape[0]
-        labels = im_label.reshape((width * height, ))
+        #labels = im_label.reshape((width * height, ))
         fx = self.dataset._intrinsic_matrix[0, 0]
         fy = self.dataset._intrinsic_matrix[1, 1]
         px = self.dataset._intrinsic_matrix[0, 2]
@@ -306,6 +322,13 @@ class ImageListener:
         # refine pose
         for i in range(num):
             cls = int(rois[i, 1])
+            x1 = max(int(rois[i, 2]), 0)
+            y1 = max(int(rois[i, 3]), 0)
+            x2 = min(int(rois[i, 4]), width-1)
+            y2 = min(int(rois[i, 5]), height-1)
+            labels = np.zeros((height, width), dtype=np.float32)
+            labels[y1:y2, x1:x2] = im_label[y1:y2, x1:x2]
+            labels = labels.reshape((width * height, ))
             index = np.where((labels == cls) & np.isfinite(dpoints[:, 0]) & (pcloud[:, 0] != 0))
             T = np.mean(dpoints[index, :] - pcloud[index, :], axis=1)
             poses[i, 4] *= T[0, 2]
@@ -333,7 +356,7 @@ class ImageListener:
         for j in xrange(rois.shape[0]):
             cls = int(rois[j, 1])
             print classes[cls], rois[j, -1]
-            if cls > 0 and rois[j, -1] > self.threshold_detection:
+            if cls > 0 and rois[j, -1] > cfg.TEST.DET_THRESHOLD:
 
                 # draw roi
                 x1 = rois[j, 2]
@@ -422,7 +445,7 @@ class ImageListener:
             for j in xrange(rois.shape[0]):
                 cls = int(rois[j, 1])
                 print classes[cls], rois[j, -1]
-                if cls > 0 and rois[j, -1] > 0.01:
+                if cls > 0 and rois[j, -1] > cfg.TEST.DET_THRESHOLD:
                     # extract 3D points
                     x3d = np.ones((4, points.shape[1]), dtype=np.float32)
                     x3d[0, :] = points[cls,:,0]
