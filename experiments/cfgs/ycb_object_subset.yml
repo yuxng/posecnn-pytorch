@@ -51,5 +51,5 @@ TEST:
   SCALES_BASE: !!python/tuple [1.0]
   VISUALIZE: False
   SYNTHESIZE: True
-  POSE_REFINE: False
+  POSE_REFINE: True
   ROS_CAMERA: kinect1
