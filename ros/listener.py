@@ -107,11 +107,13 @@ class ImageListener:
             if not thread_name in self.renders:
                 print(thread_name)
                 self.renders[thread_name] = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, render_marker=True)
-                self.renders[thread_name].load_objects(self.dataset.model_mesh_paths, self.dataset.model_texture_paths, self.dataset.model_colors)
+                self.renders[thread_name].load_objects(self.dataset.model_mesh_paths_target,
+                                                       self.dataset.model_texture_paths_target,
+                                                       self.dataset.model_colors_target)
                 self.renders[thread_name].set_camera_default()
                 self.renders[thread_name].set_light_pos([0, 0, 0])
                 self.renders[thread_name].set_light_color([1, 1, 1])
-                print self.dataset.model_mesh_paths
+                print self.dataset.model_mesh_paths_target
 
         if depth.encoding == '32FC1':
             depth_cv = self.cv_bridge.imgmsg_to_cv2(depth)

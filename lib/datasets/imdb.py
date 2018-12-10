@@ -56,7 +56,7 @@ class imdb(object):
 
         # sample indexes
         num_poses = len(self.eulers)
-        num_classes = self.num_classes - 1 # no background
+        num_classes = len(self._classes_all) - 1 # no background
         self.pose_indexes = np.zeros((num_classes, ), dtype=np.int32)
         self.pose_lists = []
         for i in range(num_classes):
