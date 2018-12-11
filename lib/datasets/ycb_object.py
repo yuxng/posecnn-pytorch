@@ -131,7 +131,7 @@ class YCBObject(data.Dataset, datasets.imdb):
             if i == 0 or i >= num_target:
                 qt[0] = np.random.uniform(-bound, bound)
                 qt[1] = np.random.uniform(-bound, bound)
-                qt[2] = np.random.uniform(cfg.TRAIN.SYN_TNEAR, cfg.TRAIN.SYN_TFAR)
+                qt[2] = np.random.uniform(cfg.TRAIN.SYN_TNEAR * 2, cfg.TRAIN.SYN_TFAR)
             else:
                 # sample an object nearby
                 object_id = i - 1
