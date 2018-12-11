@@ -4,8 +4,7 @@ set -x
 set -e
 
 export PYTHONUNBUFFERED="True"
-#export CUDA_VISIBLE_DEVICES=0,1
-export PANGOLIN_WINDOW_URI="headless://"
+export CUDA_VISIBLE_DEVICES=0,1
 export PYTHON_EGG_CACHE=/nfs
 
 #LOG="experiments/logs/ycb_object_train_subset.txt.`date +'%Y-%m-%d_%H-%M-%S'`"
