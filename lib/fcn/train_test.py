@@ -12,10 +12,12 @@ import torchvision.transforms as transforms
 import time
 import sys
 import numpy as np
+import cv2
 
 from fcn.config import cfg
 from transforms3d.quaternions import mat2quat, quat2mat, qmult
 from utils.se3 import *
+from utils.nms import *
 from utils.pose_error import re, te
 from scipy.optimize import minimize
 
@@ -197,6 +199,89 @@ def test(test_loader, network):
         print('[%d/%d], batch time %.2f' % (i, epoch_size, batch_time.val))
 
 
+def test_image(network, dataset, im_color, im_depth=None):
+    """test on a single image"""
+
+    num_classes = dataset.num_classes
+
+    # compute image blob
+    im = im_color.astype(np.float32, copy=True)
+    im -= cfg.PIXEL_MEANS
+    height = im.shape[0]
+    width = im.shape[1]
+    im = np.transpose(im / 255.0, (2, 0, 1))
+    im = im[np.newaxis, :, :, :]
+
+    # construct the meta data
+    K = dataset._intrinsic_matrix
+    Kinv = np.linalg.pinv(K)
+    meta_data_blob = np.zeros((1, 18), dtype=np.float32)
+    meta_data_blob[0, 0:9] = K.flatten()
+    meta_data_blob[0, 9:18] = Kinv.flatten()
+
+    # use fake label blob
+    label_blob = np.zeros((1, num_classes, height, width), dtype=np.float32)
+    pose_blob = np.zeros((1, num_classes, 9), dtype=np.float32)
+    gt_boxes = np.zeros((1, num_classes, 5), dtype=np.float32)
+
+    # transfer to GPU
+    inputs = torch.from_numpy(im).cuda()
+    labels = torch.from_numpy(label_blob).cuda()
+    meta_data = torch.from_numpy(meta_data_blob).cuda()
+    extents = torch.from_numpy(dataset._extents).cuda()
+    gt_boxes = torch.from_numpy(gt_boxes).cuda()
+    poses = torch.from_numpy(pose_blob).cuda()
+    points = torch.from_numpy(dataset._point_blob).cuda()
+    symmetry = torch.from_numpy(dataset._symmetry).cuda()
+
+    if cfg.TRAIN.VERTEX_REG:
+        out_label, out_vertex, rois, out_pose, out_quaternion = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
+        labels = out_label.detach().cpu().numpy()[0]
+
+        # combine poses
+        rois = rois.detach().cpu().numpy()
+        out_pose = out_pose.detach().cpu().numpy()
+        out_quaternion = out_quaternion.detach().cpu().numpy()
+        num = rois.shape[0]
+        poses = out_pose.copy()
+        for j in xrange(num):
+            cls = int(rois[j, 1])
+            if cls >= 0:
+                qt = out_quaternion[j, 4*cls:4*cls+4]
+                qt = qt / np.linalg.norm(qt)
+                # allocentric to egocentric
+                T = poses[j, 4:]
+                poses[j, :4] = allocentric2egocentric(qt, T)
+
+        # filter out detections
+        index = np.where(rois[:, -1] > cfg.TEST.DET_THRESHOLD)[0]
+        rois = rois[index, :]
+        poses = poses[index, :]
+
+        # non-maximum suppression within class
+        index = nms(rois, 0.5)
+        rois = rois[index, :]
+        poses = poses[index, :]
+           
+        # optimize depths
+        if cfg.TEST.POSE_REFINE and im_depth is not None:
+            poses = refine_pose(labels, im_depth, rois, poses, dataset._intrinsic_matrix)
+        else:
+            poses = optimize_depths(rois, poses, dataset._points_all, dataset._intrinsic_matrix)
+
+        if cfg.TEST.VISUALIZE:
+            vis_test(dataset, im, labels, out_vertex, rois, poses)
+    else:
+        out_label = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
+        labels = out_label.detach().cpu().numpy()[0]
+        rois = np.zeros((0, 7), dtype=np.float32)
+        poses = np.zeros((0, 7), dtype=np.float32)
+
+    im_pose, im_label = overlay_image(dataset, im_color, rois, poses, labels)
+
+    return im_pose, im_label, rois, poses
+
+
 def optimize_depths(rois, poses, points, intrinsic_matrix):
 
     num = rois.shape[0]
@@ -244,6 +329,138 @@ def objective_depth(x, width, height, RT, x3d, intrinsic_matrix):
     w = roi_pred[2] - roi_pred[0]
     h = roi_pred[3] - roi_pred[1]
     return np.abs(w * h - width * height)
+
+
+# backproject pixels into 3D points in camera's coordinate system
+def backproject(depth_cv, intrinsic_matrix):
+
+    depth = depth_cv.astype(np.float32, copy=True)
+
+    # get intrinsic matrix
+    K = intrinsic_matrix
+    Kinv = np.linalg.inv(K)
+
+    # compute the 3D points
+    width = depth.shape[1]
+    height = depth.shape[0]
+
+    # construct the 2D points matrix
+    x, y = np.meshgrid(np.arange(width), np.arange(height))
+    ones = np.ones((height, width), dtype=np.float32)
+    x2d = np.stack((x, y, ones), axis=2).reshape(width*height, 3)
+
+    # backprojection
+    R = np.dot(Kinv, x2d.transpose())
+
+    # compute the 3D points
+    X = np.multiply(np.tile(depth.reshape(1, width*height), (3, 1)), R)
+    return np.array(X).transpose()
+
+
+def refine_pose(im_label, im_depth, rois, poses, intrinsic_matrix):
+
+    # backprojection
+    dpoints = backproject(im_depth, intrinsic_matrix)
+
+    # renderer
+    num = rois.shape[0]
+    width = im_label.shape[1]
+    height = im_label.shape[0]
+    fx = intrinsic_matrix[0, 0]
+    fy = intrinsic_matrix[1, 1]
+    px = intrinsic_matrix[0, 2]
+    py = intrinsic_matrix[1, 2]
+    zfar = 6.0
+    znear = 0.25
+    cls_indexes = rois[:, 1].astype(np.int32) - 1
+
+    # poses
+    poses_all = []
+    for i in range(num):
+        qt = np.zeros((7, ), dtype=np.float32)
+        qt[3:] = poses[i, :4]
+        qt[0] = poses[i, 4] * poses[i, 6]
+        qt[1] = poses[i, 5] * poses[i, 6]
+        qt[2] = poses[i, 6]
+        poses_all.append(qt)
+    cfg.renderer.set_poses(poses_all)
+            
+    # rendering
+    cfg.renderer.set_projection_matrix(width, height, fx, fy, px, py, znear, zfar)
+    image_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
+    seg_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
+    pcloud_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
+    cfg.renderer.render(cls_indexes, image_tensor, seg_tensor, pc1_tensor=pcloud_tensor)
+    pcloud_tensor = pcloud_tensor.flip(0)
+    pcloud = pcloud_tensor[:,:,:3].cpu().numpy().reshape((-1, 3))
+
+    # refine pose
+    for i in range(num):
+        cls = int(rois[i, 1])
+        x1 = max(int(rois[i, 2]), 0)
+        y1 = max(int(rois[i, 3]), 0)
+        x2 = min(int(rois[i, 4]), width-1)
+        y2 = min(int(rois[i, 5]), height-1)
+        labels = np.zeros((height, width), dtype=np.float32)
+        labels[y1:y2, x1:x2] = im_label[y1:y2, x1:x2]
+        labels = labels.reshape((width * height, ))
+        index = np.where((labels == cls) & np.isfinite(dpoints[:, 0]) & (pcloud[:, 0] != 0))
+        T = np.mean(dpoints[index, :] - pcloud[index, :], axis=1)
+        poses[i, 4] *= T[0, 2]
+        poses[i, 5] *= T[0, 2]
+        poses[i, 6] = T[0, 2]
+
+    return poses
+
+
+def overlay_image(dataset, im, rois, poses, labels):
+
+    im = im[:, :, (2, 1, 0)]
+    classes = dataset._classes
+    class_colors = dataset._class_colors
+    points = dataset._points_all
+    intrinsic_matrix = dataset._intrinsic_matrix
+    height = im.shape[0]
+    width = im.shape[1]
+
+    label_image = dataset.labels_to_image(labels)
+    im_label = im.copy()
+    I = np.where(labels != 0)
+    im_label[I[0], I[1], :] = 0.5 * label_image[I[0], I[1], :] + 0.5 * im_label[I[0], I[1], :]
+
+    for j in xrange(rois.shape[0]):
+        cls = int(rois[j, 1])
+        print classes[cls], rois[j, -1]
+        if cls > 0 and rois[j, -1] > cfg.TEST.DET_THRESHOLD:
+
+            # draw roi
+            x1 = rois[j, 2]
+            y1 = rois[j, 3]
+            x2 = rois[j, 4]
+            y2 = rois[j, 5]
+            cv2.rectangle(im_label, (x1, y1), (x2, y2), class_colors[cls], 2)
+
+            # extract 3D points
+            x3d = np.ones((4, points.shape[1]), dtype=np.float32)
+            x3d[0, :] = points[cls,:,0]
+            x3d[1, :] = points[cls,:,1]
+            x3d[2, :] = points[cls,:,2]
+
+            # projection
+            RT = np.zeros((3, 4), dtype=np.float32)
+            RT[:3, :3] = quat2mat(poses[j, :4])
+            RT[:, 3] = poses[j, 4:7]
+            x2d = np.matmul(intrinsic_matrix, np.matmul(RT, x3d))
+            x = np.round(np.divide(x2d[0, :], x2d[2, :]))
+            y = np.round(np.divide(x2d[1, :], x2d[2, :]))
+            index = np.where((x >= 0) & (x < width) & (y >= 0) & (y < height))[0]
+            x = x[index].astype(np.int32)
+            y = y[index].astype(np.int32)
+            im[y, x, 0] = class_colors[cls][0]
+            im[y, x, 1] = class_colors[cls][1]
+            im[y, x, 2] = class_colors[cls][2]
+
+    return im, im_label
 
 
 def _get_bb3D(extent):
@@ -568,3 +785,103 @@ def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, sample, points
             ax.set_title('predicted z')
 
         plt.show()
+
+
+
+def vis_test(dataset, im, label, out_vertex, rois, poses):
+
+    """Visualize a testing results."""
+    import matplotlib.pyplot as plt
+
+    num_classes = dataset.num_classes
+    classes = dataset._classes
+    class_colors = dataset._class_colors
+    points = dataset._points_all
+    intrinsic_matrix = dataset._intrinsic_matrix
+    vertex_pred = out_vertex.detach().cpu().numpy()
+    height = label.shape[0]
+    width = label.shape[1]
+
+    fig = plt.figure()
+    # show image
+    im = im[0, :, :, :].copy()
+    im = im.transpose((1, 2, 0)) * 255.0
+    im += cfg.PIXEL_MEANS
+    im = im[:, :, (2, 1, 0)]
+    im = im.astype(np.uint8)
+    ax = fig.add_subplot(2, 4, 1)
+    plt.imshow(im)
+    ax.set_title('input image') 
+
+    # show predicted label
+    im_label = dataset.labels_to_image(label)
+    ax = fig.add_subplot(2, 4, 2)
+    plt.imshow(im_label)
+    ax.set_title('predicted labels')
+
+    if cfg.TRAIN.VERTEX_REG:
+
+        # show predicted boxes
+        ax = fig.add_subplot(2, 4, 3)
+        plt.imshow(im)
+        ax.set_title('predicted boxes')
+        for j in range(rois.shape[0]):
+            cls = rois[j, 1]
+            x1 = rois[j, 2]
+            y1 = rois[j, 3]
+            x2 = rois[j, 4]
+            y2 = rois[j, 5]
+            plt.gca().add_patch(
+                plt.Rectangle((x1, y1), x2-x1, y2-y1, fill=False, edgecolor=np.array(class_colors[int(cls)])/255.0, linewidth=3))
+
+            cx = (x1 + x2) / 2
+            cy = (y1 + y2) / 2
+            plt.plot(cx, cy, 'yo')
+
+        # show predicted poses
+        ax = fig.add_subplot(2, 4, 4)
+        ax.set_title('predicted poses')
+        plt.imshow(im)
+        for j in xrange(rois.shape[0]):
+            cls = int(rois[j, 1])
+            print classes[cls], rois[j, -1]
+            if cls > 0 and rois[j, -1] > cfg.TEST.DET_THRESHOLD:
+                # extract 3D points
+                x3d = np.ones((4, points.shape[1]), dtype=np.float32)
+                x3d[0, :] = points[cls,:,0]
+                x3d[1, :] = points[cls,:,1]
+                x3d[2, :] = points[cls,:,2]
+
+                # projection
+                RT = np.zeros((3, 4), dtype=np.float32)
+                RT[:3, :3] = quat2mat(poses[j, :4])
+                RT[:, 3] = poses[j, 4:7]
+                x2d = np.matmul(intrinsic_matrix, np.matmul(RT, x3d))
+                x2d[0, :] = np.divide(x2d[0, :], x2d[2, :])
+                x2d[1, :] = np.divide(x2d[1, :], x2d[2, :])
+                plt.plot(x2d[0, :], x2d[1, :], '.', color=np.divide(class_colors[cls], 255.0), alpha=0.5)
+
+        # show predicted vertex targets
+        vertex_target = vertex_pred[0, :, :, :]
+        center = np.zeros((3, height, width), dtype=np.float32)
+
+        for j in range(1, num_classes):
+            index = np.where(label == j)
+            if len(index[0]) > 0:
+                center[0, index[0], index[1]] = vertex_target[3*j, index[0], index[1]]
+                center[1, index[0], index[1]] = vertex_target[3*j+1, index[0], index[1]]
+                center[2, index[0], index[1]] = np.exp(vertex_target[3*j+2, index[0], index[1]])
+
+        ax = fig.add_subplot(2, 4, 5)
+        plt.imshow(center[0,:,:])
+        ax.set_title('predicted center x') 
+
+        ax = fig.add_subplot(2, 4, 6)
+        plt.imshow(center[1,:,:])
+        ax.set_title('predicted center y')
+
+        ax = fig.add_subplot(2, 4, 7)
+        plt.imshow(center[2,:,:])
+        ax.set_title('predicted z')
+
+    plt.show()
