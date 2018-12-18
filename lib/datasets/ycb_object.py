@@ -127,14 +127,14 @@ class YCBObject(data.Dataset, datasets.imdb):
             self.pose_indexes[cls] += 1
 
             # translation
-            bound = 0.3
-            if i == 0 or i >= num_target:
+            bound = 0.4
+            if i == 0 or i >= num_target or np.random.rand(1) > 0.5:
                 qt[0] = np.random.uniform(-bound, bound)
                 qt[1] = np.random.uniform(-bound, bound)
                 qt[2] = np.random.uniform(cfg.TRAIN.SYN_TNEAR * 2, cfg.TRAIN.SYN_TFAR)
             else:
                 # sample an object nearby
-                object_id = i - 1
+                object_id = np.random.randint(0, i, size=1)[0]
                 extent = np.mean(self._extents_all[cls+1, :])
 
                 flag = np.random.randint(0, 2)
