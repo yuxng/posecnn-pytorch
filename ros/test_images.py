@@ -91,6 +91,11 @@ if __name__ == '__main__':
     cfg.MODE == 'TEST'
     dataset = get_dataset(args.dataset_name)
 
+    # overwrite intrinsics
+    if len(cfg.INTRINSICS) == 9:
+        K = np.array(cfg.INTRINSICS).reshape(3, 3)
+        dataset._intrinsic_matrix = K
+
     # prepare network
     if args.pretrained:
         network_data = torch.load(args.pretrained)

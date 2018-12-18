@@ -103,7 +103,7 @@ if __name__ == '__main__':
 
     if cfg.TRAIN.SYNTHESIZE:
         print 'loading 3D models'
-        cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, render_marker=True)
+        cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, render_marker=False)
         cfg.renderer.load_objects(dataset.model_mesh_paths, dataset.model_texture_paths, dataset.model_colors)
         cfg.renderer.set_camera_default()
         print dataset.model_mesh_paths
