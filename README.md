@@ -32,17 +32,19 @@ If you find PoseCNN useful in your research, please consider citing:
    git submodule update --init --recursive
    ```
 
-3. Compile the new layers under $ROOT/lib/layers we introduce in PoseCNN.
+3. Install Eigen from the Github source code [here](https://github.com/eigenteam/eigen-git-mirror)
+
+4. Compile the new layers under $ROOT/lib/layers we introduce in PoseCNN.
     ```Shell
     cd $ROOT/lib/layers
     python setup.py install
     ```
 
-4. Download the VGG16 weights from [here](https://drive.google.com/file/d/1tTd64s1zNnjONlXvTFDZAf4E68Pupc_S/view?usp=sharing) (528M). Put the weight file to $ROOT/data/checkpoints.
+5. Download the VGG16 weights from [here](https://drive.google.com/file/d/1tTd64s1zNnjONlXvTFDZAf4E68Pupc_S/view?usp=sharing) (528M). Put the weight file to $ROOT/data/checkpoints.
 
-5. Compile the ycb_render in $ROOT/ycb_render
+6. Compile the ycb_render in $ROOT/ycb_render
 
-6. Compile cython components
+7. Compile cython components
     ```Shell
     cd $ROOT/lib
     python setup.py build_ext --inplace
