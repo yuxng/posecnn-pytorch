@@ -12,6 +12,7 @@
 import _init_paths
 import argparse
 import os, sys
+import torch
 from transforms3d.quaternions import mat2quat, quat2mat
 from fcn.config import cfg, cfg_from_file, get_output_dir
 import scipy.io
@@ -80,6 +81,9 @@ if __name__ == '__main__':
     renderer.set_camera_default()
     renderer.set_projection_matrix(width, height, fx, fy, px, py, znear, zfar)
 
+    image_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
+    seg_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
+
     num_images = opt.nums[int(seq_id)]
     perm = np.random.permutation(np.arange(num_images))
     for i in perm:
@@ -106,7 +110,12 @@ if __name__ == '__main__':
         print poses_all
         renderer.set_poses(poses_all)
         renderer.set_light_pos([0, 0, 0])
-        frame = renderer.render(cls_indexes)
+
+        renderer.render(cls_indexes, image_tensor, seg_tensor)
+        image_tensor = image_tensor.flip(0)
+        seg_tensor = seg_tensor.flip(0)
+        frame = [image_tensor.cpu().numpy(), seg_tensor.cpu().numpy()]
+
         im_syn = frame[0][:, :, :3] * 255
         im_syn = np.clip(im_syn, 0, 255)
         im_syn = im_syn.astype(np.uint8)
@@ -115,11 +124,13 @@ if __name__ == '__main__':
         im_label = np.clip(im_label, 0, 255)
         im_label = im_label.astype(np.uint8)
 
+        '''
         pcloud = frame[2].reshape((-1, 3))
         index = np.where(pcloud[:, 0] != 0)[0]
         perm = np.random.permutation(np.arange(len(index)))
         index = index[perm[:3000]]
         pcloud = pcloud[index, :]
+        '''
 
         # show images
         import matplotlib.pyplot as plt
@@ -133,14 +144,14 @@ if __name__ == '__main__':
         ax.set_title('color')
 
         ax = fig.add_subplot(2, 2, 2)
-        plt.imshow(im_syn[:,:,(2, 1, 0)])
+        plt.imshow(im_syn)
         ax.set_title('render')
 
         ax = fig.add_subplot(2, 2, 3)
-        plt.imshow(im_label[:,:,(2, 1, 0)])
+        plt.imshow(im_label)
         ax.set_title('label')
 
-        ax = fig.add_subplot(2, 2, 4, projection='3d')
-        ax.scatter(pcloud[:, 0], pcloud[:, 1], pcloud[:, 2], color='green')
+        # ax = fig.add_subplot(2, 2, 4, projection='3d')
+        # ax.scatter(pcloud[:, 0], pcloud[:, 1], pcloud[:, 2], color='green')
 
         plt.show()

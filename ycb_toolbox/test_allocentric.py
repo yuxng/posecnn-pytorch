@@ -10,6 +10,7 @@
 """Test a FCN on an image database."""
 
 import _init_paths
+import torch
 import argparse
 import os, sys
 from transforms3d.quaternions import mat2quat, quat2mat, qmult, qinverse
@@ -29,10 +30,13 @@ if __name__ == '__main__':
     height = 480
     width = 640
 
+    image_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
+    seg_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
+
     filename = os.path.join(root, 'data', '0000', '000001-meta.mat')
     metadata = scipy.io.loadmat(filename)
     intrinsic_matrix = metadata['intrinsic_matrix']
-    cls_indexes = [5]
+    cls_indexes = [2]
     num_classes = len(cls_indexes)
 
     obj_paths = [
@@ -60,11 +64,15 @@ if __name__ == '__main__':
     poses = []
     for i in np.arange(-2, 2, 0.4):
         for j in np.arange(-2, 2, 0.4):
-            quat = [1, 1, 0, 0]
+            quat = [1, 0, 0, 0]
             poses.append(np.array([i, j, z] + list(quat)))
 
     renderer.set_allocentric_poses(poses)
-    frame = renderer.render([0] * len(poses))
+    renderer.render([0] * len(poses), image_tensor, seg_tensor)
+    image_tensor = image_tensor.flip(0)
+    seg_tensor = seg_tensor.flip(0)
+    frame = [image_tensor.cpu().numpy(), seg_tensor.cpu().numpy]
+
     im_syn0 = frame[0][:, :, :3] * 255
     im_syn0 = np.clip(im_syn0, 0, 255)
     im_syn0 = im_syn0.astype(np.uint8)
@@ -81,7 +89,12 @@ if __name__ == '__main__':
     renderer.set_allocentric_poses(poses_new)
     '''   
     renderer.set_poses(poses)
-    frame = renderer.render([0] * len(poses))
+
+    renderer.render([0] * len(poses), image_tensor, seg_tensor)
+    image_tensor = image_tensor.flip(0)
+    seg_tensor = seg_tensor.flip(0)
+    frame = [image_tensor.cpu().numpy(), seg_tensor.cpu().numpy]
+
     im_syn1 = frame[0][:, :, :3] * 255
     im_syn1 = np.clip(im_syn1, 0, 255)
     im_syn1 = im_syn1.astype(np.uint8)
@@ -90,11 +103,11 @@ if __name__ == '__main__':
     import matplotlib.pyplot as plt
     fig = plt.figure()
     ax = fig.add_subplot(1, 2, 1)
-    plt.imshow(im_syn0[:,:,(2, 1, 0)])
+    plt.imshow(im_syn0)
     ax.set_title('allocentric')
 
     ax = fig.add_subplot(1, 2, 2)
-    plt.imshow(im_syn1[:,:,(2, 1, 0)])
-    ax.set_title('egocentric to allocentric')
+    plt.imshow(im_syn1)
+    ax.set_title('egocentric')
 
     plt.show()
