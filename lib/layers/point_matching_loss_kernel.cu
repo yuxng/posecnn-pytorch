@@ -15,7 +15,7 @@
 template <typename Dtype>
 __global__ void AveragedistanceForward(const int nthreads, const Dtype* prediction, const Dtype* target,
     const Dtype* weight, const Dtype* point, const Dtype* symmetry, const int batch_size, const int num_classes, 
-    const int num_points, Dtype* rotations, Dtype* losses, Dtype* diffs) 
+    const int num_points, const float hard_angle, Dtype* rotations, Dtype* losses, Dtype* diffs, Dtype* angles_batch) 
 {
   CUDA_1D_KERNEL_LOOP(index_thread, nthreads) 
   {
@@ -68,6 +68,17 @@ __global__ void AveragedistanceForward(const int nthreads, const Dtype* predicti
         rotations[ind + 6] = 2 * (u * w - s * v);
         rotations[ind + 7] = 2 * (v * w + s * u);
         rotations[ind + 8] = s * s - u * u - v * v + w * w;
+
+        // compute the angular distance between quarternions
+        if (p == 0)
+        {
+          Dtype d = target[index + 0] * prediction[index + 0] + target[index + 1] * prediction[index + 1] 
+                  + target[index + 2] * prediction[index + 2] + target[index + 3] * prediction[index + 3];
+          Dtype angle = acos(2 * d * d - 1) * 180.0 / 3.14159265;
+          if (angle > hard_angle)
+            angles_batch[n] = 1.0;
+        }
+
         break;
       }
     }
@@ -185,24 +196,24 @@ __global__ void AveragedistanceForward(const int nthreads, const Dtype* predicti
       for (int k = 0; k < 3; k++)
       {
         ind = n * num_points * 6 * 9 + p * 6 * 9 + 18;
-        diffs[index_diff + 0] += df * point[index + k] * rotations[ind + j * 3 + k] / (batch_size * num_points);
+        diffs[index_diff + 0] += df * point[index + k] * rotations[ind + j * 3 + k] / num_points;
         ind = n * num_points * 6 * 9 + p * 6 * 9 + 27;
-        diffs[index_diff + 1] += df * point[index + k] * rotations[ind + j * 3 + k] / (batch_size * num_points);
+        diffs[index_diff + 1] += df * point[index + k] * rotations[ind + j * 3 + k] / num_points;
         ind = n * num_points * 6 * 9 + p * 6 * 9 + 36;
-        diffs[index_diff + 2] += df * point[index + k] * rotations[ind + j * 3 + k] / (batch_size * num_points);
+        diffs[index_diff + 2] += df * point[index + k] * rotations[ind + j * 3 + k] / num_points;
         ind = n * num_points * 6 * 9 + p * 6 * 9 + 45;
-        diffs[index_diff + 3] += df * point[index + k] * rotations[ind + j * 3 + k] / (batch_size * num_points);
+        diffs[index_diff + 3] += df * point[index + k] * rotations[ind + j * 3 + k] / num_points;
       }
     }
-    losses[index_thread] = distance / (batch_size * num_points);
+    losses[index_thread] = distance / num_points;
   }
 }
 
 
 
 template <typename Dtype>
-__global__ void sum_losses_gradients(const int nthreads, const Dtype* losses, const Dtype* diffs, const int batch_size, 
-    const int num_classes, const int num_points, Dtype* loss_batch, Dtype* bottom_diff) 
+__global__ void sum_losses_gradients(const int nthreads, const Dtype* losses, const Dtype* diffs, 
+    const int num_classes, const int num_points, const float batch_hard, Dtype* angles, Dtype* loss_batch, Dtype* bottom_diff) 
 {
   CUDA_1D_KERNEL_LOOP(index, nthreads) 
   {
@@ -210,19 +221,24 @@ __global__ void sum_losses_gradients(const int nthreads, const Dtype* losses, co
     int c = index % (POSE_CHANNELS * num_classes);
 
     bottom_diff[index] = 0;
-    for (int p = 0; p < num_points; p++)
+    if (angles[n] > 0)
     {
-      int index_diff = n * num_points * POSE_CHANNELS * num_classes + p * POSE_CHANNELS * num_classes + c;
-      bottom_diff[index] += diffs[index_diff];
+      for (int p = 0; p < num_points; p++)
+      {
+        int index_diff = n * num_points * POSE_CHANNELS * num_classes + p * POSE_CHANNELS * num_classes + c;
+        bottom_diff[index] += diffs[index_diff] / batch_hard;
+      }
     }
 
     if (c == 0)
     {
       loss_batch[n] = 0;
-      for (int p = 0; p < num_points; p++)
-        loss_batch[n] += losses[n * num_points + p];
+      if (angles[n] > 0)
+      {
+        for (int p = 0; p < num_points; p++)
+          loss_batch[n] += losses[n * num_points + p] / batch_hard;
+      }
     }
-
   }
 }
 
@@ -232,7 +248,8 @@ std::vector<at::Tensor> pml_cuda_forward(
     at::Tensor bottom_target,
     at::Tensor bottom_weight,
     at::Tensor points,
-    at::Tensor symmetry) 
+    at::Tensor symmetry,
+    float hard_angle) 
 {
   // run kernels
   cudaError_t err;
@@ -246,6 +263,7 @@ std::vector<at::Tensor> pml_cuda_forward(
 
   auto losses = at::zeros({batch_size, num_points}, points.options());
   auto losses_batch = at::zeros({batch_size}, points.options());
+  auto angles_batch = at::zeros({batch_size}, points.options());
   auto top_data = at::zeros({1}, points.options());
 
   // temp diffs
@@ -259,9 +277,13 @@ std::vector<at::Tensor> pml_cuda_forward(
   output_size = batch_size * num_points;
   AveragedistanceForward<<<(output_size + kThreadsPerBlock - 1) / kThreadsPerBlock, kThreadsPerBlock>>>(
       output_size, bottom_prediction.data<float>(), bottom_target.data<float>(), bottom_weight.data<float>(), 
-      points.data<float>(), symmetry.data<float>(),
-      batch_size, num_classes, num_points, rotations.data<float>(), losses.data<float>(), diffs.data<float>());
+      points.data<float>(), symmetry.data<float>(), 
+      batch_size, num_classes, num_points, hard_angle, rotations.data<float>(), losses.data<float>(), diffs.data<float>(), angles_batch.data<float>());
   cudaDeviceSynchronize();
+
+  // sum the angle flags
+  thrust::device_ptr<float> angles_ptr(angles_batch.data<float>());
+  float batch_hard = thrust::reduce(angles_ptr, angles_ptr + batch_size);
 
   err = cudaGetLastError();
   if(cudaSuccess != err)
@@ -273,8 +295,8 @@ std::vector<at::Tensor> pml_cuda_forward(
   // sum the diffs
   output_size = batch_size * POSE_CHANNELS * num_classes;
   sum_losses_gradients<<<(output_size + kThreadsPerBlock - 1) / kThreadsPerBlock, kThreadsPerBlock>>>(
-      output_size, losses.data<float>(), diffs.data<float>(), batch_size, num_classes, 
-      num_points, losses_batch.data<float>(), bottom_diff.data<float>());
+      output_size, losses.data<float>(), diffs.data<float>(), num_classes, 
+      num_points, batch_hard, angles_batch.data<float>(), losses_batch.data<float>(), bottom_diff.data<float>());
   cudaDeviceSynchronize();
 
   // sum the loss

@@ -112,7 +112,7 @@ class PoseCNN(nn.Module):
             self.fc8 = fc(4096, num_classes)
             self.fc9 = fc(4096, 4 * num_classes, relu=False)
             self.fc10 = fc(4096, 4 * num_classes, relu=False)
-            self.pml = PMLoss()
+            self.pml = PMLoss(hard_angle=15)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):

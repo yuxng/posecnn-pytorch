@@ -135,7 +135,8 @@ std::vector<at::Tensor> pml_cuda_forward(
     at::Tensor bottom_target,
     at::Tensor bottom_weight,
     at::Tensor points,
-    at::Tensor symmetry);
+    at::Tensor symmetry,
+    float hard_angle);
 
 std::vector<at::Tensor> pml_cuda_backward(
     at::Tensor grad_loss,
@@ -146,7 +147,8 @@ std::vector<at::Tensor> pml_forward(
     at::Tensor bottom_target,
     at::Tensor bottom_weight,
     at::Tensor points,
-    at::Tensor symmetry)
+    at::Tensor symmetry,
+    float hard_angle)
 {
   CHECK_INPUT(bottom_prediction);
   CHECK_INPUT(bottom_target);
@@ -154,7 +156,7 @@ std::vector<at::Tensor> pml_forward(
   CHECK_INPUT(points);
   CHECK_INPUT(symmetry);
 
-  return pml_cuda_forward(bottom_prediction, bottom_target, bottom_weight, points, symmetry);
+  return pml_cuda_forward(bottom_prediction, bottom_target, bottom_weight, points, symmetry, hard_angle);
 }
 
 std::vector<at::Tensor> pml_backward(
