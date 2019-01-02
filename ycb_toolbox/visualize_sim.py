@@ -14,24 +14,24 @@ if __name__ == '__main__':
     model_path = '/capri/YCB_Video_Dataset'
     width = 640
     height = 480
-    files = glob.glob('debug_data/*.npy')
+    files = glob.glob('data_from_sim/*.npy')
 
     renderer = YCBRenderer(width=width, height=height, render_marker=True)
-    # models = ['003_cracker_box', '004_sugar_box', '005_tomato_soup_can', '006_mustard_bottle', '010_potted_meat_can']
-    # colors = [[0, 1, 0], [0, 0, 1], [1, 1, 0], [1, 0, 1], [0.5, 0.5, 0]]
+    models = ['003_cracker_box', '004_sugar_box', '005_tomato_soup_can', '006_mustard_bottle', '010_potted_meat_can']
+    colors = [[0, 1, 0], [0, 0, 1], [1, 1, 0], [1, 0, 1], [0.5, 0.5, 0]]
 
-    models = ['003_cracker_box']
-    colors = [[0, 1, 0]]
-
+    # models = ['003_cracker_box']
+    # colors = [[0, 1, 0]]
 
     obj_paths = [
-        '{}/models/{}/textured_simple.obj'.format(model_path, item) for item in models]
+        '{}/models_sim/{}/meshes/{}.obj'.format(model_path, item, item) for item in models]
     texture_paths = [
-        '{}/models/{}/texture_map.png'.format(model_path, item) for item in models]
+        '{}/models_sim/{}/meshes/texture_map.png'.format(model_path, item) for item in models]
     renderer.load_objects(obj_paths, texture_paths, colors)
 
-    renderer.set_fov(40)
+    renderer.set_fov(60)
     renderer.set_light_pos([0, 0, 0])
+    renderer.set_camera([0, 0, 0], [1, 0, 0], [0, 0, 1])
 
     image_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
     seg_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
@@ -58,46 +58,36 @@ if __name__ == '__main__':
             if cls_index >= 0:
                 cls_indexes.append(cls_index)
 
-                w = data['absolute_poses'][i][6]
-                x = data['absolute_poses'][i][3]
-                y = data['absolute_poses'][i][4]
-                z = data['absolute_poses'][i][5]	
-                # RT_object[:3, :3] = quat2mat([w, x, y, z])
-                RT_object[:3, :3] = np.eye(3)
+                RT = np.zeros((3, 4), dtype=np.float32)
 
-                x = data['absolute_poses'][i][0]
-                y = data['absolute_poses'][i][2]
-                z = data['absolute_poses'][i][1]
-                RT_object[:, 3] = [x, y, z]
-                print 'RT_object'
-                print RT_object
+                w = data['relative_poses'][i][0]
+                x = data['relative_poses'][i][1]
+                y = data['relative_poses'][i][2]
+                z = data['relative_poses'][i][3]
+                RT[:3, :3] = quat2mat([w, x, y, z])
 
-                RT = se3_mul(se3_inverse(RT_camera), RT_object)
-                print 'RT'
+                x = data['relative_poses'][i][4]
+                y = data['relative_poses'][i][5]
+                z = data['relative_poses'][i][6]
+                RT[:, 3] = [x, y, z]
                 print RT
+
+                RT_relative = np.array([[0, -1, 0, 0], [1, 0, 0, 0], [0, 0, 1, 0]])
+
+                RT1 = np.zeros((3, 4), dtype=np.float32)
+                RT1[:3, :3] = rotation_x(90)
+
+                print RT_relative
+                print RT1
+                RT_new = se3_mul(RT, se3_mul(RT1, RT_relative))
+                print RT_new
 
                 qt = np.zeros((7, ), dtype=np.float32)
                 qt[3:] = mat2quat(RT[:3, :3])
                 qt[:3] = RT[:, 3]
+                print qt
+
                 poses.append(qt)
-            
-            if object_name == 'camera':
-
-                w = data['absolute_poses'][i][6]
-                x = data['absolute_poses'][i][3]
-                y = data['absolute_poses'][i][4]
-                z = data['absolute_poses'][i][5]
-                # RT_camera[:3, :3] = quat2mat([w, x, y, z])
-                RT_camera[:3, :3] = np.eye(3)
-
-                x = data['absolute_poses'][i][0]
-                y = data['absolute_poses'][i][2]
-                z = data['absolute_poses'][i][1]
-
-                RT_camera[:, 3] = [x, y, z]
-                renderer.set_camera([x, z, y], [0, 0, 0], [0, 1, 0])
-                print 'RT_camera'
-                print RT_camera
 
             print('object_name: {}, relative_qt = {}, absolute_qt = {}'.format(data['object_labels'][i], data['relative_poses'][i], data['absolute_poses'][i]))
 
