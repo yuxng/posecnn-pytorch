@@ -91,5 +91,7 @@ If you find PoseCNN useful in your research, please consider citing:
     source /opt/ros/kinetic/setup.bash
     roslaunch openni_launch openni.launch depth_registration:=true
     rosrun rviz rviz
+    rosrun camera_calibration cameracalibrator.py image:=/camera/rgb/image_raw camera:=/camera/rgb --size 9x6 --square 0.0255
+    rosrun camera_calibration cameracalibrator.py image:=/camera/ir/image_raw camera:=/camera/ir --size 9x6 --square 0.0255
     ./experiments/scripts/experiments/scripts/ros_ycb_object_test_subset.sh $GPU_ID
     ```

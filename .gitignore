@@ -10,3 +10,5 @@
 output*
 lib/synthesize/build/*
 lib/utils/bbox.c
+ycb_toolbox/data*
+ycb_toolbox/result*
