@@ -37,7 +37,6 @@ class YCBObject(data.Dataset, datasets.imdb):
                               (0, 0, 128), (0, 128, 0), (128, 0, 0), (128, 128, 0), (128, 0, 128), (0, 128, 128), \
                               (64, 0, 0), (0, 64, 0), (0, 0, 64), (64, 64, 0), (64, 0, 64), (0, 64, 64), 
                               (192, 0, 0), (0, 192, 0), (0, 0, 192), (192, 192, 0), (192, 0, 192), (0, 192, 192)]
-        self._symmetry_all = np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0]).astype(np.float32)
         self._extents_all = self._load_object_extents()
 
         self._width = 640
@@ -50,7 +49,7 @@ class YCBObject(data.Dataset, datasets.imdb):
         self._classes = [self._classes_all[i] for i in cfg.TRAIN.CLASSES]
         self._num_classes = len(self._classes)
         self._class_colors = [self._class_colors_all[i] for i in cfg.TRAIN.CLASSES]
-        self._symmetry = self._symmetry_all[cfg.TRAIN.CLASSES]
+        self._symmetry = np.array(cfg.TRAIN.SYMMETRY).astype(np.float32)
         self._extents = self._extents_all[cfg.TRAIN.CLASSES]
         self._points, self._points_all, self._point_blob = self._load_object_points()
         self._pixel_mean = torch.tensor(cfg.PIXEL_MEANS / 255.0).cuda().float()

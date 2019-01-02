@@ -14,7 +14,7 @@ if __name__ == '__main__':
     model_path = '/capri/YCB_Video_Dataset'
     width = 640
     height = 480
-    files = glob.glob('data_from_sim/*.npy')
+    files = glob.glob('data_4/*.npy')
 
     renderer = YCBRenderer(width=width, height=height, render_marker=True)
     models = ['003_cracker_box', '004_sugar_box', '005_tomato_soup_can', '006_mustard_bottle', '010_potted_meat_can']
@@ -39,6 +39,8 @@ if __name__ == '__main__':
     RT_camera = np.zeros((3, 4), dtype=np.float32)
 
     for file_path in files[1:]:
+
+        print file_path
       
         data = np.load(file_path).item()
         cls_indexes = []
@@ -71,16 +73,6 @@ if __name__ == '__main__':
                 z = data['relative_poses'][i][6]
                 RT[:, 3] = [x, y, z]
                 print RT
-
-                RT_relative = np.array([[0, -1, 0, 0], [1, 0, 0, 0], [0, 0, 1, 0]])
-
-                RT1 = np.zeros((3, 4), dtype=np.float32)
-                RT1[:3, :3] = rotation_x(90)
-
-                print RT_relative
-                print RT1
-                RT_new = se3_mul(RT, se3_mul(RT1, RT_relative))
-                print RT_new
 
                 qt = np.zeros((7, ), dtype=np.float32)
                 qt[3:] = mat2quat(RT[:3, :3])
