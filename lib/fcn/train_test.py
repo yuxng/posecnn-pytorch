@@ -404,11 +404,15 @@ def refine_pose(im_label, im_depth, rois, poses, intrinsic_matrix):
         labels = np.zeros((height, width), dtype=np.float32)
         labels[y1:y2, x1:x2] = im_label[y1:y2, x1:x2]
         labels = labels.reshape((width * height, ))
-        index = np.where((labels == cls) & np.isfinite(dpoints[:, 0]) & (pcloud[:, 0] != 0))
-        T = np.mean(dpoints[index, :] - pcloud[index, :], axis=1)
-        poses[i, 4] *= T[0, 2]
-        poses[i, 5] *= T[0, 2]
-        poses[i, 6] = T[0, 2]
+        index = np.where((labels == cls) & np.isfinite(dpoints[:, 0]) & (pcloud[:, 0] != 0))[0]
+        if len(index) > 10:
+            T = np.mean(dpoints[index, :] - pcloud[index, :], axis=0)
+            poses[i, 4] *= T[2]
+            poses[i, 5] *= T[2]
+            poses[i, 6] = T[2]
+        else:
+            poses[i, 4] *= poses[i, 6]
+            poses[i, 5] *= poses[i, 6]
 
     return poses
 
