@@ -12,7 +12,7 @@ from fcn.config import cfg
 from fcn.train_test import test_image
 from cv_bridge import CvBridge, CvBridgeError
 from std_msgs.msg import String
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import Image, CameraInfo
 from transforms3d.quaternions import mat2quat, quat2mat, qmult
 from scipy.optimize import minimize
 from utils.blob import pad_im, chromatic_transform, add_noise
@@ -41,6 +41,7 @@ class ImageListener:
             if 'posecnn_image_listener' in node_names[i]:
                 idx += 1
         suffix = '_%02d' % (idx)
+        prefix = '%02d_' % (idx)
 
         # initialize a node
         rospy.init_node('posecnn_image_listener' + suffix)
@@ -50,14 +51,21 @@ class ImageListener:
         rgb_sub = message_filters.Subscriber('/%s/rgb/image_color' % (cfg.TEST.ROS_CAMERA), Image, queue_size=2)
         depth_sub = message_filters.Subscriber('/%s/depth_registered/image' % (cfg.TEST.ROS_CAMERA), Image, queue_size=2)
 
+        # update camera intrinsics
+        msg = rospy.wait_for_message('/%s/rgb/camera_info' % (cfg.TEST.ROS_CAMERA), CameraInfo)
+
+        K = np.array(msg.K).reshape(3, 3)
+        dataset._intrinsic_matrix = K
+        print(dataset._intrinsic_matrix)
+
         # create pose publisher for each known object class
         self.pubs = []
         for i in range(1, self.dataset.num_classes):
             if self.dataset.classes[i][3] == '_':
-                cls = self.dataset.classes[i][4:]
+                cls = prefix + self.dataset.classes[i][4:]
             else:
-                cls = self.dataset.classes[i]
-            self.pubs.append(rospy.Publisher('/objects/prior_pose' + suffix + '/' + cls, PoseStamped, queue_size=1))
+                cls = prefix + self.dataset.classes[i]
+            self.pubs.append(rospy.Publisher('/objects/prior_pose/' + cls, PoseStamped, queue_size=1))
 
         queue_size = 1
         slop_seconds = 0.1

@@ -23,5 +23,5 @@ cp ycb_toolbox/*.py $DST/ycb_toolbox
 cp ycb_render/*.py $DST/ycb_render
 cp ycb_render/*.txt $DST/ycb_render
 cp ycb_render/cpp/*.cpp $DST/ycb_render/cpp
-
+cp ycb_render/glutils/*.py $DST/ycb_render/glutils
 
