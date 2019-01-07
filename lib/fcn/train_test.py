@@ -413,6 +413,7 @@ def refine_pose(im_label, im_depth, rois, poses, intrinsic_matrix):
         else:
             poses[i, 4] *= poses[i, 6]
             poses[i, 5] *= poses[i, 6]
+            print 'no pose refinement'
 
     return poses
 

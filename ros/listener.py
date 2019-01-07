@@ -1,5 +1,6 @@
 import rospy
 import tf
+import rosnode
 import message_filters
 import cv2
 import numpy as np
@@ -33,19 +34,30 @@ class ImageListener:
         if cfg.TRAIN.VERTEX_REG and cfg.TEST.POSE_REFINE:
             self.renders = dict()
 
+        # check node names
+        node_names = rosnode.get_node_names()
+        idx = 0
+        for i in range(len(node_names)):
+            if 'posecnn_image_listener' in node_names[i]:
+                idx += 1
+        suffix = '_%02d' % (idx)
+
         # initialize a node
-        rospy.init_node("image_listener")
+        rospy.init_node('posecnn_image_listener' + suffix)
         self.br = tf.TransformBroadcaster()
-        self.label_pub = rospy.Publisher('posecnn_label', Image, queue_size=1)
-        self.pose_pub = rospy.Publisher('posecnn_pose', Image, queue_size=1)
+        self.label_pub = rospy.Publisher('posecnn_label' + suffix, Image, queue_size=1)
+        self.pose_pub = rospy.Publisher('posecnn_pose' + suffix, Image, queue_size=1)
         rgb_sub = message_filters.Subscriber('/%s/rgb/image_color' % (cfg.TEST.ROS_CAMERA), Image, queue_size=2)
         depth_sub = message_filters.Subscriber('/%s/depth_registered/image' % (cfg.TEST.ROS_CAMERA), Image, queue_size=2)
 
         # create pose publisher for each known object class
         self.pubs = []
         for i in range(1, self.dataset.num_classes):
-            cls = self.dataset.classes[i][4:]
-            self.pubs.append(rospy.Publisher("/objects/prior_pose/" + cls, PoseStamped, queue_size=1))
+            if self.dataset.classes[i][3] == '_':
+                cls = self.dataset.classes[i][4:]
+            else:
+                cls = self.dataset.classes[i]
+            self.pubs.append(rospy.Publisher('/objects/prior_pose' + suffix + '/' + cls, PoseStamped, queue_size=1))
 
         queue_size = 1
         slop_seconds = 0.1
