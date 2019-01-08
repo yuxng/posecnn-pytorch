@@ -126,7 +126,7 @@ class YCBObject(data.Dataset, datasets.imdb):
             self.pose_indexes[cls] += 1
 
             # translation
-            bound = 0.4
+            bound = cfg.TRAIN.SYN_BOUND
             if i == 0 or i >= num_target or np.random.rand(1) > 0.5:
                 qt[0] = np.random.uniform(-bound, bound)
                 qt[1] = np.random.uniform(-bound, bound)
