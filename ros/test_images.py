@@ -91,7 +91,7 @@ if __name__ == '__main__':
     cfg.instance_id = args.instance_id
 
     # dataset
-    cfg.MODE == 'TEST'
+    cfg.MODE = 'TEST'
     dataset = get_dataset(args.dataset_name)
 
     # prepare network
