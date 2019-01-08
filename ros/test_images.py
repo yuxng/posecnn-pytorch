@@ -35,6 +35,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Test a PoseCNN network')
     parser.add_argument('--gpu', dest='gpu_id', help='GPU id to use',
                         default=0, type=int)
+    parser.add_argument('--instance', dest='instance_id', help='PoseCNN instance id to use',
+                        default=0, type=int)
     parser.add_argument('--pretrained', dest='pretrained',
                         help='initialize with pretrained checkpoint',
                         default=None, type=str)
@@ -86,6 +88,7 @@ if __name__ == '__main__':
     # device
     cfg.device = torch.device('cuda:{:d}'.format(args.gpu_id))
     print 'GPU device {:d}'.format(args.gpu_id)
+    cfg.instance_id = args.instance_id
 
     # dataset
     cfg.MODE == 'TEST'

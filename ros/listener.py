@@ -34,14 +34,8 @@ class ImageListener:
         if cfg.TRAIN.VERTEX_REG and cfg.TEST.POSE_REFINE:
             self.renders = dict()
 
-        # check node names
-        node_names = rosnode.get_node_names()
-        idx = 0
-        for i in range(len(node_names)):
-            if 'posecnn_image_listener' in node_names[i]:
-                idx += 1
-        suffix = '_%02d' % (idx)
-        prefix = '%02d_' % (idx)
+        suffix = '_%02d' % (cfg.instance_id)
+        prefix = '%02d_' % (cfg.instance_id)
 
         # initialize a node
         rospy.init_node('posecnn_image_listener' + suffix)
