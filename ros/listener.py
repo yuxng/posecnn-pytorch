@@ -124,6 +124,14 @@ class ImageListener:
                 indexes[cls] += 1
                 self.br.sendTransform(poses[i, 4:7], quat, rospy.Time.now(), name, frame)
 
+                # send another transformation as bounding box (mis-used)
+                n = np.linalg.norm(rois[i, 2:6])
+                x1 = rois[i, 2] / n
+                y1 = rois[i, 3] / n
+                x2 = rois[i, 4] / n
+                y2 = rois[i, 5] / n
+                self.br.sendTransform([n, 0, 0], [x1, y1, x2, y2], rospy.Time.now(), name + '_roi', frame)
+
                 # create pose msg
                 msg = PoseStamped()
                 msg.header.stamp = rospy.Time.now()
