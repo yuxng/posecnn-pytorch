@@ -86,8 +86,9 @@ if __name__ == '__main__':
         np.random.seed(cfg.RNG_SEED)
 
     # device
-    cfg.device = torch.device('cuda:{:d}'.format(args.gpu_id))
+    cfg.device = torch.device('cuda:{:d}'.format(0))
     print 'GPU device {:d}'.format(args.gpu_id)
+    cfg.gpu_id = args.gpu_id
     cfg.instance_id = args.instance_id
 
     # dataset
@@ -104,7 +105,7 @@ if __name__ == '__main__':
         sys.exit()
 
     network = networks.__dict__[args.network_name](dataset.num_classes, cfg.TRAIN.NUM_UNITS, network_data).cuda(device=cfg.device)
-    network = torch.nn.DataParallel(network, device_ids=[args.gpu_id]).cuda(device=cfg.device)
+    network = torch.nn.DataParallel(network, device_ids=[0]).cuda(device=cfg.device)
     cudnn.benchmark = True
 
     # image listener

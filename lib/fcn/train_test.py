@@ -277,7 +277,7 @@ def test_image(network, dataset, im_color, im_depth=None):
         rois = np.zeros((0, 7), dtype=np.float32)
         poses = np.zeros((0, 7), dtype=np.float32)
 
-    im_pose, im_label = overlay_image(dataset, im_color, rois, poses, labels)
+    im_pose, im_label = render_image(dataset, im_color, rois, poses, labels)
 
     return im_pose, im_label, rois, poses
 
@@ -416,6 +416,81 @@ def refine_pose(im_label, im_depth, rois, poses, intrinsic_matrix):
             print 'no pose refinement'
 
     return poses
+
+
+def render_image(dataset, im, rois, poses, labels):
+
+    intrinsic_matrix = dataset._intrinsic_matrix
+    height = im.shape[0]
+    width = im.shape[1]
+    classes = dataset._classes
+    class_colors = dataset._class_colors
+
+    label_image = dataset.labels_to_image(labels)
+    im_label = im[:, :, (2, 1, 0)].copy()
+    I = np.where(labels != 0)
+    im_label[I[0], I[1], :] = 0.5 * label_image[I[0], I[1], :] + 0.5 * im_label[I[0], I[1], :]
+
+    fx = intrinsic_matrix[0, 0]
+    fy = intrinsic_matrix[1, 1]
+    px = intrinsic_matrix[0, 2]
+    py = intrinsic_matrix[1, 2]
+    zfar = 6.0
+    znear = 0.25
+    num = poses.shape[0]
+
+    image_tensor = torch.cuda.FloatTensor(height, width, 4)
+    seg_tensor = torch.cuda.FloatTensor(height, width, 4)
+
+    # set renderer
+    cfg.renderer.set_light_pos([0, 0, 0])
+    cfg.renderer.set_light_color([1, 1, 1])
+    cfg.renderer.set_projection_matrix(width, height, fx, fy, px, py, znear, zfar)
+
+    # render images
+    cls_indexes = []
+    poses_all = []
+    for i in range(num):
+        if cfg.MODE == 'TEST':
+            cls_index = int(rois[i, 1]) - 1
+        else:
+            cls_index = cfg.TRAIN.CLASSES[int(rois[i, 1])] - 1
+        cls_indexes.append(cls_index)
+
+        qt = np.zeros((7, ), dtype=np.float32)
+        qt[:3] = poses[i, 4:7]
+        qt[3:] = poses[i, :4]
+        poses_all.append(qt)
+
+        cls = int(rois[i, 1])
+        print classes[cls], rois[i, -1]
+        if cls > 0 and rois[i, -1] > cfg.TEST.DET_THRESHOLD:
+
+            # draw roi
+            x1 = rois[i, 2]
+            y1 = rois[i, 3]
+            x2 = rois[i, 4]
+            y2 = rois[i, 5]
+            cv2.rectangle(im_label, (x1, y1), (x2, y2), class_colors[cls], 2)
+
+    # rendering
+    cfg.renderer.set_poses(poses_all)
+    frame = cfg.renderer.render(cls_indexes, image_tensor, seg_tensor)
+    image_tensor = image_tensor.flip(0)
+    seg_tensor = seg_tensor.flip(0)
+
+    # RGB to BGR order
+    im_render = image_tensor.cpu().numpy()
+    im_render = np.clip(im_render, 0, 1)
+    im_render = im_render[:, :, :3] * 255
+    im_render = im_render.astype(np.uint8)
+    
+    # mask
+    seg = torch.sum(seg_tensor[:, :, :3], dim=2)
+    mask = (seg != 0).cpu().numpy()
+
+    im_output = 0.4 * im[:,:,(2, 1, 0)].astype(np.float32) + 0.6 * im_render.astype(np.float32)
+    return im_output.astype(np.uint8), im_label
 
 
 def overlay_image(dataset, im, rois, poses, labels):
