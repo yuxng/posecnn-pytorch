@@ -146,7 +146,8 @@ class ImageListener:
                 y1 = rois[i, 3] / n
                 x2 = rois[i, 4] / n
                 y2 = rois[i, 5] / n
-                self.br.sendTransform([n, 0, 0], [x1, y1, x2, y2], rospy.Time.now(), name + '_roi', frame)
+                now = rospy.Time.now()
+                self.br.sendTransform([n, now.secs, 0], [x1, y1, x2, y2], now, name + '_roi', frame)
 
                 # create pose msg
                 msg = PoseStamped()
