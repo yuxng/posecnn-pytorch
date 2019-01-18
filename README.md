@@ -55,8 +55,8 @@ If you find PoseCNN useful in your research, please consider citing:
 - PyTorch 0.4.1
 - CUDA 9.1
 
-### Running the demo (TODO)
-1. Download our trained model on the YCB-Video dataset from [here](https://drive.google.com/file/d/1UNJ56Za6--bHGgD3lbteZtXLC2E-liWz/view?usp=sharing), and save it to $ROOT/data/checkpoints.
+### Running the demo
+1. Download our trained model on five YCB Objects from [here](https://drive.google.com/open?id=1fxfBBCOPqSMYARiJQBc8ZjcWq5LiLHDq), and save it to $ROOT/data/checkpoints.
 
 2. run the following script
     ```Shell
