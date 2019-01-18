@@ -58,7 +58,9 @@ If you find PoseCNN useful in your research, please consider citing:
 ### Running the demo
 1. Download our trained model on five YCB Objects from [here](https://drive.google.com/open?id=1fxfBBCOPqSMYARiJQBc8ZjcWq5LiLHDq), and save it to $ROOT/data/checkpoints.
 
-2. run the following script
+2. Download the 3D models of the YCB Objects from [here](https://drive.google.com/file/d/1gmcDD-5bkJfcMKLZb3zGgH_HUFbulQWu/view?usp=sharing), and save it to $ROOT/data/YCB_Object.
+
+3. run the following script
     ```Shell
     ./experiments/scripts/demo.sh $GPU_ID
     ```
