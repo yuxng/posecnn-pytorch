@@ -13,7 +13,7 @@ import scipy.io
 
 import datasets
 from fcn.config import cfg
-from utils.blob import pad_im, chromatic_transform, add_noise
+from utils.blob import pad_im, chromatic_transform, add_noise, add_noise_cuda
 from transforms3d.quaternions import mat2quat, quat2mat
 from utils.se3 import *
 
@@ -52,11 +52,22 @@ class YCBVideo(data.Dataset, datasets.imdb):
         self._symmetry = self._symmetry_all[cfg.TRAIN.CLASSES]
         self._extents = self._extents_all[cfg.TRAIN.CLASSES]
         self._points, self._points_all, self._point_blob = self._load_object_points()
+        self._pixel_mean = torch.tensor(cfg.PIXEL_MEANS / 255.0).cuda().float()
+
+        self._classes_other = []
+        for i in range(self._num_classes_all):
+            if i not in cfg.TRAIN.CLASSES:
+                self._classes_other.append(i)
+        self._num_classes_other = len(self._classes_other)
 
         # 3D model paths
-        self.model_mesh_paths = ['{}/models/{}/textured_simple.obj'.format(self._ycb_video_path, cls) for cls in self._classes[1:]]
-        self.model_texture_paths = ['{}/models/{}/texture_map.png'.format(self._ycb_video_path, cls) for cls in self._classes[1:]]
-        self.model_colors = [np.array(self._class_colors_all[i]) / 255.0 for i in cfg.TRAIN.CLASSES[1:]]
+        self.model_mesh_paths = ['{}/models/{}/textured_simple.obj'.format(self._ycb_video_path, cls) for cls in self._classes_all[1:]]
+        self.model_texture_paths = ['{}/models/{}/texture_map.png'.format(self._ycb_video_path, cls) for cls in self._classes_all[1:]]
+        self.model_colors = [np.array(self._class_colors_all[i]) / 255.0 for i in range(1, len(self._classes_all))]
+
+        self.model_mesh_paths_target = ['{}/models/{}/textured_simple.obj'.format(self._ycb_video_path, cls) for cls in self._classes[1:]]
+        self.model_texture_paths_target = ['{}/models/{}/texture_map.png'.format(self._ycb_video_path, cls) for cls in self._classes[1:]]
+        self.model_colors_target = [np.array(self._class_colors_all[i]) / 255.0 for i in cfg.TRAIN.CLASSES[1:]]
 
         self._class_to_ind = dict(zip(self._classes, xrange(self._num_classes)))
         self._image_ext = '.png'
@@ -67,7 +78,8 @@ class YCBVideo(data.Dataset, datasets.imdb):
         else:
             self._size = len(self._image_index)
         self._roidb = self.gt_roidb()
-        self._build_background_images()
+        if cfg.MODE == 'TRAIN':
+            self._build_background_images()
         self._build_uniform_poses()
 
         assert os.path.exists(self._ycb_video_path), \
@@ -87,17 +99,27 @@ class YCBVideo(data.Dataset, datasets.imdb):
         zfar = 6.0
         znear = 0.25
 
-        # sample objects
+        # sample target objects
         if cfg.TRAIN.SYN_SAMPLE_OBJECT:
             maxnum = np.minimum(self.num_classes-1, cfg.TRAIN.SYN_MAX_OBJECT)
             num = np.random.randint(cfg.TRAIN.SYN_MIN_OBJECT, maxnum+1)
             perm = np.random.permutation(np.arange(self.num_classes-1))
-            cls_indexes = perm[:num]
+            indexes_target = perm[:num] + 1
         else:
             num = self.num_classes - 1
-            cls_indexes = np.arange(num)
+            indexes_target = np.arange(num) + 1
+        num_target = num
+        cls_indexes = [cfg.TRAIN.CLASSES[i]-1 for i in indexes_target]
+
+        # sample other objects as distractors
+        num_other = min(5, self._num_classes_other)
+        perm = np.random.permutation(np.arange(self._num_classes_other))
+        indexes = perm[:num_other]
+        for i in range(num_other):
+            cls_indexes.append(self._classes_other[indexes[i]]-1)
 
         # sample poses
+        num = num_target + num_other
         poses_all = []
         for i in range(num):
             qt = np.zeros((7, ), dtype=np.float32)
@@ -113,15 +135,15 @@ class YCBVideo(data.Dataset, datasets.imdb):
             self.pose_indexes[cls] += 1
 
             # translation
-            bound = 0.1
-            if i == 0:
+            bound = cfg.TRAIN.SYN_BOUND
+            if i == 0 or i >= num_target or np.random.rand(1) > 0.5:
                 qt[0] = np.random.uniform(-bound, bound)
                 qt[1] = np.random.uniform(-bound, bound)
-                qt[2] = np.random.uniform(cfg.TRAIN.SYN_TNEAR, cfg.TRAIN.SYN_TFAR)
+                qt[2] = np.random.uniform(cfg.TRAIN.SYN_TNEAR * 2, cfg.TRAIN.SYN_TFAR)
             else:
                 # sample an object nearby
-                object_id = i - 1
-                extent = np.mean(self._extents[cls+1, :])
+                object_id = np.random.randint(0, i, size=1)[0]
+                extent = np.mean(self._extents_all[cls+1, :])
 
                 flag = np.random.randint(0, 2)
                 if flag == 0:
@@ -153,19 +175,30 @@ class YCBVideo(data.Dataset, datasets.imdb):
             
         # rendering
         cfg.renderer.set_projection_matrix(width, height, fx, fy, px, py, znear, zfar)
-        frame = cfg.renderer.render(cls_indexes)
-        im = frame[0][:, :, :3] * 255
+        image_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
+        seg_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
+        cfg.renderer.render(cls_indexes, image_tensor, seg_tensor)
+        image_tensor = image_tensor.flip(0)
+        seg_tensor = seg_tensor.flip(0)
+
+        # RGB to BGR order
+        im = image_tensor.cpu().numpy()
+        im = np.clip(im, 0, 1)
+        im = im[:, :, (2, 1, 0)] * 255
         im = im.astype(np.uint8)
 
-        im_label = frame[1][:, :, :3] * 255
-        im_label = im_label.astype(np.uint8)
-        im_label = self.process_label_image(im_label)
+        im_label = seg_tensor.cpu().numpy()
+        im_label = im_label[:, :, (2, 1, 0)] * 255
+        im_label = np.round(im_label).astype(np.uint8)
+        im_label = np.clip(im_label, 0, 255)
+        im_label, im_label_all = self.process_label_image(im_label)
 
         centers = np.zeros((num, 2), dtype=np.float32)
         rcenters = cfg.renderer.get_centers()
         for i in range(num):
             centers[i, 0] = rcenters[i][1] * width
             centers[i, 1] = rcenters[i][0] * height
+        centers = centers[:num_target, :]
 
         # add background to the image
         ind = np.random.randint(len(self._backgrounds), size=1)[0]
@@ -190,12 +223,12 @@ class YCBVideo(data.Dataset, datasets.imdb):
             print 'bad background image'
 
         # paste objects on background
-        I = np.where(im_label == 0)
+        I = np.where(im_label_all == 0)
         im[I[0], I[1], :] = background[I[0], I[1], :3]
         im = im.astype(np.uint8)
         margin = 10
-        for i in range(centers.shape[0]):
-            I = np.where(im_label == cls_indexes[i]+1)
+        for i in range(num):
+            I = np.where(im_label_all == cls_indexes[i]+1)
             if len(I[0]) > 0:
                 y1 = np.max((np.round(np.min(I[0])) - margin, 0))
                 x1 = np.max((np.round(np.min(I[1])) - margin, 0))
@@ -210,12 +243,11 @@ class YCBVideo(data.Dataset, datasets.imdb):
         if cfg.TRAIN.CHROMATIC and cfg.MODE == 'TRAIN' and np.random.rand(1) > 0.1:
             im = chromatic_transform(im)
 
+        im_cuda = torch.from_numpy(im).cuda().float() / 255.0
         if cfg.TRAIN.ADD_NOISE and cfg.MODE == 'TRAIN' and np.random.rand(1) > 0.1:
-            im = add_noise(im)
-
-        im = im.astype(np.float32)
-        im -= cfg.PIXEL_MEANS
-        im = np.transpose(im / 255.0, (2, 0, 1))
+            im_cuda = add_noise_cuda(im_cuda)
+        im_cuda -= self._pixel_mean
+        im_cuda = im_cuda.permute(2, 0, 1)
 
         # label blob
         classes = np.array(range(self.num_classes))
@@ -230,8 +262,8 @@ class YCBVideo(data.Dataset, datasets.imdb):
         # poses and boxes
         pose_blob = np.zeros((self.num_classes, 9), dtype=np.float32)
         gt_boxes = np.zeros((self.num_classes, 5), dtype=np.float32)
-        for i in xrange(num):
-            cls = int(cls_indexes[i])+1
+        for i in xrange(num_target):
+            cls = int(indexes_target[i])
             pose_blob[i, 0] = 1
             pose_blob[i, 1] = cls
             T = poses_all[i][:3]
@@ -278,14 +310,14 @@ class YCBVideo(data.Dataset, datasets.imdb):
 
         # vertex regression target
         if cfg.TRAIN.VERTEX_REG:
-            vertex_targets, vertex_weights = self._generate_vertex_targets(im_label, cls_indexes+1, centers, poses_all, classes, self.num_classes)
+            vertex_targets, vertex_weights = self._generate_vertex_targets(im_label, indexes_target, centers, poses_all, classes, self.num_classes)
         else:
             vertex_targets = []
             vertex_weights = []
 
         im_info = np.array([im.shape[1], im.shape[2], cfg.TRAIN.SCALES_BASE[0]], dtype=np.float32)
 
-        sample = {'image': im,
+        sample = {'image': im_cuda,
                   'label': label_blob,
                   'meta_data': meta_data_blob,
                   'poses': pose_blob,
@@ -357,26 +389,25 @@ class YCBVideo(data.Dataset, datasets.imdb):
         else:
             im = rgba
 
-        # chromatic transform
-        if cfg.TRAIN.CHROMATIC:
-            im = chromatic_transform(im)
-
-        if cfg.TRAIN.ADD_NOISE:
-            im = add_noise(im)
+        im_scale = cfg.TRAIN.SCALES_BASE[scale_ind]
+        im = cv2.resize(im, None, None, fx=im_scale, fy=im_scale, interpolation=cv2.INTER_LINEAR)
+        height = im.shape[0]
+        width = im.shape[1]
 
         if roidb['flipped']:
             im = im[:, ::-1, :]
 
-        im_orig = im.astype(np.float32, copy=True)
-        im_orig -= cfg.PIXEL_MEANS	
-        im_scale = cfg.TRAIN.SCALES_BASE[scale_ind]
-        im = cv2.resize(im_orig, None, None, fx=im_scale, fy=im_scale, interpolation=cv2.INTER_LINEAR)
+        # chromatic transform
+        if cfg.TRAIN.CHROMATIC and cfg.MODE == 'TRAIN' and np.random.rand(1) > 0.1:
+            im = chromatic_transform(im)
 
-        height = im.shape[0]
-        width = im.shape[1]
-        im = np.transpose(im / 255.0, (2, 0, 1))
+        im_cuda = torch.from_numpy(im).cuda().float() / 255.0
+        if cfg.TRAIN.ADD_NOISE and cfg.MODE == 'TRAIN' and np.random.rand(1) > 0.1:
+            im_cuda = add_noise_cuda(im_cuda)
+        im_cuda -= self._pixel_mean
+        im_cuda = im_cuda.permute(2, 0, 1)
 
-        return im, im_scale, height, width
+        return im_cuda, im_scale, height, width
 
 
     def _get_label_blob(self, roidb, num_classes, im_scale, height, width):
@@ -747,13 +778,18 @@ class YCBVideo(data.Dataset, datasets.imdb):
         height = label_image.shape[0]
         width = label_image.shape[1]
         labels = np.zeros((height, width), dtype=np.int32)
+        labels_all = np.zeros((height, width), dtype=np.int32)
 
         # label image is in BGR order
         index = label_image[:,:,2] + 256*label_image[:,:,1] + 256*256*label_image[:,:,0]
-        for i in xrange(1, len(self._class_colors)):
-            color = self._class_colors[i]
+        for i in xrange(1, len(self._class_colors_all)):
+            color = self._class_colors_all[i]
             ind = color[0] + 256*color[1] + 256*256*color[2]
             I = np.where(index == ind)
-            labels[I[0], I[1]] = i
+            labels_all[I[0], I[1]] = i
 
-        return labels
+            ind = np.where(np.array(cfg.TRAIN.CLASSES) == i)[0]
+            if len(ind) > 0:
+                labels[I[0], I[1]] = ind
+
+        return labels, labels_all

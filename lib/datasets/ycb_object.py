@@ -103,11 +103,14 @@ class YCBObject(data.Dataset, datasets.imdb):
         cls_indexes = [cfg.TRAIN.CLASSES[i]-1 for i in indexes_target]
 
         # sample other objects as distractors
-        num_other = min(5, self._num_classes_other)
-        perm = np.random.permutation(np.arange(self._num_classes_other))
-        indexes = perm[:num_other]
-        for i in range(num_other):
-            cls_indexes.append(self._classes_other[indexes[i]]-1)
+        if cfg.TRAIN.SYN_SAMPLE_DISTRACTOR:
+            num_other = min(5, self._num_classes_other)
+            perm = np.random.permutation(np.arange(self._num_classes_other))
+            indexes = perm[:num_other]
+            for i in range(num_other):
+                cls_indexes.append(self._classes_other[indexes[i]]-1)
+        else:
+            num_other = 0
 
         # sample poses
         num = num_target + num_other

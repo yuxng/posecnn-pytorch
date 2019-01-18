@@ -65,6 +65,13 @@ class imdb(object):
 
     def _build_background_images(self):
 
+        cache_file = os.path.join(self.cache_path, 'backgrounds.pkl')
+        if os.path.exists(cache_file):
+            with open(cache_file, 'rb') as fid:
+                self._backgrounds = cPickle.load(fid)
+            print '{} backgrounds loaded from {}'.format(self._name, cache_file)
+            return
+
         backgrounds = []
 
         if cfg.TRAIN.SYN_BACKGROUND_SPECIFIC:
@@ -78,7 +85,7 @@ class imdb(object):
                     filename = os.path.join(allencenter, subdir, files[j])
                     backgrounds.append(filename)
         else:
-
+            '''
             # SUN 2012
             root = os.path.join(self.cache_path, '../SUN2012/data/Images')
             subdirs = os.listdir(root)
@@ -110,16 +117,14 @@ class imdb(object):
             for i in range(len(files)):
                 filename = os.path.join(objectnet3d, files[i])
                 backgrounds.append(filename)
+            '''
 
-            # AllenCenter
-            allencenter = os.path.join(self.cache_path, '../AllenCenter/data')
-            subdirs = os.listdir(allencenter)
-            for i in xrange(len(subdirs)):
-                subdir = subdirs[i]
-                files = os.listdir(os.path.join(allencenter, subdir))
-                for j in range(len(files)):
-                    filename = os.path.join(allencenter, subdir, files[j])
-                    backgrounds.append(filename)
+            # PASCAL 2012
+            pascal = os.path.join(self.cache_path, '../PASCAL2012/data')
+            files = os.listdir(pascal)
+            for i in range(len(files)):
+                filename = os.path.join(pascal, files[i])
+                backgrounds.append(filename)
 
         for i in xrange(len(backgrounds)):
             if not os.path.isfile(backgrounds[i]):

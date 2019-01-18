@@ -96,6 +96,12 @@ if __name__ == '__main__':
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=cfg.TRAIN.IMS_PER_BATCH, shuffle=True, num_workers=0)
     print 'Use dataset `{:s}` for training'.format(dataset.name)
 
+    # overwrite intrinsics
+    if len(cfg.INTRINSICS) > 0:
+        K = np.array(cfg.INTRINSICS).reshape(3, 3)
+        dataset._intrinsic_matrix = K
+        print(dataset._intrinsic_matrix)
+
     output_dir = get_output_dir(dataset, None)
     print 'Output will be saved to `{:s}`'.format(output_dir)
     if not os.path.exists(output_dir):
