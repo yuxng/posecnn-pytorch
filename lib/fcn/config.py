@@ -38,6 +38,7 @@ __C.BACKGROUND = ''
 __C.USE_GPU_NMS = True
 __C.MODE = 'TEST'
 __C.INTRINSICS = ()
+__C.DATA_PATH = ''
 
 __C.FLOW_HEIGHT = 512
 __C.FLOW_WIDTH = 640

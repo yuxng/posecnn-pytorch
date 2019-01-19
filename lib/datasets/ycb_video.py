@@ -24,7 +24,10 @@ class YCBVideo(data.Dataset, datasets.imdb):
         self._image_set = image_set
         self._ycb_video_path = self._get_default_path() if ycb_video_path is None \
                             else ycb_video_path
-        self._data_path = os.path.join(self._ycb_video_path, 'data')
+        if cfg.DATA_PATH == '':
+            self._data_path = os.path.join(self._ycb_video_path, 'data')
+        else:
+            self._data_path = cfg.DATA_PATH
 
         # define all the classes
         self._classes_all = ('__background__', '002_master_chef_can', '003_cracker_box', '004_sugar_box', '005_tomato_soup_can', '006_mustard_bottle', \

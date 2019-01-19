@@ -1,5 +1,6 @@
 EXP_DIR: ycb_video
 INPUT: COLOR
+DATA_PATH: /cdr/YCB_Video_Dataset/YCB_Video_Dataset/YCB_Video_Dataset/data
 TRAIN:
   TRAINABLE: True
   WEIGHT_DECAY: 0.0001
