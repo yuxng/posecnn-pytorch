@@ -436,15 +436,6 @@ class YCBVideo(data.Dataset, datasets.imdb):
                 label_blob[i, I[0], I[1]] = 1.0
                 label_blob[0, I[0], I[1]] = 0.0
 
-        # bounding boxes
-        boxes = meta_data['box'].copy()
-        num = boxes.shape[0]
-        if roidb['flipped']:
-            oldx1 = boxes[:, 0].copy()
-            oldx2 = boxes[:, 2].copy()
-            boxes[:, 0] = width - oldx2 - 1
-            boxes[:, 2] = width - oldx1 - 1
-
         # poses
         poses = meta_data['poses']
         if len(poses.shape) == 2:
@@ -469,8 +460,24 @@ class YCBVideo(data.Dataset, datasets.imdb):
                     qt = -1 * qt
                 pose_blob[count, 2:6] = qt
                 pose_blob[count, 6:] = T
-                gt_boxes[count, :4] =  boxes[i, :] * im_scale
-                gt_boxes[count, 4] =  ind
+
+                # compute box
+                x3d = np.ones((4, self._points_all.shape[1]), dtype=np.float32)
+                x3d[0, :] = self._points_all[cls,:,0]
+                x3d[1, :] = self._points_all[cls,:,1]
+                x3d[2, :] = self._points_all[cls,:,2]
+                RT = np.zeros((3, 4), dtype=np.float32)
+                RT[:3, :3] = quat2mat(qt)
+                RT[:, 3] = T
+                x2d = np.matmul(self._intrinsic_matrix, np.matmul(RT, x3d))
+                x2d[0, :] = np.divide(x2d[0, :], x2d[2, :])
+                x2d[1, :] = np.divide(x2d[1, :], x2d[2, :])
+        
+                gt_boxes[count, 0] = np.min(x2d[0, :]) * im_scale
+                gt_boxes[count, 1] = np.min(x2d[1, :]) * im_scale
+                gt_boxes[count, 2] = np.max(x2d[0, :]) * im_scale
+                gt_boxes[count, 3] = np.max(x2d[1, :]) * im_scale
+                gt_boxes[count, 4] = ind
                 count += 1
 
         # construct the meta data
