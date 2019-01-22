@@ -145,6 +145,8 @@ class YCBObject(data.Dataset, datasets.imdb):
                 qt[0] = poses_all[object_id][0] + flag * extent * np.random.uniform(1.0, 1.5)
                 if np.absolute(qt[0]) > bound:
                     qt[0] = poses_all[object_id][0] - flag * extent * np.random.uniform(1.0, 1.5)
+                if np.absolute(qt[0]) > bound:
+                    qt[0] = np.random.uniform(-bound, bound)
 
                 flag = np.random.randint(0, 2)
                 if flag == 0:
@@ -152,6 +154,8 @@ class YCBObject(data.Dataset, datasets.imdb):
                 qt[1] = poses_all[object_id][1] + flag * extent * np.random.uniform(1.0, 1.5)
                 if np.absolute(qt[1]) > bound:
                     qt[1] = poses_all[object_id][1] - flag * extent * np.random.uniform(1.0, 1.5)
+                if np.absolute(qt[1]) > bound:
+                    qt[1] = np.random.uniform(-bound, bound)
 
                 qt[2] = poses_all[object_id][2] - extent * np.random.uniform(2.0, 4.0)
                 if qt[2] < cfg.TRAIN.SYN_TNEAR:
