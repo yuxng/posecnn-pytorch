@@ -56,6 +56,23 @@ class ImageListener:
             # subscribe rgb image
             rospy.Subscriber('/logitech/image_color', Image, self.callback_rgb)
 
+        elif cfg.TEST.ROS_CAMERA == 'D435':
+            # use RealSense D435
+            rgb_sub = message_filters.Subscriber('/camera/color/image_raw', Image, queue_size=2)
+            depth_sub = message_filters.Subscriber('/camera/aligned_depth_to_color/image_raw', Image, queue_size=2)
+
+            # update camera intrinsics
+            msg = rospy.wait_for_message('/camera/color/camera_info', CameraInfo)
+
+            K = np.array(msg.K).reshape(3, 3)
+            dataset._intrinsic_matrix = K
+            print(dataset._intrinsic_matrix)
+
+            queue_size = 1
+            slop_seconds = 0.1
+            ts = message_filters.ApproximateTimeSynchronizer([rgb_sub, depth_sub], queue_size, slop_seconds)
+            ts.registerCallback(self.callback_rgbd)
+
         elif cfg.TEST.POSE_REFINE:
 
             # use kinect
@@ -127,7 +144,11 @@ class ImageListener:
         self.pose_pub.publish(pose_msg)
 
         # poses
-        frame = '%s_depth_optical_frame' % (cfg.TEST.ROS_CAMERA)
+        if cfg.TEST.ROS_CAMERA == 'D435':
+            frame = 'camera_depth_optical_frame'
+        else:
+            frame = '%s_depth_optical_frame' % (cfg.TEST.ROS_CAMERA)
+
         indexes = np.zeros((self.dataset.num_classes, ), dtype=np.int32)
         index = np.argsort(rois[:, 2])
         rois = rois[index, :]
@@ -189,6 +210,9 @@ class ImageListener:
                     depth.encoding))
             return
 
+        if cfg.TEST.ROS_CAMERA == 'D435':
+            depth_cv = depth_cv/1000.0
+
         # run network
         im = self.cv_bridge.imgmsg_to_cv2(rgb, 'bgr8')
         im_pose, im_label, rois, poses = test_image(self.net, self.dataset, im, depth_cv)
@@ -207,7 +231,11 @@ class ImageListener:
         self.pose_pub.publish(pose_msg)
 
         # poses
-        frame = '%s_depth_optical_frame' % (cfg.TEST.ROS_CAMERA)
+        if cfg.TEST.ROS_CAMERA == 'D435':
+            frame = 'camera_depth_optical_frame'
+        else:
+            frame = '%s_depth_optical_frame' % (cfg.TEST.ROS_CAMERA)
+
         indexes = np.zeros((self.dataset.num_classes, ), dtype=np.int32)
         index = np.argsort(rois[:, 2])
         rois = rois[index, :]
