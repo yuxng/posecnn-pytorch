@@ -243,7 +243,7 @@ class YCBObject(data.Dataset, datasets.imdb):
 
         im_cuda = torch.from_numpy(im).cuda().float() / 255.0
         if cfg.TRAIN.ADD_NOISE and cfg.MODE == 'TRAIN' and np.random.rand(1) > 0.1:
-            im_cuda = add_noise_cuda(im_cuda)
+            im_cuda = add_noise_cuda(im_cuda, 0.2)
         im_cuda -= self._pixel_mean
         im_cuda = im_cuda.permute(2, 0, 1)
 

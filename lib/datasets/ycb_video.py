@@ -81,7 +81,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
         else:
             self._size = len(self._image_index)
         self._roidb = self.gt_roidb()
-        if cfg.MODE == 'TRAIN':
+        if cfg.MODE == 'TRAIN' or (cfg.MODE == 'TEST' and cfg.TEST.SYNTHESIZE == True):
             self._build_background_images()
         self._build_uniform_poses()
 

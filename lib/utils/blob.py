@@ -132,13 +132,13 @@ def add_noise(image):
     return noisy.astype('uint8')
 
 
-def add_noise_cuda(image):
+def add_noise_cuda(image, level = 0.05):
     # random number
     r = np.random.rand(1)
 
     # gaussian noise
     if r < 0.8:
-        noise_level = random.uniform(0, 0.05)
+        noise_level = random.uniform(0, level)
         gauss = torch.randn_like(image) * noise_level
         noisy = image + gauss
         noisy = torch.clamp(noisy, 0, 1.0)
