@@ -35,6 +35,14 @@ for split in ['train', 'test', 'debug']:
     __sets[name] = (lambda split=split:
             datasets.linemod(split))
 
+# panda arm dataset
+for split in ['train', 'test']:
+    name = 'panda_{}'.format(split)
+    print name
+    __sets[name] = (lambda split=split:
+            datasets.panda(split))
+
+
 def get_dataset(name):
     """Get an imdb (image database) by name."""
     if not __sets.has_key(name):

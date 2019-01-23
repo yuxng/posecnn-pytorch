@@ -9,6 +9,7 @@ from .imdb import imdb
 from .ycb_video import YCBVideo
 from .ycb_object import YCBObject
 from .linemod import linemod
+from .panda import panda
 
 import os.path as osp
 ROOT_DIR = osp.join(osp.dirname(__file__), '..', '..')
