@@ -126,7 +126,7 @@ if __name__ == '__main__':
     if torch.cuda.device_count() > 1:
         cfg.TRAIN.GPUNUM = torch.cuda.device_count()
         print("Let's use", torch.cuda.device_count(), "GPUs!")
-        network = torch.nn.DataParallel(network).cuda()
+    network = torch.nn.DataParallel(network).cuda()
     cudnn.benchmark = True
 
     assert(args.solver in ['adam', 'sgd'])
