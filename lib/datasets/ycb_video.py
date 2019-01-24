@@ -142,7 +142,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
             if i == 0 or i >= num_target or np.random.rand(1) > 0.5:
                 qt[0] = np.random.uniform(-bound, bound)
                 qt[1] = np.random.uniform(-bound, bound)
-                qt[2] = np.random.uniform(cfg.TRAIN.SYN_TNEAR * 2, cfg.TRAIN.SYN_TFAR)
+                qt[2] = np.random.uniform(cfg.TRAIN.SYN_TNEAR, cfg.TRAIN.SYN_TFAR)
             else:
                 # sample an object nearby
                 object_id = np.random.randint(0, i, size=1)[0]
@@ -248,7 +248,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
 
         im_cuda = torch.from_numpy(im).cuda().float() / 255.0
         if cfg.TRAIN.ADD_NOISE and cfg.MODE == 'TRAIN' and np.random.rand(1) > 0.1:
-            im_cuda = add_noise_cuda(im_cuda)
+            im_cuda = add_noise_cuda(im_cuda, cfg.TRAIN.NOISE_LEVEL)
         im_cuda -= self._pixel_mean
         im_cuda = im_cuda.permute(2, 0, 1)
 
