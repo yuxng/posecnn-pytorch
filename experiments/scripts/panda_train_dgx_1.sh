@@ -6,6 +6,7 @@ set -e
 export PYTHONUNBUFFERED="True"
 export CUDA_VISIBLE_DEVICES=0,1
 export PYTHON_EGG_CACHE=/nfs
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
 
 ./tools/train_net.py \
   --network posecnn \
