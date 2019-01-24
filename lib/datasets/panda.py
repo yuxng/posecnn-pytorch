@@ -375,12 +375,17 @@ class panda(data.Dataset, datasets.imdb):
     def _sample_camera(self, poses, target_id):
         # sample a camera extrinsics
         target = poses[target_id][:3, 3].T
+        count = 0
         while 1:
             theta = np.random.uniform(low=0, high=np.pi)
             phi = np.random.uniform(low=-np.pi/2, high=np.pi/2) #top sphere
-            r = np.random.uniform(low=0.8, high=2.6) #sphere radius
+            r = np.random.uniform(low=cfg.TRAIN.SYN_TNEAR, high=cfg.TRAIN.SYN_TFAR) #sphere radius
             pos = np.array([r*np.sin(theta)*np.cos(phi), r*np.sin(theta)*np.sin(phi), r*np.cos(theta)])
-            if np.linalg.norm(pos-target) > cfg.TRAIN.SYN_TNEAR and np.linalg.norm(pos-target) < cfg.TRAIN.SYN_TFAR:
+            n = np.linalg.norm(pos-target)
+            if n > cfg.TRAIN.SYN_TNEAR and n < cfg.TRAIN.SYN_TFAR and self._valid_camera_pos(poses, pos):
+                break
+            count += 1
+            if count > 9:
                 break
         ref = pos + (pos - target) + np.random.uniform(-0.15, 0.15, 3) #so that the target not always at image center
         cfg.renderer.set_camera(pos, ref, [0, 0, -1])
@@ -390,7 +395,7 @@ class panda(data.Dataset, datasets.imdb):
     def _valid_camera_pos(self, arm_pose, camera_pos):
         # avoid sampling camera position too close to arm
         for pose in arm_pose:
-            if np.linalg.norm(camera_pos-pose[:3, 3].T) < 0.2:
+            if np.linalg.norm(camera_pos-pose[:3, 3].T) < 0.4:
                 return False
         return True
 
