@@ -380,8 +380,7 @@ class panda(data.Dataset, datasets.imdb):
             phi = np.random.uniform(low=-np.pi/2, high=np.pi/2) #top sphere
             r = np.random.uniform(low=0.8, high=2.6) #sphere radius
             pos = np.array([r*np.sin(theta)*np.cos(phi), r*np.sin(theta)*np.sin(phi), r*np.cos(theta)])
-            if np.linalg.norm(pos-target) > cfg.TRAIN.SYN_TNEAR and \
-            np.linalg.norm(pos-target) < cfg.TRAIN.SYN_TFAR and self._valid_camera_pos(poses, pos): #avoid extreme case
+            if np.linalg.norm(pos-target) > cfg.TRAIN.SYN_TNEAR and np.linalg.norm(pos-target) < cfg.TRAIN.SYN_TFAR:
                 break
         ref = pos + (pos - target) + np.random.uniform(-0.15, 0.15, 3) #so that the target not always at image center
         cfg.renderer.set_camera(pos, ref, [0, 0, -1])
