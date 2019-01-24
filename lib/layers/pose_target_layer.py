@@ -53,7 +53,7 @@ def pose_target_layer(rois, bbox_prob, bbox_pred, gt_boxes, poses, is_training):
                 gt_box[0, 5] = gt_boxes[i, j, 4]
                 gt_box_blob = np.concatenate((gt_box_blob, gt_box), axis=0)
                 poses[i, j, 0] = i
-                pose_blob = np.concatenate((pose_blob, poses[i, j, :].reshape(1, 9)), axis=0)
+                pose_blob = np.concatenate((pose_blob, poses[i, j, :].cpu().reshape(1, 9)), axis=0)
 
     if gt_box_blob.shape[0] == 0:
         num = rois.shape[0]
