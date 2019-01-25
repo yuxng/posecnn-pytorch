@@ -20,6 +20,7 @@ import time, os, sys
 import os.path as osp
 import numpy as np
 import cv2
+import scipy.io
 
 import _init_paths
 from fcn.train_test import test_image
@@ -92,7 +93,7 @@ if __name__ == '__main__':
     print 'GPU device {:d}'.format(args.gpu_id)
 
     # dataset
-    cfg.MODE == 'TEST'
+    # cfg.MODE = 'TEST'
     dataset = get_dataset(args.dataset_name)
 
     # list images
@@ -104,6 +105,10 @@ if __name__ == '__main__':
 
     if cfg.TEST.VISUALIZE:
         images = np.random.permutation(images)
+    else:
+        resdir = args.imgdir + '_posecnn_results'
+        if not os.path.exists(resdir):
+            os.makedirs(resdir)
 
     # prepare network
     if args.pretrained:
@@ -119,18 +124,23 @@ if __name__ == '__main__':
     cudnn.benchmark = True
     network.eval()
 
-    if cfg.TRAIN.VERTEX_REG and cfg.TEST.POSE_REFINE:
-        cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, render_marker=True)
-        cfg.renderer.load_objects(dataset.model_mesh_paths_target,
-                                  dataset.model_texture_paths_target,
-                                  dataset.model_colors_target)
-        cfg.renderer.set_camera_default()
-        cfg.renderer.set_light_pos([0, 0, 0])
-        cfg.renderer.set_light_color([1, 1, 1])
-        print dataset.model_mesh_paths_target
+    cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, render_marker=True)
+    cfg.renderer.load_objects(dataset.model_mesh_paths, dataset.model_texture_paths, dataset.model_colors)
+    cfg.renderer.set_camera_default()
+    cfg.renderer.set_light_pos([0, 0, 0])
+    cfg.renderer.set_light_color([1, 1, 1])
+    print dataset.model_mesh_paths
 
     # run network
     for i in range(len(images)):
         im = pad_im(cv2.imread(images[i], cv2.IMREAD_COLOR), 16)
         depth = None
-        im_pose, im_label, rois, poses = test_image(network, dataset, im, depth)
+        im_pose, labels, rois, poses = test_image(network, dataset, im, depth)
+
+        # save result
+        if not cfg.TEST.VISUALIZE:
+            result = {'labels': labels, 'rois': rois, 'poses': poses, 'intrinsic_matrix': dataset._intrinsic_matrix}
+            head, tail = os.path.split(images[i])
+            filename = os.path.join(resdir, tail + '.mat')
+            print(images[i], filename)
+            scipy.io.savemat(filename, result, do_compression=True)

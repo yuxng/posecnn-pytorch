@@ -269,8 +269,6 @@ def test_image(network, dataset, im_color, im_depth=None):
         else:
             poses = optimize_depths(rois, poses, dataset._points_all, dataset._intrinsic_matrix)
 
-        if cfg.TEST.VISUALIZE:
-            vis_test(dataset, im, labels, out_vertex, rois, poses)
     else:
         out_label = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
         labels = out_label.detach().cpu().numpy()[0]
@@ -279,7 +277,10 @@ def test_image(network, dataset, im_color, im_depth=None):
 
     im_pose, im_label = render_image(dataset, im_color, rois, poses, labels)
 
-    return im_pose, im_label, rois, poses
+    if cfg.TEST.VISUALIZE:
+        vis_test(dataset, im, labels, out_vertex, rois, poses, im_pose)
+
+    return im_pose, labels, rois, poses
 
 
 def optimize_depths(rois, poses, points, intrinsic_matrix):
@@ -868,7 +869,7 @@ def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, sample, points
 
 
 
-def vis_test(dataset, im, label, out_vertex, rois, poses):
+def vis_test(dataset, im, label, out_vertex, rois, poses, im_pose):
 
     """Visualize a testing results."""
     import matplotlib.pyplot as plt
@@ -898,6 +899,10 @@ def vis_test(dataset, im, label, out_vertex, rois, poses):
     ax = fig.add_subplot(2, 4, 2)
     plt.imshow(im_label)
     ax.set_title('predicted labels')
+
+    ax = fig.add_subplot(2, 4, 8)
+    plt.imshow(im_pose)
+    ax.set_title('rendered image')
 
     if cfg.TRAIN.VERTEX_REG:
 
