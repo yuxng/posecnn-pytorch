@@ -127,4 +127,3 @@ for i in index_plot:
 filename = 'plots/all.png'
 plt.savefig(filename)
 plt.show()
-
