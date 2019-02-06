@@ -280,7 +280,7 @@ def test_image(network, dataset, im_color, im_depth=None):
     if cfg.TEST.VISUALIZE:
         vis_test(dataset, im, labels, out_vertex, rois, poses, im_pose)
 
-    return im_pose, labels, rois, poses
+    return im_pose, im_label, rois, poses
 
 
 def optimize_depths(rois, poses, points, intrinsic_matrix):
@@ -391,7 +391,7 @@ def refine_pose(im_label, im_depth, rois, poses, intrinsic_matrix):
     image_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
     seg_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
     pcloud_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
-    cfg.renderer.render(cls_indexes, image_tensor, seg_tensor, pc1_tensor=pcloud_tensor)
+    cfg.renderer.render(cls_indexes, image_tensor, seg_tensor, pc2_tensor=pcloud_tensor)
     pcloud_tensor = pcloud_tensor.flip(0)
     pcloud = pcloud_tensor[:,:,:3].cpu().numpy().reshape((-1, 3))
 
@@ -408,9 +408,9 @@ def refine_pose(im_label, im_depth, rois, poses, intrinsic_matrix):
         index = np.where((labels == cls) & np.isfinite(dpoints[:, 0]) & (pcloud[:, 0] != 0))[0]
         if len(index) > 10:
             T = np.mean(dpoints[index, :] - pcloud[index, :], axis=0)
-            poses[i, 4] *= T[2]
-            poses[i, 5] *= T[2]
-            poses[i, 6] = T[2]
+            poses[i, 4] *= poses[i, 6]
+            poses[i, 5] *= poses[i, 6]
+            poses[i, 6] += T[2]
         else:
             poses[i, 4] *= poses[i, 6]
             poses[i, 5] *= poses[i, 6]
