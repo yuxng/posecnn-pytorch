@@ -108,7 +108,7 @@ class panda(data.Dataset, datasets.imdb):
             trans = pose[:3, 3]
             poses_all.append(np.hstack((trans, quat)))
         
-        #render the entire arm
+        # render the entire arm
         cfg.renderer.set_poses(poses_all)
         cls_indexes = np.array(range(len(self._classes_all) - 1)).astype(np.int32)
         cfg.renderer.render(cls_indexes, image_tensor, seg_tensor)

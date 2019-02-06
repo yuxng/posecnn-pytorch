@@ -13,6 +13,6 @@ echo Logging output to "$LOG"
 time ./tools/test_images.py --gpu 0 \
   --imgdir data/Images/panda2 \
   --network posecnn \
-  --pretrained output/panda/panda_train/vgg16_panda_epoch_5.checkpoint.pth \
+  --pretrained output/panda/panda_train/vgg16_panda_epoch_8.checkpoint.pth \
   --dataset panda_train \
   --cfg experiments/cfgs/panda.yml
