@@ -65,6 +65,10 @@ class panda(data.Dataset, datasets.imdb):
         self.model_texture_paths = ['' for cls in self._classes_all[1:]]
         self.model_colors = [np.array(self._class_colors_all[i]) / 255.0 for i in range(1, len(self._classes_all))]
 
+        self.model_mesh_paths_target = ['{}/{}.DAE'.format(self._panda_path, cls) for cls in self._classes[1:]]
+        self.model_texture_paths_target = ['' for cls in self._classes[1:]]
+        self.model_colors_target = [np.array(self._class_colors_all[i]) / 255.0 for i in cfg.TRAIN.CLASSES[1:]]
+
         self._image_ext = '.png'
         self._pixel_mean = torch.tensor(cfg.PIXEL_MEANS / 255.0).cuda().float() # as in linemod
         self._size = cfg.TRAIN.SYNNUM
