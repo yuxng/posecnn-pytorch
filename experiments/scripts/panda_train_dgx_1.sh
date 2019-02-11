@@ -14,4 +14,4 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
   --dataset panda_train \
   --cfg experiments/cfgs/panda.yml \
   --solver sgd \
-  --epochs 8
+  --epochs 16
