@@ -2,7 +2,7 @@
 
 DST="/home/yuxiang/GitLab/posecnn-pytorch"
 
-cp README.md $DST
+cp $DST/README.md .
 cp $DST/lib/datasets/*.py lib/datasets
 cp $DST/lib/fcn/*.py lib/fcn 
 cp $DST/lib/layers/*.py lib/layers

@@ -1,6 +1,6 @@
 # posecnn-pytorch
 
-PyTorch implementation of the PoseCNN framework. Created by Yu Xiang at NVIDIA Research.
+PyTorch implementation of the PoseCNN framework.
 
 ### Introduction
 
@@ -87,7 +87,7 @@ If you find PoseCNN useful in your research, please consider citing:
 
     ```
 
-### Running with ROS
+### Running with ROS: list of all commands useful
     ```Shell
     export ROS_MASTER_URI=http://palladino:11311/
     source /opt/ros/kinetic/setup.bash

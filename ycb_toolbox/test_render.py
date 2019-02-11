@@ -76,7 +76,7 @@ if __name__ == '__main__':
     px = intrinsic_matrix[0, 2]
     py = intrinsic_matrix[1, 2]
     zfar = 6.0
-    znear = 0.25
+    znear = 0.01
 
     renderer.set_camera_default()
     renderer.set_projection_matrix(width, height, fx, fy, px, py, znear, zfar)

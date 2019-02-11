@@ -88,7 +88,7 @@ class panda(data.Dataset, datasets.imdb):
         px = self._intrinsic_matrix[0, 2]
         py = self._intrinsic_matrix[1, 2]
         zfar = 6.0
-        znear = 0.25
+        znear = 0.01
         bound = 0.2
         image_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
         seg_tensor = torch.cuda.FloatTensor(height, width, 4).detach()

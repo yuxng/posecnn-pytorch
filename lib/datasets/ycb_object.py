@@ -88,7 +88,7 @@ class YCBObject(data.Dataset, datasets.imdb):
         px = self._intrinsic_matrix[0, 2]
         py = self._intrinsic_matrix[1, 2]
         zfar = 6.0
-        znear = 0.25
+        znear = 0.01
 
         # sample target objects
         if cfg.TRAIN.SYN_SAMPLE_OBJECT:

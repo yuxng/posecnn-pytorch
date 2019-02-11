@@ -372,7 +372,7 @@ def refine_pose(im_label, im_depth, rois, poses, intrinsic_matrix):
     px = intrinsic_matrix[0, 2]
     py = intrinsic_matrix[1, 2]
     zfar = 6.0
-    znear = 0.25
+    znear = 0.01
     cls_indexes = rois[:, 1].astype(np.int32) - 1
 
     # poses
@@ -437,7 +437,7 @@ def render_image(dataset, im, rois, poses, labels):
     px = intrinsic_matrix[0, 2]
     py = intrinsic_matrix[1, 2]
     zfar = 6.0
-    znear = 0.25
+    znear = 0.01
     num = poses.shape[0]
 
     image_tensor = torch.cuda.FloatTensor(height, width, 4)
