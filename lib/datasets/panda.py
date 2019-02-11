@@ -33,11 +33,11 @@ class panda(data.Dataset, datasets.imdb):
                             else panda_path
 
         # define all the robot parts
-        self._classes_all = ['__background__', 'link1', 'link2', 'link3', 'link4', 'link5', 'link6', 'link7', 'hand', 'finger', 'finger']
+        self._classes_all = ['__background__', 'link1', 'link2', 'link3', 'link4', 'link5', 'link6', 'link7', 'hand', 'finger', 'finger', 'camera']
         self._num_classes_all = len(self._classes_all)
         self._class_colors_all = [(255, 255, 255), (255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (255, 0, 255), (0, 255, 255), \
-                              (0, 0, 128), (0, 128, 0), (128, 0, 0), (128, 128, 0)]
-        self._symmetry_all = np.array([0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0]).astype(np.float32)
+                              (0, 0, 128), (0, 128, 0), (128, 0, 0), (128, 128, 0), (128, 0, 128)]
+        self._symmetry_all = np.array([0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]).astype(np.float32)
         self._extents_all = self._load_object_extents()
         self._diameters_all = np.linalg.norm(self._extents_all,axis=1)
 
@@ -93,43 +93,84 @@ class panda(data.Dataset, datasets.imdb):
         image_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
         seg_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
         cfg.renderer.set_projection_matrix(width, height, fx, fy, px, py, znear, zfar)
-        
-        # sample target poses
-        robot_all, _ = self.robot.gen_rand_pose(self._base_link, base_pose=np.eye(4))
-        # offset the center in model coordinates
-        robot_all = self.robot.offset_pose_center(robot_all, dir='off', base_link=self._base_link) 
-        extrinsic = self._sample_camera(robot_all, self._classes_idx[1]-1)
-        cfg.renderer.set_camera_default()
-        cfg.renderer.set_light_pos(np.random.uniform(-0.5, 0.5, 3))
-        intensity = np.random.uniform(0.8, 2)
-        light_color = intensity * np.random.uniform(0.9, 1.1, 3)          
-        cfg.renderer.set_light_color(light_color)
 
-        poses_all = []
-        for i in range(len(self._classes_all) - 1):
-            pose = extrinsic.dot(robot_all[i])
-            quat = mat2quat(pose[:3, :3])
-            trans = pose[:3, 3]
-            poses_all.append(np.hstack((trans, quat)))
+        while 1:
+
+            # sample target poses
+            robot_all, _ = self.robot.gen_rand_pose(self._base_link, base_pose=np.eye(4))
+            # offset the center in model coordinates
+            robot_all = self.robot.offset_pose_center(robot_all, dir='off', base_link=self._base_link)
+            extrinsic = self._sample_camera(robot_all, self._classes_idx[1]-1)
+            cfg.renderer.set_camera_default()
+            cfg.renderer.set_light_pos(np.random.uniform(-0.5, 0.5, 3))
+            intensity = np.random.uniform(0.8, 2)
+            light_color = intensity * np.random.uniform(0.9, 1.1, 3)          
+            cfg.renderer.set_light_color(light_color)
+
+            poses_all = []
+            cls_indexes = []
+            poses_target = []
+            cls_indexes_target = []
+            for i in range(len(self._classes_all) - 1):
+                pose = extrinsic.dot(robot_all[i])
+                quat = mat2quat(pose[:3, :3])
+                trans = pose[:3, 3]
+                tq = np.hstack((trans, quat))
+                poses_all.append(tq)
+                cls_indexes.append(i)
+
+                ind = np.where(np.array(cfg.TRAIN.CLASSES[1:]) == i + 1)[0]
+                if len(ind) > 0:
+                    poses_target.append(tq)
+                    cls_indexes_target.append(i)
+
+            # render target
+            cfg.renderer.set_poses(poses_target)
+            cfg.renderer.render(cls_indexes_target, image_tensor, seg_tensor)
+
+            seg_tensor = seg_tensor.flip(0)
+            seg = torch.sum(seg_tensor[:, :, :3], dim=2)
+            mask = (seg != 0).cpu().numpy()
+
+            # render the entire arm
+            cfg.renderer.set_poses(poses_all)
+            cfg.renderer.render(cls_indexes, image_tensor, seg_tensor)
+            image_tensor = image_tensor.flip(0)
+            seg_tensor = seg_tensor.flip(0)
+
+            im_label = seg_tensor.cpu().numpy()
+            im_label = im_label[:, :, (2, 1, 0)] * 255
+            im_label = np.round(im_label).astype(np.uint8)
+            im_label = np.clip(im_label, 0, 255)
+            im_label, im_label_all = self.process_label_image(im_label)
+
+            # compute occlusion percentage
+            mask_target = (im_label > 0).astype(np.int32)
+            per_occ = 1.0 - np.sum(mask & mask_target) / np.sum(mask)
+            if per_occ < 0.5:
+                '''
+                import matplotlib.pyplot as plt
+                fig = plt.figure()
+                ax = fig.add_subplot(1, 2, 1)
+                im = image_tensor.cpu().numpy()
+                im = np.clip(im, 0, 1)
+                im = im[:, :, (2, 1, 0)] * 255
+                im = im.astype(np.uint8)
+                plt.imshow(im[:, :, (2, 1, 0)])
+                ax = fig.add_subplot(1, 2, 2)
+                plt.imshow(mask)
+                print per_occ
+                plt.show()
+                '''
+                break
         
-        # render the entire arm
-        cfg.renderer.set_poses(poses_all)
         cls_indexes = np.array(range(len(self._classes_all) - 1)).astype(np.int32)
-        cfg.renderer.render(cls_indexes, image_tensor, seg_tensor)
-        image_tensor = image_tensor.flip(0)
-        seg_tensor = seg_tensor.flip(0)
 
         # RGB to BGR order
         im = image_tensor.cpu().numpy()
         im = np.clip(im, 0, 1)
         im = im[:, :, (2, 1, 0)] * 255
         im = im.astype(np.uint8)
-
-        im_label = seg_tensor.cpu().numpy()
-        im_label = im_label[:, :, (2, 1, 0)] * 255
-        im_label = np.round(im_label).astype(np.uint8)
-        im_label = np.clip(im_label, 0, 255)
-        im_label, im_label_all = self.process_label_image(im_label)
 
         # part centers
         rcenters = cfg.renderer.get_centers()
@@ -389,7 +430,7 @@ class panda(data.Dataset, datasets.imdb):
             if n > cfg.TRAIN.SYN_TNEAR and n < cfg.TRAIN.SYN_TFAR and self._valid_camera_pos(poses, pos):
                 break
             count += 1
-            if count > 9:
+            if count > 50:
                 break
         ref = pos + (pos - target) + np.random.uniform(-0.15, 0.15, 3) #so that the target not always at image center
         cfg.renderer.set_camera(pos, ref, [0, 0, -1])
