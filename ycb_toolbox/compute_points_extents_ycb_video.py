@@ -8,7 +8,7 @@ root_path = osp.join(this_dir, '..', 'data', 'YCB_Object')
 #opt = ycb_video()
 
 # classes = opt.classes + ('holiday_cup1', 'holiday_cup2', 'sanning_mug_new', )
-classes = ('sanning_mug_new', )
+classes = ('sanning_mug_2', )
 
 # extent file
 filename = osp.join(root_path, 'models', 'extents.txt')
@@ -38,6 +38,20 @@ for i in range(len(classes)):
     i = 0
     m = 0
     factor = 0.01
+
+    for item in bpy.data.objects:
+        if item.type == 'MESH':
+            for vertex in item.data.vertices:
+                rv = vertex.co
+                vertex.co[0] = vertices[i, 0] * factor
+                vertex.co[1] = vertices[i, 1] * factor
+                vertex.co[2] = vertices[i, 2] * factor
+                i += 1
+       
+    # save model
+    bpy.data.objects[obj_object.name].select = True
+    filename = osp.join(root_path, 'models', cls, 'textured_simple_new.obj')
+    bpy.ops.export_scene.obj(filepath=filename, use_selection=True)
 
     vertices[:, 0] *= factor
     vertices[:, 1] -= m

@@ -609,7 +609,13 @@ def _vis_minibatch(inputs, labels, vertex_targets, sample, class_colors):
             
             # projection
             RT = np.zeros((3, 4), dtype=np.float32)
-            RT[:3, :3] = quat2mat(pose_blob[j, 2:6])
+
+            # allocentric to egocentric
+            T = pose_blob[j, 6:]
+            qt = allocentric2egocentric(pose_blob[j, 2:6], T)
+            RT[:3, :3] = quat2mat(qt)
+
+            # RT[:3, :3] = quat2mat(pose_blob[j, 2:6])
             RT[:, 3] = pose_blob[j, 6:]
             x2d = np.matmul(intrinsic_matrix, np.matmul(RT, x3d))
             x2d[0, :] = np.divide(x2d[0, :], x2d[2, :])
