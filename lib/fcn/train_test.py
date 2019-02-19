@@ -408,9 +408,9 @@ def refine_pose(im_label, im_depth, rois, poses, intrinsic_matrix):
         index = np.where((labels == cls) & np.isfinite(dpoints[:, 0]) & (pcloud[:, 0] != 0))[0]
         if len(index) > 10:
             T = np.mean(dpoints[index, :] - pcloud[index, :], axis=0)
+            poses[i, 6] += T[2]
             poses[i, 4] *= poses[i, 6]
             poses[i, 5] *= poses[i, 6]
-            poses[i, 6] += T[2]
         else:
             poses[i, 4] *= poses[i, 6]
             poses[i, 5] *= poses[i, 6]
@@ -456,6 +456,10 @@ def render_image(dataset, im, rois, poses, labels):
             cls_index = int(rois[i, 1]) - 1
         else:
             cls_index = cfg.TRAIN.CLASSES[int(rois[i, 1])] - 1
+
+        if cls_index < 0:
+            continue
+
         cls_indexes.append(cls_index)
 
         qt = np.zeros((7, ), dtype=np.float32)
@@ -475,22 +479,26 @@ def render_image(dataset, im, rois, poses, labels):
             cv2.rectangle(im_label, (x1, y1), (x2, y2), class_colors[cls], 2)
 
     # rendering
-    cfg.renderer.set_poses(poses_all)
-    frame = cfg.renderer.render(cls_indexes, image_tensor, seg_tensor)
-    image_tensor = image_tensor.flip(0)
-    seg_tensor = seg_tensor.flip(0)
+    if len(cls_indexes) > 0:
+        cfg.renderer.set_poses(poses_all)
+        frame = cfg.renderer.render(cls_indexes, image_tensor, seg_tensor)
+        image_tensor = image_tensor.flip(0)
+        seg_tensor = seg_tensor.flip(0)
 
-    # RGB to BGR order
-    im_render = image_tensor.cpu().numpy()
-    im_render = np.clip(im_render, 0, 1)
-    im_render = im_render[:, :, :3] * 255
-    im_render = im_render.astype(np.uint8)
+        # RGB to BGR order
+        im_render = image_tensor.cpu().numpy()
+        im_render = np.clip(im_render, 0, 1)
+        im_render = im_render[:, :, :3] * 255
+        im_render = im_render.astype(np.uint8)
     
-    # mask
-    seg = torch.sum(seg_tensor[:, :, :3], dim=2)
-    mask = (seg != 0).cpu().numpy()
+        # mask
+        seg = torch.sum(seg_tensor[:, :, :3], dim=2)
+        mask = (seg != 0).cpu().numpy()
 
-    im_output = 0.4 * im[:,:,(2, 1, 0)].astype(np.float32) + 0.6 * im_render.astype(np.float32)
+        im_output = 0.4 * im[:,:,(2, 1, 0)].astype(np.float32) + 0.6 * im_render.astype(np.float32)
+    else:
+        im_output = 0.4 * im[:,:,(2, 1, 0)]
+
     return im_output.astype(np.uint8), im_label
 
 
