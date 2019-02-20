@@ -123,4 +123,4 @@ if __name__ == '__main__':
     cudnn.benchmark = True
 
     # test network
-    test(dataloader, network)
+    test(dataloader, network, output_dir)

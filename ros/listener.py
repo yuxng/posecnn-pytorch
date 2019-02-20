@@ -35,6 +35,8 @@ class ImageListener:
 
         suffix = '_%02d' % (cfg.instance_id)
         prefix = '%02d_' % (cfg.instance_id)
+        self.suffix = suffix
+        self.prefix = prefix
 
         # initialize a node
         rospy.init_node('posecnn_image_listener' + suffix)
@@ -244,7 +246,12 @@ class ImageListener:
             cls = int(rois[i, 1])
             if cls > 0 and rois[i, -1] > cfg.TEST.DET_THRESHOLD:
                 quat = [poses[i, 1], poses[i, 2], poses[i, 3], poses[i, 0]]
-                name = self.dataset.classes[cls] + '_%02d' % (indexes[cls])
+                # name = self.dataset.classes[cls] + '_%02d' % (indexes[cls])
+                if self.dataset.classes[cls][3] == '_':
+                    name = self.prefix + self.dataset.classes[cls][4:]
+                else:
+                    name = self.prefix + self.dataset.classes[cls]
+
                 indexes[cls] += 1
                 self.br.sendTransform(poses[i, 4:7], quat, rospy.Time.now(), name, frame)
 

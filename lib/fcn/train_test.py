@@ -141,7 +141,7 @@ def train(train_loader, network, optimizer, epoch):
         cfg.TRAIN.ITERS += 1
 
 
-def test(test_loader, network):
+def test(test_loader, network, output_dir):
 
     batch_time = AverageMeter()
     epoch_size = len(test_loader)
@@ -182,12 +182,13 @@ def test(test_loader, network):
                     poses[j, :4] = allocentric2egocentric(qt, T)
 
             # optimize depths
-            poses = optimize_depths(rois, poses, test_loader.dataset._points_all, test_loader.dataset._intrinsic_matrix)
+            poses_refined = optimize_depths(rois, poses, test_loader.dataset._points_all, test_loader.dataset._intrinsic_matrix)
         else:
             out_label = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
             out_vertex = []
             rois = []
             poses = []
+            poses_refined = []
 
         if cfg.TEST.VISUALIZE:
             _vis_test(inputs, labels, out_label, out_vertex, rois, poses, sample, \
@@ -195,6 +196,10 @@ def test(test_loader, network):
 
         # measure elapsed time
         batch_time.update(time.time() - end)
+
+        result = {'labels': out_label, 'rois': rois, 'poses': poses, 'poses_refined': poses_refined}
+        filename = os.path.join(output_dir, '%06d.mat' % i)
+        scipy.io.savemat(filename, result, do_compression=True)
 
         print('[%d/%d], batch time %.2f' % (i, epoch_size, batch_time.val))
 
