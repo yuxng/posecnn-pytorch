@@ -50,4 +50,4 @@ TEST:
   VISUALIZE: False
   SYNTHESIZE: False
   POSE_REFINE: True
-  ROS_CAMERA: kinect2
+  ROS_CAMERA: kinect1

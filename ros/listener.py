@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 import threading
 import sys
+import os
 
 from fcn.config import cfg
 from fcn.train_test import test_image
@@ -161,7 +162,8 @@ class ImageListener:
                 quat = [poses[i, 1], poses[i, 2], poses[i, 3], poses[i, 0]]
                 name = self.dataset.classes[cls] + '_%02d' % (indexes[cls])
                 indexes[cls] += 1
-                self.br.sendTransform(poses[i, 4:7], quat, rospy.Time.now(), name, frame)
+                tf_name = os.path.join("posecnn", name)
+                self.br.sendTransform(poses[i, 4:7], quat, rospy.Time.now(), tf_name, frame)
 
                 # send another transformation as bounding box (mis-used)
                 n = np.linalg.norm(rois[i, 2:6])
@@ -170,7 +172,7 @@ class ImageListener:
                 x2 = rois[i, 4] / n
                 y2 = rois[i, 5] / n
                 now = rospy.Time.now()
-                self.br.sendTransform([n, now.secs, 0], [x1, y1, x2, y2], now, name + '_roi', frame)
+                self.br.sendTransform([n, now.secs, 0], [x1, y1, x2, y2], now, tf_name + '_roi', frame)
 
                 # create pose msg
                 msg = PoseStamped()
@@ -253,7 +255,9 @@ class ImageListener:
                     name = self.prefix + self.dataset.classes[cls]
 
                 indexes[cls] += 1
-                self.br.sendTransform(poses[i, 4:7], quat, rospy.Time.now(), name, frame)
+
+                tf_name = os.path.join("posecnn", name)
+                self.br.sendTransform(poses[i, 4:7], quat, rospy.Time.now(), tf_name, frame)
 
                 # send another transformation as bounding box (mis-used)
                 n = np.linalg.norm(rois[i, 2:6])
@@ -262,7 +266,7 @@ class ImageListener:
                 x2 = rois[i, 4] / n
                 y2 = rois[i, 5] / n
                 now = rospy.Time.now()
-                self.br.sendTransform([n, now.secs, 0], [x1, y1, x2, y2], now, name + '_roi', frame)
+                self.br.sendTransform([n, now.secs, 0], [x1, y1, x2, y2], now, tf_name + '_roi', frame)
 
                 # create pose msg
                 msg = PoseStamped()
