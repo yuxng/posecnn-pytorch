@@ -171,7 +171,7 @@ class PoseCNN(nn.Module):
             # bounding box classification and regression branch
             bbox_labels, bbox_targets, bbox_inside_weights, bbox_outside_weights = roi_target_layer(out_box, gt_boxes)
             out_roi_conv4 = self.roi_pool_conv4(out_conv4_3, out_box)
-            out_roi_conv5 = self.roi_pool_conv4(out_conv5_3, out_box)
+            out_roi_conv5 = self.roi_pool_conv5(out_conv5_3, out_box)
             out_roi = out_roi_conv4 + out_roi_conv5
             out_roi_flatten = out_roi.view(out_roi.size(0), -1)
             out_fc7 = self.classifier(out_roi_flatten)
@@ -184,7 +184,7 @@ class PoseCNN(nn.Module):
             # rotation regression branch
             rois, poses_target, poses_weight = pose_target_layer(out_box, bbox_prob, bbox_pred, gt_boxes, poses, self.training)
             out_qt_conv4 = self.roi_pool_conv4(out_conv4_3, rois)
-            out_qt_conv5 = self.roi_pool_conv4(out_conv5_3, rois)
+            out_qt_conv5 = self.roi_pool_conv5(out_conv5_3, rois)
             out_qt = out_qt_conv4 + out_qt_conv5
             out_qt_flatten = out_qt.view(out_qt.size(0), -1)
             out_qt_fc7 = self.classifier(out_qt_flatten)
