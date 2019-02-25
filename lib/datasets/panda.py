@@ -33,11 +33,11 @@ class panda(data.Dataset, datasets.imdb):
                             else panda_path
 
         # define all the robot parts
-        self._classes_all = ['__background__', 'link1', 'link2', 'link3', 'link4', 'link5', 'link6', 'link7', 'hand', 'finger', 'finger', 'camera']
+        self._classes_all = ['__background__', 'link1', 'link2', 'link3', 'link4', 'link5', 'link6', 'link7', 'hand', 'finger', 'finger']
         self._num_classes_all = len(self._classes_all)
         self._class_colors_all = [(255, 255, 255), (255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (255, 0, 255), (0, 255, 255), \
-                              (0, 0, 128), (0, 128, 0), (128, 0, 0), (128, 128, 0), (128, 0, 128)]
-        self._symmetry_all = np.array([0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]).astype(np.float32)
+                              (0, 0, 128), (0, 128, 0), (128, 0, 0), (128, 128, 0)]
+        self._symmetry_all = np.array([0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0]).astype(np.float32)
         self._extents_all = self._load_object_extents()
         self._diameters_all = np.linalg.norm(self._extents_all,axis=1)
 

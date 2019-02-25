@@ -76,7 +76,7 @@ class ImageListener:
             ts = message_filters.ApproximateTimeSynchronizer([rgb_sub, depth_sub], queue_size, slop_seconds)
             ts.registerCallback(self.callback_rgbd)
 
-        elif cfg.TEST.POSE_REFINE:
+        if cfg.TEST.POSE_REFINE:
 
             # use kinect
             rgb_sub = message_filters.Subscriber('/%s/rgb/image_color' % (cfg.TEST.ROS_CAMERA), Image, queue_size=2)
