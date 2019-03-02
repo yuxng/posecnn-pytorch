@@ -12,6 +12,7 @@ __sets = {}
 import datasets.ycb_video
 import datasets.ycb_object
 import datasets.linemod
+import datasets.isaac_sim
 import numpy as np
 
 # ycb video dataset
@@ -28,6 +29,13 @@ for split in ['train', 'test']:
     __sets[name] = (lambda split=split:
             datasets.YCBObject(split))
 
+# isaac sim dataset
+for split in ['train', 'test']:
+    name = 'isaac_sim_{}'.format(split)
+    print name
+    __sets[name] = (lambda split=split:
+            datasets.isaac_sim.IsaacSim(split))
+            
 # linemod dataset
 for split in ['train', 'test', 'debug']:
     name = 'linemod_{}'.format(split)
