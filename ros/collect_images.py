@@ -33,8 +33,8 @@ class ImageListener:
 
         # initialize a node
         rospy.init_node("image_listener")
-        rgb_sub = message_filters.Subscriber('/kinect1/rgb/image_color', Image, queue_size=2)
-        depth_sub = message_filters.Subscriber('/kinect1/depth_registered/image', Image, queue_size=2)
+        rgb_sub = message_filters.Subscriber('/camera/rgb/image_color', Image, queue_size=2)
+        depth_sub = message_filters.Subscriber('/camera/depth_registered/image', Image, queue_size=2)
         # depth_sub = message_filters.Subscriber('/camera/depth_registered/sw_registered/image_rect_raw', Image, queue_size=2)
 
         queue_size = 1
@@ -54,11 +54,16 @@ class ImageListener:
                     depth.encoding))
             return
 
-        # write images
+        # write color images
         im = self.cv_bridge.imgmsg_to_cv2(rgb, 'bgr8')
         filename = self.outdir + '/%06d-color.png' % self.count
         cv2.imwrite(filename, im)
-        print filename
+        print(filename)
+
+        filename = self.outdir + '/%06d-depth.png' % self.count
+        cv2.imwrite(filename, depth_cv)
+        print(filename)
+
         self.count += 1
 
 
