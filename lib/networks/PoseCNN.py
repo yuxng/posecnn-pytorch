@@ -83,9 +83,10 @@ class PoseCNN(nn.Module):
         
         # freeze some layers
         print self.features
-        for i in [0, 2, 5, 7, 10, 12, 14]:
-            self.features[i].weight.requires_grad = False
-            self.features[i].bias.requires_grad = False
+        if cfg.TRAIN.FREEZE_LAYERS:
+            for i in [0, 2, 5, 7, 10, 12, 14]:
+                self.features[i].weight.requires_grad = False
+                self.features[i].bias.requires_grad = False
 
         # semantic labeling branch
         self.conv4_embed = conv(512, num_units, kernel_size=1)

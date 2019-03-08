@@ -74,7 +74,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
 
         self._class_to_ind = dict(zip(self._classes, xrange(self._num_classes)))
         self._image_ext = '.png'
-        self._image_index = self._load_image_set_index()
+        self._image_index = self._load_image_set_index(image_set)
 
         if (cfg.MODE == 'TRAIN' and cfg.TRAIN.SYNTHESIZE) or (cfg.MODE == 'TEST' and cfg.TEST.SYNTHESIZE):
             self._size = len(self._image_index) * (cfg.TRAIN.SYN_RATIO+1)
@@ -84,6 +84,10 @@ class YCBVideo(data.Dataset, datasets.imdb):
         if cfg.MODE == 'TRAIN' or (cfg.MODE == 'TEST' and cfg.TEST.SYNTHESIZE == True):
             self._build_background_images()
         self._build_uniform_poses()
+
+        # poses from the dataset
+        self._poses = self._load_all_poses()
+        self._pose_indexes = np.zeros((self._num_classes-1, ), dtype=np.int32)
 
         assert os.path.exists(self._ycb_video_path), \
                 'ycb_video path does not exist: {}'.format(self._ycb_video_path)
@@ -101,6 +105,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
         py = self._intrinsic_matrix[1, 2]
         zfar = 6.0
         znear = 0.01
+        classes = np.array(cfg.TRAIN.CLASSES)
 
         # sample target objects
         if cfg.TRAIN.SYN_SAMPLE_OBJECT:
@@ -128,14 +133,30 @@ class YCBVideo(data.Dataset, datasets.imdb):
             qt = np.zeros((7, ), dtype=np.float32)
             # rotation
             cls = int(cls_indexes[i])
-            if self.pose_indexes[cls] >= len(self.pose_lists[cls]):
-                self.pose_indexes[cls] = 0
-                self.pose_lists[cls] = np.random.permutation(np.arange(len(self.eulers)))
-            roll = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][0] + 15 * np.random.randn()
-            pitch = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][1] + 15 * np.random.randn()
-            yaw = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][2] + 15 * np.random.randn()
-            qt[3:] = euler2quat(roll * math.pi / 180.0, pitch * math.pi / 180.0, yaw * math.pi / 180.0)
-            self.pose_indexes[cls] += 1
+
+            if cfg.TRAIN.SYN_SAMPLE_POSE and i < num_target:
+                # sample from dataset poses
+                cls_ind = np.where(classes == cls+1)[0]
+                cls_ind = int(cls_ind) - 1
+                if self._pose_indexes[cls_ind] >= len(self._poses[cls_ind]):
+                    self._pose_indexes[cls_ind] = 0
+                    pindex = np.random.permutation(np.arange(len(self._poses[cls_ind])))
+                    self._poses[cls_ind] = self._poses[cls_ind][pindex]
+                ind = self._pose_indexes[cls_ind]
+                pose = self._poses[cls_ind][ind, :]
+                euler = pose[:3] + (cfg.TRAIN.SYN_STD_ROTATION * math.pi / 180.0) * np.random.randn(3)
+                qt[3:] = euler2quat(euler[0], euler[1], euler[2])
+                self._pose_indexes[cls_ind] += 1
+            else:
+                # uniformly sample poses
+                if self.pose_indexes[cls] >= len(self.pose_lists[cls]):
+                    self.pose_indexes[cls] = 0
+                    self.pose_lists[cls] = np.random.permutation(np.arange(len(self.eulers)))
+                roll = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][0] + 15 * np.random.randn()
+                pitch = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][1] + 15 * np.random.randn()
+                yaw = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][2] + 15 * np.random.randn()
+                qt[3:] = euler2quat(roll * math.pi / 180.0, pitch * math.pi / 180.0, yaw * math.pi / 180.0)
+                self.pose_indexes[cls] += 1
 
             # translation
             bound = cfg.TRAIN.SYN_BOUND
@@ -564,11 +585,11 @@ class YCBVideo(data.Dataset, datasets.imdb):
         return os.path.join(datasets.ROOT_DIR, 'data', 'YCB_Video')
 
 
-    def _load_image_set_index(self):
+    def _load_image_set_index(self, image_set):
         """
         Load the indexes listed in this dataset's image set file.
         """
-        image_set_file = os.path.join(self._ycb_video_path, self._image_set + '.txt')
+        image_set_file = os.path.join(self._ycb_video_path, image_set + '.txt')
         assert os.path.exists(image_set_file), \
                 'Path does not exist: {}'.format(image_set_file)
 
@@ -606,7 +627,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
             print('%d %s [%d/%d]' % (i, self.classes[i], count[i], len(list(video_ids_selected))))
 
         # sample a subset for training
-        if self._image_set == 'train':
+        if image_set == 'train':
             image_index = image_index[::10]
 
         return image_index
@@ -810,3 +831,49 @@ class YCBVideo(data.Dataset, datasets.imdb):
                 labels[I[0], I[1]] = ind
 
         return labels, labels_all
+
+
+    def _load_all_poses(self):
+
+        # load cache file
+        prefix = '_class'
+        for i in range(len(cfg.TRAIN.CLASSES)):
+            prefix += '_%d' % cfg.TRAIN.CLASSES[i]
+        cache_file = os.path.join(self.cache_path, self.name + prefix + '_poses.pkl')
+        if os.path.exists(cache_file):
+            with open(cache_file, 'rb') as fid:
+                poses = cPickle.load(fid)
+            print '{} poses loaded from {}'.format(self.name, cache_file)
+            return poses
+
+        poses = [np.zeros((0, 6), dtype=np.float32) for i in range(len(cfg.TRAIN.CLASSES)-1)] # no background
+        classes = np.array(cfg.TRAIN.CLASSES)
+
+        # load all image indexes
+        image_index = self._load_image_set_index('trainval')
+        print('loading poses...')
+        for i in range(len(image_index)):
+            filename = os.path.join(self._data_path, image_index[i] + '-meta.mat')
+
+            meta_data = scipy.io.loadmat(filename)
+            cls_indexes = meta_data['cls_indexes'].flatten()
+            gt = meta_data['poses']
+            if len(gt.shape) == 2:
+                gt = np.reshape(gt, (3, 4, 1))
+
+            for j in range(len(cls_indexes)):
+                cls = int(cls_indexes[j])
+                ind = np.where(classes == cls)[0]
+                if len(ind) > 0:
+                    R = gt[:, :3, j]
+                    T = gt[:, 3, j]
+                    pose = np.zeros((1, 6), dtype=np.float32)
+                    pose[0, :3] = mat2euler(R)
+                    pose[0, 3:] = T
+                    poses[int(ind)-1] = np.concatenate((poses[int(ind)-1], pose), axis=0)
+
+        # save poses
+        with open(cache_file, 'wb') as fid:
+            cPickle.dump(poses, fid, cPickle.HIGHEST_PROTOCOL)
+        print 'wrote poses to {}'.format(cache_file)
+        return poses

@@ -10,9 +10,10 @@ import torch.nn as nn
 import torchvision.transforms as transforms
 
 import time
-import sys
+import sys, os
 import numpy as np
 import cv2
+import scipy
 
 from fcn.config import cfg
 from transforms3d.quaternions import mat2quat, quat2mat, qmult

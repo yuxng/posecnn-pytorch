@@ -12,6 +12,6 @@ echo Logging output to "$LOG"
 
 time ./tools/test_net.py --gpu 0 \
   --network posecnn \
-  --pretrained output/ycb_video/ycb_video_train/vgg16_ycb_object_dgx_1_epoch_4.checkpoint.pth \
+  --pretrained output/ycb_video/ycb_video_train/vgg16_ycb_video_dgx_1_epoch_1.checkpoint.pth \
   --dataset ycb_video_keyframe \
   --cfg experiments/cfgs/ycb_video.yml
