@@ -109,6 +109,7 @@ class imdb(object):
             for i in range(len(files)):
                 filename = os.path.join(objectnet3d, files[i])
                 backgrounds.append(filename)
+            '''
 
             # PASCAL 2012
             pascal = os.path.join(self.cache_path, '../PASCAL2012/data')
@@ -116,14 +117,15 @@ class imdb(object):
             for i in range(len(files)):
                 filename = os.path.join(pascal, files[i])
                 backgrounds.append(filename)
-            '''
 
+            '''
             # YCB Background
             ycb = os.path.join(self.cache_path, '../YCB_Background')
             files = os.listdir(ycb)
             for i in range(len(files)):
                 filename = os.path.join(ycb, files[i])
                 backgrounds.append(filename)
+            '''
 
         for i in xrange(len(backgrounds)):
             if not os.path.isfile(backgrounds[i]):

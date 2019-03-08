@@ -27,7 +27,6 @@ TRAIN:
   USE_FLIPPED: False
   CHROMATIC: True
   ADD_NOISE: True
-  NOISE_LEVEL: 0.2
   VISUALIZE: False
   VERTEX_REG: True
   # synthetic data
