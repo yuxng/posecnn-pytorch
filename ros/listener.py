@@ -52,7 +52,7 @@ class ImageListener:
                 cls = prefix + self.dataset.classes[i][4:]
             else:
                 cls = prefix + self.dataset.classes[i]
-            self.pubs.append(rospy.Publisher('/raw/objects/prior_pose/' + cls, PoseStamped, queue_size=1))
+            self.pubs.append(rospy.Publisher('/objects/prior_pose/' + cls, PoseStamped, queue_size=1))
 
         if cfg.TEST.ROS_CAMERA == 'logitech':
 
