@@ -172,9 +172,9 @@ class YCBVideo(data.Dataset, datasets.imdb):
                 qt[3:] = euler2quat(euler[0], euler[1], euler[2])
                 self._pose_indexes[cls_ind] += 1
 
-                qt[0] = pose[4] + np.random.uniform(-0.1, 0.1)
-                qt[1] = pose[5] + np.random.uniform(-0.1, 0.1)
-                qt[2] = pose[6] + np.random.uniform(-0.1, 0.1)
+                qt[0] = pose[3] + np.random.uniform(-0.1, 0.1)
+                qt[1] = pose[4] + np.random.uniform(-0.1, 0.1)
+                qt[2] = pose[5] + np.random.uniform(-0.1, 0.1)
 
             else:
                 # uniformly sample poses
