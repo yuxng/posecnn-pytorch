@@ -10,12 +10,31 @@ import numpy.random as npr
 import cv2
 import cPickle
 import scipy.io
+import copy
 
 import datasets
 from fcn.config import cfg
 from utils.blob import pad_im, chromatic_transform, add_noise, add_noise_cuda
 from transforms3d.quaternions import mat2quat, quat2mat
 from utils.se3 import *
+from utils.pose_error import *
+
+def VOCap(rec, prec):
+    index = np.where(np.isfinite(rec))[0]
+    rec = rec[index]
+    prec = prec[index]
+    if len(rec) == 0 or len(prec) == 0:
+        ap = 0
+    else:
+        mrec = np.insert(rec, 0, 0)
+        mrec = np.append(mrec, 0.1)
+        mpre = np.insert(prec, 0, 0)
+        mpre = np.append(mpre, prec[-1])
+        for i in range(1, len(mpre)):
+            mpre[i] = max(mpre[i], mpre[i-1])
+        i = np.where(mrec[1:] != mrec[:-1])[0] + 1
+        ap = np.sum(np.multiply(mrec[i] - mrec[i-1], mpre[i])) * 10
+    return ap
 
 class YCBVideo(data.Dataset, datasets.imdb):
     def __init__(self, image_set, ycb_video_path = None):
@@ -80,14 +99,19 @@ class YCBVideo(data.Dataset, datasets.imdb):
             self._size = len(self._image_index) * (cfg.TRAIN.SYN_RATIO+1)
         else:
             self._size = len(self._image_index)
+        if self._size > cfg.TRAIN.MAX_ITERS_PER_EPOCH * cfg.TRAIN.IMS_PER_BATCH:
+            self._size = cfg.TRAIN.MAX_ITERS_PER_EPOCH * cfg.TRAIN.IMS_PER_BATCH
         self._roidb = self.gt_roidb()
+        self._perm = np.random.permutation(np.arange(len(self._roidb)))
+        self._cur = 0
         if cfg.MODE == 'TRAIN' or (cfg.MODE == 'TEST' and cfg.TEST.SYNTHESIZE == True):
             self._build_background_images()
         self._build_uniform_poses()
 
         # poses from the dataset
-        self._poses = self._load_all_poses()
-        self._pose_indexes = np.zeros((self._num_classes-1, ), dtype=np.int32)
+        if cfg.MODE == 'TRAIN' or (cfg.MODE == 'TEST' and cfg.TEST.SYNTHESIZE == True):
+            self._poses = self._load_all_poses()
+            self._pose_indexes = np.zeros((self._num_classes-1, ), dtype=np.int32)
 
         assert os.path.exists(self._ycb_video_path), \
                 'ycb_video path does not exist: {}'.format(self._ycb_video_path)
@@ -147,6 +171,11 @@ class YCBVideo(data.Dataset, datasets.imdb):
                 euler = pose[:3] + (cfg.TRAIN.SYN_STD_ROTATION * math.pi / 180.0) * np.random.randn(3)
                 qt[3:] = euler2quat(euler[0], euler[1], euler[2])
                 self._pose_indexes[cls_ind] += 1
+
+                qt[0] = pose[4] + np.random.uniform(-0.1, 0.1)
+                qt[1] = pose[5] + np.random.uniform(-0.1, 0.1)
+                qt[2] = pose[6] + np.random.uniform(-0.1, 0.1)
+
             else:
                 # uniformly sample poses
                 if self.pose_indexes[cls] >= len(self.pose_lists[cls]):
@@ -158,38 +187,38 @@ class YCBVideo(data.Dataset, datasets.imdb):
                 qt[3:] = euler2quat(roll * math.pi / 180.0, pitch * math.pi / 180.0, yaw * math.pi / 180.0)
                 self.pose_indexes[cls] += 1
 
-            # translation
-            bound = cfg.TRAIN.SYN_BOUND
-            if i == 0 or i >= num_target or np.random.rand(1) > 0.5:
-                qt[0] = np.random.uniform(-bound, bound)
-                qt[1] = np.random.uniform(-bound, bound)
-                qt[2] = np.random.uniform(cfg.TRAIN.SYN_TNEAR, cfg.TRAIN.SYN_TFAR)
-            else:
-                # sample an object nearby
-                object_id = np.random.randint(0, i, size=1)[0]
-                extent = np.mean(self._extents_all[cls+1, :])
-
-                flag = np.random.randint(0, 2)
-                if flag == 0:
-                    flag = -1
-                qt[0] = poses_all[object_id][0] + flag * extent * np.random.uniform(1.0, 1.5)
-                if np.absolute(qt[0]) > bound:
-                    qt[0] = poses_all[object_id][0] - flag * extent * np.random.uniform(1.0, 1.5)
-                if np.absolute(qt[0]) > bound:
+                # translation
+                bound = cfg.TRAIN.SYN_BOUND
+                if i == 0 or i >= num_target or np.random.rand(1) > 0.5:
                     qt[0] = np.random.uniform(-bound, bound)
-
-                flag = np.random.randint(0, 2)
-                if flag == 0:
-                    flag = -1
-                qt[1] = poses_all[object_id][1] + flag * extent * np.random.uniform(1.0, 1.5)
-                if np.absolute(qt[1]) > bound:
-                    qt[1] = poses_all[object_id][1] - flag * extent * np.random.uniform(1.0, 1.5)
-                if np.absolute(qt[1]) > bound:
                     qt[1] = np.random.uniform(-bound, bound)
+                    qt[2] = np.random.uniform(cfg.TRAIN.SYN_TNEAR, cfg.TRAIN.SYN_TFAR)
+                else:
+                    # sample an object nearby
+                    object_id = np.random.randint(0, i, size=1)[0]
+                    extent = np.mean(self._extents_all[cls+1, :])
 
-                qt[2] = poses_all[object_id][2] - extent * np.random.uniform(2.0, 4.0)
-                if qt[2] < cfg.TRAIN.SYN_TNEAR:
-                    qt[2] = poses_all[object_id][2] + extent * np.random.uniform(2.0, 4.0)
+                    flag = np.random.randint(0, 2)
+                    if flag == 0:
+                        flag = -1
+                    qt[0] = poses_all[object_id][0] + flag * extent * np.random.uniform(1.0, 1.5)
+                    if np.absolute(qt[0]) > bound:
+                        qt[0] = poses_all[object_id][0] - flag * extent * np.random.uniform(1.0, 1.5)
+                    if np.absolute(qt[0]) > bound:
+                        qt[0] = np.random.uniform(-bound, bound)
+
+                    flag = np.random.randint(0, 2)
+                    if flag == 0:
+                        flag = -1
+                    qt[1] = poses_all[object_id][1] + flag * extent * np.random.uniform(1.0, 1.5)
+                    if np.absolute(qt[1]) > bound:
+                        qt[1] = poses_all[object_id][1] - flag * extent * np.random.uniform(1.0, 1.5)
+                    if np.absolute(qt[1]) > bound:
+                        qt[1] = np.random.uniform(-bound, bound)
+
+                    qt[2] = poses_all[object_id][2] - extent * np.random.uniform(2.0, 4.0)
+                    if qt[2] < cfg.TRAIN.SYN_TNEAR:
+                        qt[2] = poses_all[object_id][2] + extent * np.random.uniform(2.0, 4.0)
 
             poses_all.append(qt)
         cfg.renderer.set_poses(poses_all)
@@ -353,7 +382,9 @@ class YCBVideo(data.Dataset, datasets.imdb):
                   'points': self._point_blob,
                   'symmetry': self._symmetry,
                   'gt_boxes': gt_boxes,
-                  'im_info': im_info}
+                  'im_info': im_info,
+                  'video_id': 'none',
+                  'image_id': 'none'}
 
         if cfg.TRAIN.VERTEX_REG:
             sample['vertex_targets'] = vertex_targets
@@ -372,11 +403,12 @@ class YCBVideo(data.Dataset, datasets.imdb):
         if is_syn:
             return self._render_item()
 
-        if (cfg.MODE == 'TRAIN' and cfg.TRAIN.SYNTHESIZE) or (cfg.MODE == 'TEST' and cfg.TEST.SYNTHESIZE):
-            index = int((index % self._size) / (cfg.TRAIN.SYN_RATIO+1))
-        else:
-            index = int(index % self._size)
-        roidb = self._roidb[index]
+        if self._cur + 1 >= len(self._roidb):
+            self._perm = np.random.permutation(np.arange(len(self._roidb)))
+            self._cur = 0
+        db_ind = self._perm[self._cur]
+        roidb = self._roidb[db_ind]
+        self._cur += 1
 
         # Get the input image blob
         random_scale_ind = npr.randint(0, high=len(cfg.TRAIN.SCALES_BASE))
@@ -396,7 +428,9 @@ class YCBVideo(data.Dataset, datasets.imdb):
                   'points': self._point_blob,
                   'symmetry': self._symmetry,
                   'gt_boxes': gt_boxes,
-                  'im_info': im_info}
+                  'im_info': im_info,
+                  'video_id': roidb['video_id'],
+                  'image_id': roidb['image_id']}
 
         if cfg.TRAIN.VERTEX_REG:
             sample['vertex_targets'] = vertex_targets
@@ -627,8 +661,8 @@ class YCBVideo(data.Dataset, datasets.imdb):
             print('%d %s [%d/%d]' % (i, self.classes[i], count[i], len(list(video_ids_selected))))
 
         # sample a subset for training
-        if image_set == 'train':
-            image_index = image_index[::10]
+        # if image_set == 'train':
+        #    image_index = image_index[::10]
 
         return image_index
 
@@ -788,12 +822,14 @@ class YCBVideo(data.Dataset, datasets.imdb):
         # parse image name
         pos = index.find('/')
         video_id = index[:pos]
+        image_id = index[pos+1:]
         
         return {'image': image_path,
                 'depth': depth_path,
                 'label': label_path,
                 'meta_data': metadata_path,
                 'video_id': video_id,
+                'image_id': image_id,
                 'flipped': False}
 
 
@@ -877,3 +913,241 @@ class YCBVideo(data.Dataset, datasets.imdb):
             cPickle.dump(poses, fid, cPickle.HIGHEST_PROTOCOL)
         print 'wrote poses to {}'.format(cache_file)
         return poses
+
+
+    def evaluation(self, output_dir):
+
+        filename = os.path.join(output_dir, 'results_posecnn.mat')
+        if os.path.exists(filename):
+            results_all = scipy.io.loadmat(filename)
+            print('load results from file')
+            print(filename)
+            distances_sys = results_all['distances_sys']
+            distances_non = results_all['distances_non']
+            errors_rotation = results_all['errors_rotation']
+            errors_translation = results_all['errors_translation']
+            results_seq_id = results_all['results_seq_id'].flatten()
+            results_frame_id = results_all['results_frame_id'].flatten()
+            results_object_id = results_all['results_object_id'].flatten()
+            results_cls_id = results_all['results_cls_id'].flatten()
+        else:
+            # save results
+            num_max = 100000
+            num_results = 2
+            distances_sys = np.zeros((num_max, num_results), dtype=np.float32)
+            distances_non = np.zeros((num_max, num_results), dtype=np.float32)
+            errors_rotation = np.zeros((num_max, num_results), dtype=np.float32)
+            errors_translation = np.zeros((num_max, num_results), dtype=np.float32)
+            results_seq_id = np.zeros((num_max, ), dtype=np.float32)
+            results_frame_id = np.zeros((num_max, ), dtype=np.float32)
+            results_object_id = np.zeros((num_max, ), dtype=np.float32)
+            results_cls_id = np.zeros((num_max, ), dtype=np.float32)
+
+            # for each image
+            count = -1
+            for i in range(len(self._roidb)):
+    
+                # parse keyframe name
+                seq_id = int(self._roidb[i]['video_id'])
+                frame_id = int(self._roidb[i]['image_id'])
+
+                # load result
+                filename = os.path.join(output_dir, '%04d_%06d.mat' % (seq_id, frame_id))
+                print(filename)
+                result_posecnn = scipy.io.loadmat(filename)
+
+                # load gt poses
+                filename = osp.join(self._data_path, '%04d/%06d-meta.mat' % (seq_id, frame_id))
+                print(filename)
+                gt = scipy.io.loadmat(filename)
+
+                # for each gt poses
+                cls_indexes = gt['cls_indexes'].flatten()
+                for j in range(len(cls_indexes)):
+                    count += 1
+                    cls_index = cls_indexes[j]
+                    RT_gt = gt['poses'][:, :, j]
+
+                    results_seq_id[count] = seq_id
+                    results_frame_id[count] = frame_id
+                    results_object_id[count] = j
+                    results_cls_id[count] = cls_index
+
+                    # network result
+                    result = result_posecnn
+                    if len(result['rois']) > 0:
+                        roi_index = np.where(result['rois'][:, 1] == cls_index)[0]
+                    else:
+                        roi_index = []
+
+                    if len(roi_index) > 0:
+                        RT = np.zeros((3, 4), dtype=np.float32)
+
+                        # pose from network
+                        RT[:3, :3] = quat2mat(result['poses'][roi_index, :4].flatten())
+                        RT[:, 3] = result['poses'][roi_index, 4:]
+                        distances_sys[count, 0] = adi(RT[:3, :3], RT[:, 3],  RT_gt[:3, :3], RT_gt[:, 3], self._points[cls_index])
+                        distances_non[count, 0] = add(RT[:3, :3], RT[:, 3],  RT_gt[:3, :3], RT_gt[:, 3], self._points[cls_index])
+                        errors_rotation[count, 0] = re(RT[:3, :3], RT_gt[:3, :3])
+                        errors_translation[count, 0] = te(RT[:, 3], RT_gt[:, 3])
+
+                        # pose after depth refinement
+                        if cfg.TEST.POSE_REFINE:
+                            RT[:3, :3] = quat2mat(result['poses_refined'][roi_index, :4].flatten())
+                            RT[:, 3] = result['poses_refined'][roi_index, 4:]
+                            distances_sys[count, 1] = adi(RT[:3, :3], RT[:, 3],  RT_gt[:3, :3], RT_gt[:, 3], self._points[cls_index])
+                            distances_non[count, 1] = add(RT[:3, :3], RT[:, 3],  RT_gt[:3, :3], RT_gt[:, 3], self._points[cls_index])
+                            errors_rotation[count, 1] = re(RT[:3, :3], RT_gt[:3, :3])
+                            errors_translation[count, 1] = te(RT[:, 3], RT_gt[:, 3])
+                        else:
+                            distances_sys[count, 1] = np.inf
+                            distances_non[count, 1] = np.inf
+                            errors_rotation[count, 1] = np.inf
+                            errors_translation[count, 1] = np.inf
+                    else:
+                        distances_sys[count, :] = np.inf
+                        distances_non[count, :] = np.inf
+                        errors_rotation[count, :] = np.inf
+                        errors_translation[count, :] = np.inf
+
+            distances_sys = distances_sys[:count+1, :]
+            distances_non = distances_non[:count+1, :]
+            errors_rotation = errors_rotation[:count+1, :]
+            errors_translation = errors_translation[:count+1, :]
+            results_seq_id = results_seq_id[:count+1]
+            results_frame_id = results_frame_id[:count+1]
+            results_object_id = results_object_id[:count+1]
+            results_cls_id = results_cls_id[:count+1]
+
+            results_all = {'distances_sys': distances_sys,
+                       'distances_non': distances_non,
+                       'errors_rotation': errors_rotation,
+                       'errors_translation': errors_translation,
+                       'results_seq_id': results_seq_id,
+                       'results_frame_id': results_frame_id,
+                       'results_object_id': results_object_id,
+                       'results_cls_id': results_cls_id }
+
+            filename = os.path.join(output_dir, 'results_posecnn.mat')
+            scipy.io.savemat(filename, results_all)
+
+        # print the results
+        # for each class
+        import matplotlib.pyplot as plt
+        max_distance = 0.1
+        index_plot = [0, 1]
+        color = ['r', 'b']
+        leng = ['PoseCNN', 'PoseCNN refined']
+        num = len(leng)
+        ADD = np.zeros((self.num_classes, num), dtype=np.float32)
+        ADDS = np.zeros((self.num_classes, num), dtype=np.float32)
+        TS = np.zeros((self.num_classes, num), dtype=np.float32)
+        classes = copy.copy(self._classes)
+        classes[0] = 'all'
+        for k in cfg.TRAIN.CLASSES:
+            fig = plt.figure()
+            if k == 0:
+                index = range(len(results_cls_id))
+            else:
+                index = np.where(results_cls_id == k)[0]
+
+            if len(index) == 0:
+                continue
+            print('%s: %d objects' % (classes[k], len(index)))
+
+            # distance symmetry
+            ax = fig.add_subplot(2, 3, 1)
+            lengs = []
+            for i in index_plot:
+                D = distances_sys[index, i]
+                ind = np.where(D > max_distance)[0]
+                D[ind] = np.inf
+                d = np.sort(D)
+                n = len(d)
+                accuracy = np.cumsum(np.ones((n, ), np.float32)) / n
+                plt.plot(d, accuracy, color[i], linewidth=2)
+                ADDS[k, i] = VOCap(d, accuracy)
+                lengs.append('%s (%.2f)' % (leng[i], ADDS[k, i] * 100))
+                print('%s, %s: %d objects missed' % (classes[k], leng[i], np.sum(np.isinf(D))))
+
+            ax.legend(lengs)
+            plt.xlabel('Average distance threshold in meter (symmetry)')
+            plt.ylabel('accuracy')
+            ax.set_title(classes[k])
+
+            # distance non-symmetry
+            ax = fig.add_subplot(2, 3, 2)
+            lengs = []
+            for i in index_plot:
+                D = distances_non[index, i]
+                ind = np.where(D > max_distance)[0]
+                D[ind] = np.inf
+                d = np.sort(D)
+                n = len(d)
+                accuracy = np.cumsum(np.ones((n, ), np.float32)) / n
+                plt.plot(d, accuracy, color[i], linewidth=2)
+                ADD[k, i] = VOCap(d, accuracy)
+                lengs.append('%s (%.2f)' % (leng[i], ADD[k, i] * 100))
+                print('%s, %s: %d objects missed' % (classes[k], leng[i], np.sum(np.isinf(D))))
+
+            ax.legend(lengs)
+            plt.xlabel('Average distance threshold in meter (non-symmetry)')
+            plt.ylabel('accuracy')
+            ax.set_title(classes[k])
+
+            # translation
+            ax = fig.add_subplot(2, 3, 3)
+            lengs = []
+            for i in index_plot:
+                D = errors_translation[index, i]
+                ind = np.where(D > max_distance)[0]
+                D[ind] = np.inf
+                d = np.sort(D)
+                n = len(d)
+                accuracy = np.cumsum(np.ones((n, ), np.float32)) / n
+                plt.plot(d, accuracy, color[i], linewidth=2)
+                TS[k, i] = VOCap(d, accuracy)
+                lengs.append('%s (%.2f)' % (leng[i], TS[k, i] * 100))
+                print('%s, %s: %d objects missed' % (classes[k], leng[i], np.sum(np.isinf(D))))
+
+            ax.legend(lengs)
+            plt.xlabel('Translation threshold in meter')
+            plt.ylabel('accuracy')
+            ax.set_title(classes[k])
+
+            # rotation histogram
+            count = 4
+            for i in index_plot:
+                ax = fig.add_subplot(2, 3, count)
+                D = errors_rotation[index, i]
+                ind = np.where(np.isfinite(D))[0]
+                D = D[ind]
+                ax.hist(D, bins=range(0, 190, 10), range=(0, 180))
+                plt.xlabel('Rotation angle error')
+                plt.ylabel('count')
+                ax.set_title(leng[i])
+                count += 1
+
+            # mng = plt.get_current_fig_manager()
+            # mng.full_screen_toggle()
+            filename = output_dir + '/' + classes[k] + '.png'
+            plt.savefig(filename)
+            # plt.show()
+
+        # print ADD
+        print('==================ADD======================')
+        for k in cfg.TRAIN.CLASSES:
+            print('%s: %f' % (classes[k], ADD[k, 0]))
+        for k in cfg.TRAIN.CLASSES[1:]:
+            print('%f' % (ADD[k, 0]))
+        print('%f' % (ADD[0, 0]))
+        print('===========================================')
+
+        # print ADD-S
+        print('==================ADD-S====================')
+        for k in cfg.TRAIN.CLASSES:
+            print('%s: %f' % (classes[k], ADDS[k, 0]))
+        for k in cfg.TRAIN.CLASSES[1:]:
+            print('%f' % (ADDS[k, 0]))
+        print('%f' % (ADDS[0, 0]))
+        print('===========================================')

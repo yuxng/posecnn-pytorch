@@ -183,7 +183,7 @@ def test(test_loader, network, output_dir):
                     poses[j, :4] = allocentric2egocentric(qt, T)
 
             # optimize depths
-            poses_refined = optimize_depths(rois, poses, test_loader.dataset._points_all, test_loader.dataset._intrinsic_matrix)
+            poses, poses_refined = optimize_depths(rois, poses, test_loader.dataset._points_all, test_loader.dataset._intrinsic_matrix)
         else:
             out_label = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
             out_vertex = []
@@ -199,10 +199,17 @@ def test(test_loader, network, output_dir):
         batch_time.update(time.time() - end)
 
         result = {'labels': out_label, 'rois': rois, 'poses': poses, 'poses_refined': poses_refined}
-        filename = os.path.join(output_dir, '%06d.mat' % i)
+        if 'video_id' in sample and 'image_id' in sample:
+            filename = os.path.join(output_dir, sample['video_id'][0] + '_' + sample['image_id'][0] + '.mat')
+        else:
+            filename = os.path.join(output_dir, '%06d.mat' % i)
         scipy.io.savemat(filename, result, do_compression=True)
 
         print('[%d/%d], batch time %.2f' % (i, epoch_size, batch_time.val))
+
+    filename = os.path.join(output_dir, 'results_posecnn.mat')
+    if os.path.exists(filename):
+        os.remove(filename)
 
 
 def test_image(network, dataset, im_color, im_depth=None):
@@ -292,6 +299,7 @@ def test_image(network, dataset, im_color, im_depth=None):
 def optimize_depths(rois, poses, points, intrinsic_matrix):
 
     num = rois.shape[0]
+    poses_refined = poses.copy()
     for i in range(num):
         roi = rois[i, 2:6]
         width = roi[2] - roi[0]
@@ -313,11 +321,14 @@ def optimize_depths(rois, poses, points, intrinsic_matrix):
         # optimization
         x0 = poses[i, 6]
         res = minimize(objective_depth, x0, args=(width, height, RT, x3d, intrinsic_matrix), method='nelder-mead', options={'xtol': 1e-8, 'disp': False})
-        poses[i, 4] *= res.x 
-        poses[i, 5] *= res.x
-        poses[i, 6] = res.x
+        poses_refined[i, 4] *= res.x 
+        poses_refined[i, 5] *= res.x
+        poses_refined[i, 6] = res.x
 
-    return poses
+        poses[i, 4] *= poses[i, 6] 
+        poses[i, 5] *= poses[i, 6]
+
+    return poses, poses_refined
 
 
 def objective_depth(x, width, height, RT, x3d, intrinsic_matrix):

@@ -124,3 +124,6 @@ if __name__ == '__main__':
 
     # test network
     test(dataloader, network, output_dir)
+
+    # evaluation
+    dataset.evaluation(output_dir)
