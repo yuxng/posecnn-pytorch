@@ -108,7 +108,7 @@ def train(train_loader, network, optimizer, epoch):
                 = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
 
             loss_label = loss_cross_entropy(out_logsoftmax, out_weight)
-            loss_vertex = smooth_l1_loss(out_vertex, vertex_targets, vertex_weights)
+            loss_vertex = cfg.TRAIN.VERTEX_W * smooth_l1_loss(out_vertex, vertex_targets, vertex_weights)
             loss_box = loss_cross_entropy(out_logsoftmax_box, bbox_labels)
             loss_location = smooth_l1_loss(bbox_pred, bbox_targets, bbox_inside_weights)
             loss_pose = torch.mean(loss_pose_tensor)
@@ -838,7 +838,7 @@ def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, sample, points
             for j in xrange(rois.shape[0]):
                 cls = int(rois[j, 1])
                 print classes[cls], rois[j, -1]
-                if cls > 0 and rois[j, -1] > 0.1:
+                if cls > 0:
                     # extract 3D points
                     x3d = np.ones((4, points.shape[1]), dtype=np.float32)
                     x3d[0, :] = points[cls,:,0]

@@ -13,4 +13,4 @@ export PYTHON_EGG_CACHE=/nfs
   --dataset ycb_video_train \
   --cfg experiments/cfgs/ycb_video_dgx_2.yml \
   --solver sgd \
-  --epochs 8
+  --epochs 4

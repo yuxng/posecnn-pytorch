@@ -661,8 +661,8 @@ class YCBVideo(data.Dataset, datasets.imdb):
             print('%d %s [%d/%d]' % (i, self.classes[i], count[i], len(list(video_ids_selected))))
 
         # sample a subset for training
-        # if image_set == 'train':
-        #    image_index = image_index[::10]
+        if image_set == 'train':
+            image_index = image_index[::10]
 
         return image_index
 
@@ -879,6 +879,8 @@ class YCBVideo(data.Dataset, datasets.imdb):
         if os.path.exists(cache_file):
             with open(cache_file, 'rb') as fid:
                 poses = cPickle.load(fid)
+                for i in range(len(poses)):
+                    print('%s, min distance %f, max distance %f' % (self._classes[i+1], np.min(poses[i][:,5]), np.max(poses[i][:,5])))
             print '{} poses loaded from {}'.format(self.name, cache_file)
             return poses
 
