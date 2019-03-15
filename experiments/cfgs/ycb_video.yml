@@ -29,7 +29,9 @@ TRAIN:
   ADD_NOISE: True
   VISUALIZE: False
   VERTEX_REG: True
+  FREEZE_LAYERS: False
   VERTEX_W: 10.0
+  VERTEX_W_INSIDE: 10.0
   # synthetic data
   SYNTHESIZE: True
   SYN_RATIO: 5
@@ -50,6 +52,6 @@ TEST:
   HOUGH_SKIP_PIXELS: 10
   DET_THRESHOLD: 0.1
   SCALES_BASE: !!python/tuple [1.0]
-  VISUALIZE: False
+  VISUALIZE: True
   SYNTHESIZE: False
   POSE_REFINE: True

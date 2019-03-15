@@ -98,6 +98,7 @@ if __name__ == '__main__':
     print 'Use dataset `{:s}` for training'.format(dataset.name)
 
     output_dir = get_output_dir(dataset, None)
+    output_dir = osp.join(output_dir, cfg.TRAIN.SNAPSHOT_INFIX)
     print 'Output will be saved to `{:s}`'.format(output_dir)
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)

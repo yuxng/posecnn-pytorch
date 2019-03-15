@@ -43,7 +43,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
         self._image_set = image_set
         self._ycb_video_path = self._get_default_path() if ycb_video_path is None \
                             else ycb_video_path
-        if cfg.DATA_PATH == '':
+        if cfg.DATA_PATH == '' or cfg.MODE == 'TEST':
             self._data_path = os.path.join(self._ycb_video_path, 'data')
         else:
             self._data_path = cfg.DATA_PATH
@@ -102,7 +102,10 @@ class YCBVideo(data.Dataset, datasets.imdb):
         if self._size > cfg.TRAIN.MAX_ITERS_PER_EPOCH * cfg.TRAIN.IMS_PER_BATCH:
             self._size = cfg.TRAIN.MAX_ITERS_PER_EPOCH * cfg.TRAIN.IMS_PER_BATCH
         self._roidb = self.gt_roidb()
-        self._perm = np.random.permutation(np.arange(len(self._roidb)))
+        if cfg.MODE == 'TRAIN':
+            self._perm = np.random.permutation(np.arange(len(self._roidb)))
+        else:
+            self._perm = np.arange(len(self._roidb))
         self._cur = 0
         if cfg.MODE == 'TRAIN' or (cfg.MODE == 'TEST' and cfg.TEST.SYNTHESIZE == True):
             self._build_background_images()
@@ -403,7 +406,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
         if is_syn:
             return self._render_item()
 
-        if self._cur + 1 >= len(self._roidb):
+        if self._cur >= len(self._roidb):
             self._perm = np.random.permutation(np.arange(len(self._roidb)))
             self._cur = 0
         db_ind = self._perm[self._cur]
@@ -1143,6 +1146,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
         for k in cfg.TRAIN.CLASSES[1:]:
             print('%f' % (ADD[k, 0]))
         print('%f' % (ADD[0, 0]))
+        print(cfg.TRAIN.SNAPSHOT_INFIX)
         print('===========================================')
 
         # print ADD-S
@@ -1152,4 +1156,5 @@ class YCBVideo(data.Dataset, datasets.imdb):
         for k in cfg.TRAIN.CLASSES[1:]:
             print('%f' % (ADDS[k, 0]))
         print('%f' % (ADDS[0, 0]))
+        print(cfg.TRAIN.SNAPSHOT_INFIX)
         print('===========================================')

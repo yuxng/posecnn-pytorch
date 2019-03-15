@@ -203,6 +203,7 @@ def test(test_loader, network, output_dir):
             filename = os.path.join(output_dir, sample['video_id'][0] + '_' + sample['image_id'][0] + '.mat')
         else:
             filename = os.path.join(output_dir, '%06d.mat' % i)
+        print filename
         scipy.io.savemat(filename, result, do_compression=True)
 
         print('[%d/%d], batch time %.2f' % (i, epoch_size, batch_time.val))
