@@ -102,7 +102,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
         if self._size > cfg.TRAIN.MAX_ITERS_PER_EPOCH * cfg.TRAIN.IMS_PER_BATCH:
             self._size = cfg.TRAIN.MAX_ITERS_PER_EPOCH * cfg.TRAIN.IMS_PER_BATCH
         self._roidb = self.gt_roidb()
-        if cfg.MODE == 'TRAIN':
+        if cfg.MODE == 'TRAIN' or cfg.TEST.VISUALIZE:
             self._perm = np.random.permutation(np.arange(len(self._roidb)))
         else:
             self._perm = np.arange(len(self._roidb))
