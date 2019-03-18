@@ -90,10 +90,11 @@ if __name__ == '__main__':
 
     # device
     cfg.device = torch.device('cuda:{:d}'.format(args.gpu_id))
+    cfg.gpu_id = args.gpu_id
     print 'GPU device {:d}'.format(args.gpu_id)
 
     # dataset
-    # cfg.MODE = 'TEST'
+    cfg.MODE = 'TEST'
     dataset = get_dataset(args.dataset_name)
 
     # list images
@@ -124,12 +125,13 @@ if __name__ == '__main__':
     cudnn.benchmark = True
     network.eval()
 
-    cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, render_marker=True)
-    cfg.renderer.load_objects(dataset.model_mesh_paths, dataset.model_texture_paths, dataset.model_colors)
+    cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, gpu_id=cfg.gpu_id, render_marker=False)
+    cfg.renderer.load_objects(dataset.model_mesh_paths_target,
+                              dataset.model_texture_paths_target,
+                              dataset.model_colors_target)
     cfg.renderer.set_camera_default()
     cfg.renderer.set_light_pos([0, 0, 0])
     cfg.renderer.set_light_color([1, 1, 1])
-    print dataset.model_mesh_paths
 
     # run network
     for i in range(len(images)):

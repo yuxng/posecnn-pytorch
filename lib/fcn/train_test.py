@@ -281,7 +281,7 @@ def test_image(network, dataset, im_color, im_depth=None):
         if cfg.TEST.POSE_REFINE and im_depth is not None:
             poses = refine_pose(labels, im_depth, rois, poses, dataset._intrinsic_matrix)
         else:
-            poses = optimize_depths(rois, poses, dataset._points_all, dataset._intrinsic_matrix)
+            poses_tmp, poses = optimize_depths(rois, poses, dataset._points_all, dataset._intrinsic_matrix)
 
     else:
         out_label = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
