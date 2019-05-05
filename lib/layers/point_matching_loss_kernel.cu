@@ -253,7 +253,7 @@ std::vector<at::Tensor> pml_cuda_forward(
 {
   // run kernels
   cudaError_t err;
-  const int kThreadsPerBlock = 1024;
+  const int kThreadsPerBlock = 512;
   int output_size;
 
   // temp losses
@@ -331,7 +331,7 @@ std::vector<at::Tensor> pml_cuda_backward(
     at::Tensor bottom_diff)
 {
   cudaError_t err;
-  const int kThreadsPerBlock = 1024;
+  const int kThreadsPerBlock = 512;
   int output_size;
   const int batch_size = bottom_diff.size(0);
   const int num_classes = bottom_diff.size(1) / POSE_CHANNELS;

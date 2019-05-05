@@ -58,6 +58,11 @@ class YCBObject(data.Dataset, datasets.imdb):
         self._classes_other = []
         for i in range(self._num_classes_all):
             if i not in cfg.TRAIN.CLASSES:
+                # do not use clamp
+                if i == 19 and 20 in cfg.TRAIN.CLASSES:
+                    continue
+                if i == 20 and 19 in cfg.TRAIN.CLASSES:
+                    continue
                 self._classes_other.append(i)
         self._num_classes_other = len(self._classes_other)
 
@@ -72,7 +77,7 @@ class YCBObject(data.Dataset, datasets.imdb):
 
         self._class_to_ind = dict(zip(self._classes, xrange(self._num_classes)))
         self._size = cfg.TRAIN.SYNNUM
-        if cfg.MODE == 'TRAIN':
+        if cfg.MODE == 'TRAIN' or (cfg.MODE == 'TEST' and cfg.TEST.SYNTHESIZE == True):
             self._build_background_images()
         self._build_uniform_poses()
 
@@ -106,15 +111,16 @@ class YCBObject(data.Dataset, datasets.imdb):
         # sample other objects as distractors
         if cfg.TRAIN.SYN_SAMPLE_DISTRACTOR:
             num_other = min(5, self._num_classes_other)
+            num_selected = np.random.randint(0, num_other+1)
             perm = np.random.permutation(np.arange(self._num_classes_other))
-            indexes = perm[:num_other]
-            for i in range(num_other):
+            indexes = perm[:num_selected]
+            for i in range(num_selected):
                 cls_indexes.append(self._classes_other[indexes[i]]-1)
         else:
-            num_other = 0
+            num_selected = 0
 
         # sample poses
-        num = num_target + num_other
+        num = num_target + num_selected
         poses_all = []
         for i in range(num):
             qt = np.zeros((7, ), dtype=np.float32)
