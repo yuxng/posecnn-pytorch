@@ -395,10 +395,12 @@ class YCBObject(data.Dataset, datasets.imdb):
             filename_mask = filename[:-4] + '_mask.pbm'
             mask = cv2.imread(filename_mask, cv2.IMREAD_UNCHANGED)
             mask = np.array(mask == 0).astype(np.uint8)
+            kernel = np.ones((20, 20),np.uint8)
+            mask = cv2.erode(mask,kernel,iterations = 1)
 
             while 1:
                 # rescale the image
-                rescale_factor = np.random.uniform(0.1, 0.5)
+                rescale_factor = np.random.uniform(0.05, 0.3)
                 affine_1 = np.eye(3, dtype=np.float32)
                 affine_1[0, 0] = rescale_factor * affine_1[0, 0] 
                 affine_1[1, 1] = rescale_factor * affine_1[1, 1]
