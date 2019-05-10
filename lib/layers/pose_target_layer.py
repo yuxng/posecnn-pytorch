@@ -100,7 +100,7 @@ def _compute_pose_targets(quaternions, labels, num_classes):
 
     for i in xrange(num):
         cls = labels[i]
-        if cls > 0:
+        if cls > 0 and np.linalg.norm(quaternions[i, :]) > 0:
             start = int(4 * cls)
             end = start + 4
             poses_target[i, start:end] = quaternions[i, :]

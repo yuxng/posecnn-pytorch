@@ -10,6 +10,7 @@ import numpy.random as npr
 import cv2
 import cPickle
 import scipy.io
+import glob
 
 import datasets
 from fcn.config import cfg
@@ -25,6 +26,7 @@ class YCBObject(data.Dataset, datasets.imdb):
         self._image_set = image_set
         self._ycb_object_path = self._get_default_path() if ycb_object_path is None \
                             else ycb_object_path
+        self._data_path = os.path.join(self._ycb_object_path, 'data')
         self.root_path = self._ycb_object_path
 
         # define all the classes
@@ -80,6 +82,18 @@ class YCBObject(data.Dataset, datasets.imdb):
         if cfg.MODE == 'TRAIN' or (cfg.MODE == 'TEST' and cfg.TEST.SYNTHESIZE == True):
             self._build_background_images()
         self._build_uniform_poses()
+
+        # sample indexes real for ycb object
+        num_poses = 600
+        num_classes = len(self._classes_all) - 1 # no background
+        self.pose_indexes_real = np.zeros((num_classes, ), dtype=np.int32)
+        self.pose_lists_real = []
+        self.pose_images = []
+        for i in range(num_classes):
+            self.pose_lists_real.append(np.random.permutation(np.arange(num_poses)))
+            dirname = osp.join(self._data_path, self._classes_all[i+1], '*.jpg')
+            files = glob.glob(dirname)
+            self.pose_images.append(files)
 
         assert os.path.exists(self._ycb_object_path), \
                 'ycb_object path does not exist: {}'.format(self._ycb_object_path)
@@ -340,9 +354,235 @@ class YCBObject(data.Dataset, datasets.imdb):
 
 
 
+    def _compose_item(self):
+
+        height = cfg.TRAIN.SYN_HEIGHT
+        width = cfg.TRAIN.SYN_WIDTH
+        classes_all = np.array(range(len(self._classes_all)))
+
+        # sample target objects
+        if cfg.TRAIN.SYN_SAMPLE_OBJECT:
+            maxnum = np.minimum(self.num_classes-1, cfg.TRAIN.SYN_MAX_OBJECT)
+            num = np.random.randint(cfg.TRAIN.SYN_MIN_OBJECT, maxnum+1)
+            perm = np.random.permutation(np.arange(self.num_classes-1))
+            indexes_target = perm[:num] + 1
+        else:
+            num = self.num_classes - 1
+            indexes_target = np.arange(num) + 1
+        num_target = num
+        cls_indexes = [cfg.TRAIN.CLASSES[i]-1 for i in indexes_target]
+
+        # sample poses
+        im_color = np.zeros((height, width, 3), dtype=np.uint8)
+        im_label = np.zeros((height, width), dtype=np.uint8)
+        im_label_all = np.zeros((height, width), dtype=np.uint8)
+        gt_boxes = np.zeros((self.num_classes, 5), dtype=np.float32)
+        for i in range(num):
+
+            # select image
+            cls = int(cls_indexes[i])
+            if self.pose_indexes_real[cls] >= len(self.pose_lists_real[cls]):
+                self.pose_indexes_real[cls] = 0
+                self.pose_lists_real[cls] = np.random.permutation(np.arange(len(self.pose_lists_real[cls])))
+            index_image = self.pose_lists_real[cls][self.pose_indexes_real[cls]]
+            self.pose_indexes_real[cls] += 1
+
+            # read image
+            filename = self.pose_images[cls][index_image]
+            im = cv2.imread(filename, cv2.IMREAD_UNCHANGED)
+
+            # read mask
+            filename_mask = filename[:-4] + '_mask.pbm'
+            mask = cv2.imread(filename_mask, cv2.IMREAD_UNCHANGED)
+            mask = np.array(mask == 0).astype(np.uint8)
+
+            while 1:
+                # rescale the image
+                rescale_factor = np.random.uniform(0.1, 0.5)
+                affine_1 = np.eye(3, dtype=np.float32)
+                affine_1[0, 0] = rescale_factor * affine_1[0, 0] 
+                affine_1[1, 1] = rescale_factor * affine_1[1, 1]
+
+                # translation to center
+                delta_x = np.random.uniform(0.25, 0.5)
+                delta_y = np.random.uniform(0.25, 0.5)
+                M_translation = np.float32([[1,0,delta_x * width], [0,1,delta_y * height]])
+                affine_2 = np.eye(3, dtype=np.float32)
+                affine_2[:2, :] = M_translation
+
+                # rotation
+                degree = np.random.uniform(-180.0, 180.0)
+                M_rotation = cv2.getRotationMatrix2D((width/2, height/2), degree, 1)
+                affine_3 = np.eye(3, dtype=np.float32)
+                affine_3[:2, :] = M_rotation
+
+                # translation again
+                delta_x = np.random.uniform(-0.4, 0.4)
+                delta_y = np.random.uniform(-0.4, 0.4)
+                M_translation_1 = np.float32([[1,0,delta_x * width], [0,1,delta_y * height]])
+                affine_4 = np.eye(3, dtype=np.float32)
+                affine_4[:2, :] = M_translation_1
+
+                # all together
+                affine = np.dot(affine_4, np.dot(affine_3, np.dot(affine_2, affine_1)))
+                im_final = cv2.warpAffine(im, affine[:2, :], (width, height))
+                mask_final = cv2.warpAffine(mask, affine[:2, :], (width, height))
+
+                index_foreground = np.where(mask_final == 1)
+                if len(index_foreground[0]) > 0:
+                    break
+
+            # paste object and label
+            index = np.where((mask_final == 1) & (im_label_all == 0))
+            im_color[index[0], index[1], :] = im_final[index[0], index[1], :]
+
+            cls_ind = np.where(np.array(cfg.TRAIN.CLASSES) == cls+1)[0]
+            im_label[index[0], index[1]] = cls_ind
+
+            gt_boxes[i, 0] = np.min(index_foreground[1])
+            gt_boxes[i, 1] = np.min(index_foreground[0])
+            gt_boxes[i, 2] = np.max(index_foreground[1])
+            gt_boxes[i, 3] = np.max(index_foreground[0])
+            gt_boxes[i, 4] = cls_ind
+
+            cls_ind = np.where(classes_all == cls+1)[0]
+            im_label_all[index[0], index[1]] = cls_ind
+
+            '''
+            import matplotlib.pyplot as plt
+            fig = plt.figure()
+            im = im.astype(np.uint8)
+            ax = fig.add_subplot(2, 3, 1)
+            plt.imshow(im[:, :, (2, 1, 0)])
+            ax.set_title('color')
+            ax = fig.add_subplot(2, 3, 2)
+            plt.imshow(im_final[:, :, (2, 1, 0)])
+            ax.set_title('final')
+            ax = fig.add_subplot(2, 3, 3)
+            plt.imshow(mask)
+            ax.set_title('mask')
+            ax = fig.add_subplot(2, 3, 4)
+            plt.imshow(mask_final)
+            ax.set_title('mask final')
+            ax = fig.add_subplot(2, 3, 5)
+            plt.imshow(im_color[:, :, (2, 1, 0)])
+
+            for j in range(gt_boxes.shape[0]):
+                if gt_boxes[j, 4] == 0:
+                    continue
+                x1 = gt_boxes[j, 0]
+                y1 = gt_boxes[j, 1]
+                x2 = gt_boxes[j, 2]
+                y2 = gt_boxes[j, 3]
+                plt.gca().add_patch(
+                    plt.Rectangle((x1, y1), x2-x1, y2-y1, fill=False, edgecolor='g', linewidth=3, clip_on=False))
+
+            ax = fig.add_subplot(2, 3, 6)
+            plt.imshow(im_label_all)
+            plt.show()
+            #'''
+
+        # add background to the image
+        ind = np.random.randint(len(self._backgrounds), size=1)[0]
+        filename = self._backgrounds[ind]
+        background = cv2.imread(filename, cv2.IMREAD_UNCHANGED)
+        try:
+            # randomly crop a region as background
+            bw = background.shape[1]
+            bh = background.shape[0]
+            x1 = npr.randint(0, int(bw/3))
+            y1 = npr.randint(0, int(bh/3))
+            x2 = npr.randint(int(2*bw/3), bw)
+            y2 = npr.randint(int(2*bh/3), bh)
+            background = background[y1:y2, x1:x2]
+            background = cv2.resize(background, (self._width, self._height), interpolation=cv2.INTER_LINEAR)
+        except:
+            background = np.zeros((self._height, self._width, 3), dtype=np.uint8)
+            print 'bad background image'
+
+        if len(background.shape) != 3:
+            background = np.zeros((self._height, self._width, 3), dtype=np.uint8)
+            print 'bad background image'
+
+        # paste objects on background
+        I = np.where(im_label_all == 0)
+        im_color[I[0], I[1], :] = background[I[0], I[1], :3]
+        im = im_color.astype(np.uint8)
+        margin = 10
+        for i in range(num):
+            I = np.where(im_label_all == cls_indexes[i]+1)
+            if len(I[0]) > 0:
+                y1 = np.max((np.round(np.min(I[0])) - margin, 0))
+                x1 = np.max((np.round(np.min(I[1])) - margin, 0))
+                y2 = np.min((np.round(np.max(I[0])) + margin, self._height-1))
+                x2 = np.min((np.round(np.max(I[1])) + margin, self._width-1))
+                foreground = im[y1:y2, x1:x2].astype(np.uint8)
+                mask = 255 * np.ones((foreground.shape[0], foreground.shape[1]), dtype=np.uint8)
+                background = cv2.seamlessClone(foreground, background, mask, ((x1+x2)/2, (y1+y2)/2), cv2.NORMAL_CLONE)
+        im = background
+
+        # chromatic transform
+        if cfg.TRAIN.CHROMATIC and cfg.MODE == 'TRAIN' and np.random.rand(1) > 0.1:
+            im = chromatic_transform(im)
+
+        im_cuda = torch.from_numpy(im).cuda().float() / 255.0
+        if cfg.TRAIN.ADD_NOISE and cfg.MODE == 'TRAIN' and np.random.rand(1) > 0.1:
+            im_cuda = add_noise_cuda(im_cuda, cfg.TRAIN.NOISE_LEVEL)
+        im_cuda -= self._pixel_mean
+        im_cuda = im_cuda.permute(2, 0, 1)
+
+        # label blob
+        classes = np.array(range(self.num_classes))
+        label_blob = np.zeros((self.num_classes, self._height, self._width), dtype=np.float32)
+        label_blob[0, :, :] = 1.0
+        for i in range(1, self.num_classes):
+            I = np.where(im_label == classes[i])
+            if len(I[0]) > 0:
+                label_blob[i, I[0], I[1]] = 1.0
+                label_blob[0, I[0], I[1]] = 0.0
+
+        # construct the meta data
+        K = self._intrinsic_matrix
+        K[2, 2] = 1
+        Kinv = np.linalg.pinv(K)
+        meta_data_blob = np.zeros(18, dtype=np.float32)
+        meta_data_blob[0:9] = K.flatten()
+        meta_data_blob[9:18] = Kinv.flatten()
+
+        # no vertex regression target and poses
+        pose_blob = np.zeros((self.num_classes, 9), dtype=np.float32)
+        vertex_targets = np.zeros((3 * self.num_classes, height, width), dtype=np.float32)
+        vertex_weights = np.zeros((3 * self.num_classes, height, width), dtype=np.float32)
+        im_info = np.array([im.shape[1], im.shape[2], cfg.TRAIN.SCALES_BASE[0]], dtype=np.float32)
+
+        sample = {'image': im_cuda,
+                  'label': label_blob,
+                  'meta_data': meta_data_blob,
+                  'poses': pose_blob,
+                  'extents': self._extents,
+                  'points': self._point_blob,
+                  'symmetry': self._symmetry,
+                  'gt_boxes': gt_boxes,
+                  'im_info': im_info}
+
+        if cfg.TRAIN.VERTEX_REG:
+            sample['vertex_targets'] = vertex_targets
+            sample['vertex_weights'] = vertex_weights
+
+        return sample
+
+
+
     def __getitem__(self, index):
 
-        return self._render_item()
+        is_syn = 0
+        if ((cfg.MODE == 'TRAIN' and cfg.TRAIN.SYNTHESIZE) or (cfg.MODE == 'TEST' and cfg.TEST.SYNTHESIZE)) and (index % cfg.TRAIN.SYN_RATIO != 0):
+            is_syn = 1
+
+        if is_syn:
+            return self._render_item()
+        else:
+            return self._compose_item()
 
 
     def __len__(self):
