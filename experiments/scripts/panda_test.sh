@@ -12,6 +12,6 @@ echo Logging output to "$LOG"
 
 time ./tools/test_net.py --gpu 0 \
   --network posecnn \
-  --pretrained output/panda/panda_train/vgg16_panda_epoch_1.checkpoint.pth \
+  --pretrained output/panda/panda_train/vgg16_panda_dgx_1_epoch_12.checkpoint.pth \
   --dataset panda_train \
   --cfg experiments/cfgs/panda.yml
