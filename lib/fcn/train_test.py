@@ -82,7 +82,10 @@ def train(train_loader, network, optimizer, epoch):
 
         end = time.time()
 
-        inputs = sample['image']
+        if cfg.INPUT == 'DEPTH':
+            inputs = sample['image_depth']
+        else:
+            inputs = sample['image_color']
         labels = sample['label'].cuda()
         meta_data = sample['meta_data'].cuda()
         extents = sample['extents'][0, :, :].repeat(cfg.TRAIN.GPUNUM, 1, 1).cuda()

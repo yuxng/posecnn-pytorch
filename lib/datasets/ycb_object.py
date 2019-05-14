@@ -14,7 +14,7 @@ import glob
 
 import datasets
 from fcn.config import cfg
-from utils.blob import pad_im, chromatic_transform, add_noise, add_noise_cuda
+from utils.blob import pad_im, chromatic_transform, add_noise, add_noise_cuda, add_noise_depth_cuda
 from transforms3d.quaternions import mat2quat, quat2mat
 from transforms3d.euler import euler2quat
 from utils.se3 import *
@@ -196,15 +196,26 @@ class YCBObject(data.Dataset, datasets.imdb):
         cfg.renderer.set_projection_matrix(width, height, fx, fy, px, py, znear, zfar)
         image_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
         seg_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
-        cfg.renderer.render(cls_indexes, image_tensor, seg_tensor)
+        if cfg.INPUT == 'DEPTH' or cfg.INPUT == 'RGBD':
+            pc_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
+        else:
+            pc_tensor = None
+        cfg.renderer.render(cls_indexes, image_tensor, seg_tensor, pc2_tensor=pc_tensor)
         image_tensor = image_tensor.flip(0)
         seg_tensor = seg_tensor.flip(0)
+        if pc_tensor is not None:
+            pc_tensor = pc_tensor.flip(0)
 
         # RGB to BGR order
         im = image_tensor.cpu().numpy()
         im = np.clip(im, 0, 1)
         im = im[:, :, (2, 1, 0)] * 255
         im = im.astype(np.uint8)
+
+        if cfg.INPUT == 'DEPTH' or cfg.INPUT == 'RGBD':
+            # XYZ coordinates in camera frame
+            im_depth = pc_tensor.cpu().numpy()
+            im_depth = im_depth[:, :, :3]
 
         im_label = seg_tensor.cpu().numpy()
         im_label = im_label[:, :, (2, 1, 0)] * 255
@@ -219,31 +230,56 @@ class YCBObject(data.Dataset, datasets.imdb):
             centers[i, 1] = rcenters[i][0] * height
         centers = centers[:num_target, :]
 
-        # add background to the image
-        ind = np.random.randint(len(self._backgrounds), size=1)[0]
-        filename = self._backgrounds[ind]
-        background = cv2.imread(filename, cv2.IMREAD_UNCHANGED)
+        # add background to the color image
+        ind = np.random.randint(len(self._backgrounds_color), size=1)[0]
+        filename = self._backgrounds_color[ind]
+        background_color = cv2.imread(filename, cv2.IMREAD_UNCHANGED)
         try:
             # randomly crop a region as background
-            bw = background.shape[1]
-            bh = background.shape[0]
+            bw = background_color.shape[1]
+            bh = background_color.shape[0]
             x1 = npr.randint(0, int(bw/3))
             y1 = npr.randint(0, int(bh/3))
             x2 = npr.randint(int(2*bw/3), bw)
             y2 = npr.randint(int(2*bh/3), bh)
-            background = background[y1:y2, x1:x2]
-            background = cv2.resize(background, (self._width, self._height), interpolation=cv2.INTER_LINEAR)
+            background_color = background_color[y1:y2, x1:x2]
+            background_color = cv2.resize(background_color, (self._width, self._height), interpolation=cv2.INTER_LINEAR)
         except:
-            background = np.zeros((self._height, self._width, 3), dtype=np.uint8)
-            print 'bad background image'
+            background_color = np.zeros((self._height, self._width, 3), dtype=np.uint8)
+            print 'bad background_color image'
 
-        if len(background.shape) != 3:
-            background = np.zeros((self._height, self._width, 3), dtype=np.uint8)
-            print 'bad background image'
+        if len(background_color.shape) != 3:
+            background_color = np.zeros((self._height, self._width, 3), dtype=np.uint8)
+            print 'bad background_color image'
+
+        # add background to the depth image
+        if cfg.INPUT == 'DEPTH' or cfg.INPUT == 'RGBD':
+            ind = np.random.randint(len(self._backgrounds_depth), size=1)[0]
+            filename = self._backgrounds_depth[ind]
+            background_depth = cv2.imread(filename, cv2.IMREAD_UNCHANGED)
+
+            try:
+                # randomly crop a region as background
+                bw = background_depth.shape[1]
+                bh = background_depth.shape[0]
+                x1 = npr.randint(0, int(bw/3))
+                y1 = npr.randint(0, int(bh/3))
+                x2 = npr.randint(int(2*bw/3), bw)
+                y2 = npr.randint(int(2*bh/3), bh)
+                background_depth = background_depth[y1:y2, x1:x2]
+                background_depth = cv2.resize(background_depth, (self._width, self._height), interpolation=cv2.INTER_LINEAR)
+                background_depth = self.backproject(background_depth, self._intrinsic_matrix, 1000.0)
+            except:
+                background_depth = np.zeros((self._height, self._width, 3), dtype=np.uint8)
+                print 'bad depth background image'
+
+            if len(background_depth.shape) != 3:
+                background_depth = np.zeros((self._height, self._width, 3), dtype=np.uint8)
+                print 'bad depth background image'
 
         # paste objects on background
         I = np.where(im_label_all == 0)
-        im[I[0], I[1], :] = background[I[0], I[1], :3]
+        im[I[0], I[1], :] = background_color[I[0], I[1], :3]
         im = im.astype(np.uint8)
         margin = 10
         for i in range(num):
@@ -255,8 +291,30 @@ class YCBObject(data.Dataset, datasets.imdb):
                 x2 = np.min((np.round(np.max(I[1])) + margin, self._width-1))
                 foreground = im[y1:y2, x1:x2].astype(np.uint8)
                 mask = 255 * np.ones((foreground.shape[0], foreground.shape[1]), dtype=np.uint8)
-                background = cv2.seamlessClone(foreground, background, mask, ((x1+x2)/2, (y1+y2)/2), cv2.NORMAL_CLONE)
-        im = background
+                background_color = cv2.seamlessClone(foreground, background_color, mask, ((x1+x2)/2, (y1+y2)/2), cv2.NORMAL_CLONE)
+        im = background_color
+
+        if cfg.INPUT == 'DEPTH' or cfg.INPUT == 'RGBD':
+            I = np.where(im_label_all == 0)
+            im_depth[I[0], I[1], :] = background_depth[I[0], I[1], :3]
+
+        '''
+        import matplotlib.pyplot as plt
+        fig = plt.figure()
+        ax = fig.add_subplot(3, 2, 1)
+        plt.imshow(im[:, :, (2, 1, 0)])
+        for i in range(num_target):
+            plt.plot(centers[i, 0], centers[i, 1], 'yo')
+        ax = fig.add_subplot(3, 2, 2)
+        plt.imshow(im_label)
+        ax = fig.add_subplot(3, 2, 3)
+        plt.imshow(im_depth[:, :, 0])
+        ax = fig.add_subplot(3, 2, 4)
+        plt.imshow(im_depth[:, :, 1])
+        ax = fig.add_subplot(3, 2, 5)
+        plt.imshow(im_depth[:, :, 2])
+        plt.show()
+        #'''
 
         # chromatic transform
         if cfg.TRAIN.CHROMATIC and cfg.MODE == 'TRAIN' and np.random.rand(1) > 0.1:
@@ -267,6 +325,14 @@ class YCBObject(data.Dataset, datasets.imdb):
             im_cuda = add_noise_cuda(im_cuda, cfg.TRAIN.NOISE_LEVEL)
         im_cuda -= self._pixel_mean
         im_cuda = im_cuda.permute(2, 0, 1)
+
+        if cfg.INPUT == 'DEPTH' or cfg.INPUT == 'RGBD':
+            im_cuda_depth = torch.from_numpy(im_depth).cuda().float()
+            if cfg.TRAIN.ADD_NOISE and cfg.MODE == 'TRAIN' and np.random.rand(1) > 0.1:
+                im_cuda_depth = add_noise_depth_cuda(im_cuda_depth)
+            im_cuda_depth = im_cuda_depth.permute(2, 0, 1)
+        else:
+            im_cuda_depth = im_cuda.clone()
 
         # label blob
         classes = np.array(range(self.num_classes))
@@ -336,7 +402,8 @@ class YCBObject(data.Dataset, datasets.imdb):
 
         im_info = np.array([im.shape[1], im.shape[2], cfg.TRAIN.SCALES_BASE[0]], dtype=np.float32)
 
-        sample = {'image': im_cuda,
+        sample = {'image_color': im_cuda,
+                  'image_depth': im_cuda_depth,
                   'label': label_blob,
                   'meta_data': meta_data_blob,
                   'poses': pose_blob,
@@ -400,7 +467,7 @@ class YCBObject(data.Dataset, datasets.imdb):
 
             while 1:
                 # rescale the image
-                rescale_factor = np.random.uniform(0.05, 0.3)
+                rescale_factor = np.random.uniform(0.1, 0.3)
                 affine_1 = np.eye(3, dtype=np.float32)
                 affine_1[0, 0] = rescale_factor * affine_1[0, 0] 
                 affine_1[1, 1] = rescale_factor * affine_1[1, 1]
@@ -485,8 +552,8 @@ class YCBObject(data.Dataset, datasets.imdb):
             #'''
 
         # add background to the image
-        ind = np.random.randint(len(self._backgrounds), size=1)[0]
-        filename = self._backgrounds[ind]
+        ind = np.random.randint(len(self._backgrounds_color), size=1)[0]
+        filename = self._backgrounds_color[ind]
         background = cv2.imread(filename, cv2.IMREAD_UNCHANGED)
         try:
             # randomly crop a region as background
@@ -557,7 +624,8 @@ class YCBObject(data.Dataset, datasets.imdb):
         vertex_weights = np.zeros((3 * self.num_classes, height, width), dtype=np.float32)
         im_info = np.array([im.shape[1], im.shape[2], cfg.TRAIN.SCALES_BASE[0]], dtype=np.float32)
 
-        sample = {'image': im_cuda,
+        sample = {'image_color': im_cuda,
+                  'image_depth': im_cuda,
                   'label': label_blob,
                   'meta_data': meta_data_blob,
                   'poses': pose_blob,
@@ -578,7 +646,8 @@ class YCBObject(data.Dataset, datasets.imdb):
     def __getitem__(self, index):
 
         is_syn = 0
-        if ((cfg.MODE == 'TRAIN' and cfg.TRAIN.SYNTHESIZE) or (cfg.MODE == 'TEST' and cfg.TEST.SYNTHESIZE)) and (index % cfg.TRAIN.SYN_RATIO != 0):
+        if ((cfg.MODE == 'TRAIN' and cfg.TRAIN.SYNTHESIZE) or (cfg.MODE == 'TEST' and cfg.TEST.SYNTHESIZE)) and \
+           (cfg.INPUT == 'DEPTH' or (index % cfg.TRAIN.SYN_RATIO != 0)):
             is_syn = 1
 
         if is_syn:

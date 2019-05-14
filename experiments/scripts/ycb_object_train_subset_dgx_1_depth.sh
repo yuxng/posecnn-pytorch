@@ -11,6 +11,6 @@ export PYTHON_EGG_CACHE=/nfs
   --network posecnn \
   --pretrained data/checkpoints/vgg16-397923af.pth \
   --dataset ycb_object_train \
-  --cfg experiments/cfgs/ycb_object_subset_dgx_2.yml \
+  --cfg experiments/cfgs/ycb_object_subset_dgx_1_depth.yml \
   --solver sgd \
   --epochs 16

@@ -11,6 +11,7 @@ import numpy as np
 import datasets
 import cPickle
 import math
+import glob
 from fcn.config import cfg
 
 class imdb(object):
@@ -46,6 +47,32 @@ class imdb(object):
         return cache_path
 
 
+    # backproject pixels into 3D points in camera's coordinate system
+    def backproject(self, depth_cv, intrinsic_matrix, factor):
+
+        depth = depth_cv.astype(np.float32, copy=True) / factor
+
+        # get intrinsic matrix
+        K = intrinsic_matrix
+        Kinv = np.linalg.inv(K)
+
+        # compute the 3D points
+        width = depth.shape[1]
+        height = depth.shape[0]
+
+        # construct the 2D points matrix
+        x, y = np.meshgrid(np.arange(width), np.arange(height))
+        ones = np.ones((height, width), dtype=np.float32)
+        x2d = np.stack((x, y, ones), axis=2).reshape(width*height, 3)
+
+        # backprojection
+        R = np.dot(Kinv, x2d.transpose())
+
+        # compute the 3D points
+        X = np.multiply(np.tile(depth.reshape(1, width*height), (3, 1)), R)
+        return np.array(X).transpose().reshape((height, width, 3))
+
+
     def _build_uniform_poses(self):
 
         self.eulers = []
@@ -65,7 +92,26 @@ class imdb(object):
 
     def _build_background_images(self):
 
-        backgrounds = []
+        flag = 0
+        cache_file_color = os.path.join(self.cache_path, 'backgrounds_color.pkl')
+        cache_file_depth = os.path.join(self.cache_path, 'backgrounds_depth.pkl')
+        if os.path.exists(cache_file_color):
+            with open(cache_file_color, 'rb') as fid:
+                self._backgrounds_color = cPickle.load(fid)
+            print '{} backgrounds color loaded from {}'.format(self._name, cache_file_color)
+            flag += 1
+
+        if os.path.exists(cache_file_depth):
+            with open(cache_file_depth, 'rb') as fid:
+                self._backgrounds_depth = cPickle.load(fid)
+            print '{} backgrounds depth loaded from {}'.format(self._name, cache_file_depth)
+            flag += 1
+
+        if flag == 2:
+            return
+
+        backgrounds_color = []
+        backgrounds_depth = []
         if cfg.TRAIN.SYN_BACKGROUND_SPECIFIC:
             # NVIDIA
             allencenter = os.path.join(self.cache_path, '../AllenCenter/data')
@@ -75,7 +121,7 @@ class imdb(object):
                 files = os.listdir(os.path.join(allencenter, subdir))
                 for j in range(len(files)):
                     filename = os.path.join(allencenter, subdir, files[j])
-                    backgrounds.append(filename)
+                    backgrounds_color.append(filename)
         else:
             '''
             # SUN 2012
@@ -116,7 +162,7 @@ class imdb(object):
             files = os.listdir(pascal)
             for i in range(len(files)):
                 filename = os.path.join(pascal, files[i])
-                backgrounds.append(filename)
+                backgrounds_color.append(filename)
 
             '''
             # YCB Background
@@ -127,9 +173,33 @@ class imdb(object):
                 backgrounds.append(filename)
             '''
 
-        for i in xrange(len(backgrounds)):
-            if not os.path.isfile(backgrounds[i]):
-                print 'file not exist {}'.format(backgrounds[i])
+        # depth background
+        kinect = os.path.join(self.cache_path, '../Kinect')
+        subdirs = os.listdir(kinect)
+        for i in xrange(len(subdirs)):
+            subdir = subdirs[i]
+            files = glob.glob(os.path.join(self.cache_path, '../Kinect', subdir, '*depth*'))
+            for j in range(len(files)):
+                filename = os.path.join(self.cache_path, '../Kinect', subdir, files[j])
+                backgrounds_depth.append(filename)
 
-        self._backgrounds = backgrounds
-        print 'build background images finished, {:d} images'.format(len(backgrounds))
+        for i in xrange(len(backgrounds_color)):
+            if not os.path.isfile(backgrounds_color[i]):
+                print 'file not exist {}'.format(backgrounds_color[i])
+
+        for i in xrange(len(backgrounds_depth)):
+            if not os.path.isfile(backgrounds_depth[i]):
+                print 'file not exist {}'.format(backgrounds_depth[i])
+
+        self._backgrounds_color = backgrounds_color
+        self._backgrounds_depth = backgrounds_depth
+        print 'build color background images finished, {:d} images'.format(len(backgrounds_color))
+        print 'build depth background images finished, {:d} images'.format(len(backgrounds_depth))
+
+        with open(cache_file_color, 'wb') as fid:
+            cPickle.dump(backgrounds_color, fid, cPickle.HIGHEST_PROTOCOL)
+        print 'wrote color backgrounds to {}'.format(cache_file_color)
+
+        with open(cache_file_depth, 'wb') as fid:
+            cPickle.dump(backgrounds_depth, fid, cPickle.HIGHEST_PROTOCOL)
+        print 'wrote depth backgrounds to {}'.format(cache_file_depth)
