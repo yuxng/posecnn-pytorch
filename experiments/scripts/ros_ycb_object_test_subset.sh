@@ -13,6 +13,6 @@ echo Logging output to "$LOG"
 time ./ros/test_images.py --gpu $1 \
   --instance $2 \
   --network posecnn \
-  --pretrained output/ycb_object/ycb_object_train/vgg16_ycb_object_pose_dgx_1_epoch_10.checkpoint.pth \
+  --pretrained output/ycb_object/ycb_object_train/vgg16_ycb_object_pose_dgx_4_depth_epoch_3.checkpoint.pth \
   --dataset ycb_object_test \
-  --cfg experiments/cfgs/ycb_object_subset_dgx_1.yml
+  --cfg experiments/cfgs/ycb_object_subset_dgx_4_depth.yml

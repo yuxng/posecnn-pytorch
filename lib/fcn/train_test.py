@@ -157,7 +157,10 @@ def test(test_loader, network, output_dir):
 
         end = time.time()
 
-        inputs = sample['image'].cuda()
+        if cfg.INPUT == 'DEPTH':
+            inputs = sample['image_depth']
+        else:
+            inputs = sample['image_color']
         labels = sample['label'].cuda()
         meta_data = sample['meta_data'].cuda()
         extents = sample['extents'][0, :, :].repeat(cfg.TRAIN.GPUNUM, 1, 1).cuda()
@@ -229,6 +232,11 @@ def test_image(network, dataset, im_color, im_depth=None):
     im = np.transpose(im / 255.0, (2, 0, 1))
     im = im[np.newaxis, :, :, :]
 
+    if cfg.INPUT == 'DEPTH':
+        im_xyz = dataset.backproject(im_depth, dataset._intrinsic_matrix, 1.0)
+        im_xyz = np.transpose(im_xyz, (2, 0, 1))
+        im_xyz = im_xyz[np.newaxis, :, :, :]
+
     # construct the meta data
     K = dataset._intrinsic_matrix
     Kinv = np.linalg.pinv(K)
@@ -242,7 +250,10 @@ def test_image(network, dataset, im_color, im_depth=None):
     gt_boxes = np.zeros((1, num_classes, 5), dtype=np.float32)
 
     # transfer to GPU
-    inputs = torch.from_numpy(im).cuda()
+    if cfg.INPUT == 'DEPTH':
+        inputs = torch.from_numpy(im_xyz).cuda().float()
+    else:
+        inputs = torch.from_numpy(im).cuda()
     labels = torch.from_numpy(label_blob).cuda()
     meta_data = torch.from_numpy(meta_data_blob).cuda()
     extents = torch.from_numpy(dataset._extents).cuda()

@@ -52,6 +52,9 @@ class imdb(object):
 
         depth = depth_cv.astype(np.float32, copy=True) / factor
 
+        index = np.where(~np.isfinite(depth))
+        depth[index[0], index[1]] = 0
+
         # get intrinsic matrix
         K = intrinsic_matrix
         Kinv = np.linalg.inv(K)
