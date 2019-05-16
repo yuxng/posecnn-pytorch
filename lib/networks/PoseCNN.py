@@ -78,11 +78,20 @@ class PoseCNN(nn.Module):
 
         # conv features
         features = list(vgg16.features)[:30]
+        
+        # change the first conv layer for RGBD
+        if cfg.INPUT == 'RGBD':
+            conv0 = conv(6, 64, kernel_size=3, relu=False)
+            conv0.weight.data[:, :3, :, :] = features[0].weight.data
+            conv0.weight.data[:, 3:, :, :] = features[0].weight.data
+            conv0.bias.data = features[0].bias.data
+            features[0] = conv0
+
         self.features = nn.ModuleList(features)
         self.classifier = vgg16.classifier[:-1]
-        
+        print(self.features)
+
         # freeze some layers
-        print self.features
         if cfg.TRAIN.FREEZE_LAYERS:
             for i in [0, 2, 5, 7, 10, 12, 14]:
                 self.features[i].weight.requires_grad = False

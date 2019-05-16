@@ -84,8 +84,11 @@ def train(train_loader, network, optimizer, epoch):
 
         if cfg.INPUT == 'DEPTH':
             inputs = sample['image_depth']
-        else:
+        elif cfg.INPUT == 'COLOR':
             inputs = sample['image_color']
+        elif cfg.INPUT == 'RGBD':
+            inputs = torch.cat((sample['image_color'], sample['image_depth']), dim=1)
+
         labels = sample['label'].cuda()
         meta_data = sample['meta_data'].cuda()
         extents = sample['extents'][0, :, :].repeat(cfg.TRAIN.GPUNUM, 1, 1).cuda()
@@ -623,18 +626,53 @@ def _vis_minibatch(inputs, labels, vertex_targets, sample, class_colors):
 
     if cfg.TRAIN.VERTEX_REG:
         vertex_target_blob = vertex_targets.cpu().numpy()
+
+    if cfg.INPUT == 'COLOR':
+        m = 2
+        n = 3
+    else:
+        m = 3
+        n = 3
     
     for i in range(im_blob.shape[0]):
         fig = plt.figure()
+        start = 1
+
         # show image
-        im = im_blob[i, :, :, :].copy()
-        im = im.transpose((1, 2, 0)) * 255.0
-        im += cfg.PIXEL_MEANS
-        im = im[:, :, (2, 1, 0)]
-        im = im.astype(np.uint8)
-        ax = fig.add_subplot(2, 3, 1)
-        plt.imshow(im)
-        ax.set_title('color') 
+        if cfg.INPUT == 'COLOR' or cfg.INPUT == 'RGBD':
+            if cfg.INPUT == 'COLOR':
+                im = im_blob[i, :, :, :].copy()
+            else:
+                im = im_blob[i, :3, :, :].copy()
+            im = im.transpose((1, 2, 0)) * 255.0
+            im += cfg.PIXEL_MEANS
+            im = im[:, :, (2, 1, 0)]
+            im = im.astype(np.uint8)
+            ax = fig.add_subplot(m, n, 1)
+            plt.imshow(im)
+            ax.set_title('color')
+            start += 1
+
+        if cfg.INPUT == 'DEPTH' or cfg.INPUT == 'RGBD':
+            if cfg.INPUT == 'DEPTH':
+                im_depth = im_blob[i, :, :, :].copy()
+            else:
+                im_depth = im_blob[i, 3:, :, :].copy()
+
+            ax = fig.add_subplot(m, n, start)
+            plt.imshow(im_depth[0, :, :])
+            ax.set_title('depth x')
+            start += 1
+
+            ax = fig.add_subplot(m, n, start)
+            plt.imshow(im_depth[1, :, :])
+            ax.set_title('depth y')
+            start += 1
+
+            ax = fig.add_subplot(m, n, start)
+            plt.imshow(im_depth[2, :, :])
+            ax.set_title('depth z')
+            start += 1
 
         # project the 3D box to image
         pose_blob = gt_poses[i]
@@ -668,8 +706,12 @@ def _vis_minibatch(inputs, labels, vertex_targets, sample, class_colors):
             plt.gca().add_patch(plt.Rectangle((x1, y1), x2-x1, y2-y1, fill=False, edgecolor='g', linewidth=3, clip_on=False))
 
         # show gt boxes
-        ax = fig.add_subplot(2, 3, 2)
-        plt.imshow(im)
+        ax = fig.add_subplot(m, n, start)
+        start += 1
+        if cfg.INPUT == 'COLOR' or cfg.INPUT == 'RGBD':
+            plt.imshow(im)
+        else:
+            plt.imshow(im_depth[2, :, :])
         ax.set_title('gt boxes')
         boxes = gt_boxes[i]
         for j in range(boxes.shape[0]):
@@ -694,7 +736,8 @@ def _vis_minibatch(inputs, labels, vertex_targets, sample, class_colors):
             I = np.where(label[:, :, j] > 0)
             im_label[I[0], I[1], :] = class_colors[j]
 
-        ax = fig.add_subplot(2, 3, 3)
+        ax = fig.add_subplot(m, n, start)
+        start += 1
         plt.imshow(im_label)
         ax.set_title('label')
 
@@ -710,15 +753,18 @@ def _vis_minibatch(inputs, labels, vertex_targets, sample, class_colors):
                     center[1, index[0], index[1]] = vertex_target[3*j+1, index[0], index[1]]
                     center[2, index[0], index[1]] = np.exp(vertex_target[3*j+2, index[0], index[1]])
 
-            ax = fig.add_subplot(2, 3, 4)
+            ax = fig.add_subplot(m, n, start)
+            start += 1
             plt.imshow(center[0,:,:])
             ax.set_title('center x') 
 
-            ax = fig.add_subplot(2, 3, 5)
+            ax = fig.add_subplot(m, n, start)
+            start += 1
             plt.imshow(center[1,:,:])
             ax.set_title('center y')
 
-            ax = fig.add_subplot(2, 3, 6)
+            ax = fig.add_subplot(m, n, start)
+            start += 1
             plt.imshow(center[2,:,:])
             ax.set_title('z')
 

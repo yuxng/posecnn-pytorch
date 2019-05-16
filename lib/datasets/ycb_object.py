@@ -230,10 +230,18 @@ class YCBObject(data.Dataset, datasets.imdb):
             centers[i, 1] = rcenters[i][0] * height
         centers = centers[:num_target, :]
 
-        # add background to the color image
+        # add background to the image
         ind = np.random.randint(len(self._backgrounds_color), size=1)[0]
         filename = self._backgrounds_color[ind]
         background_color = cv2.imread(filename, cv2.IMREAD_UNCHANGED)
+
+        if cfg.INPUT == 'DEPTH':
+            ind = np.random.randint(len(self._backgrounds_depth), size=1)[0]
+
+        if cfg.INPUT == 'DEPTH' or cfg.INPUT == 'RGBD':
+            filename = self._backgrounds_depth[ind]
+            background_depth = cv2.imread(filename, cv2.IMREAD_UNCHANGED)
+
         try:
             # randomly crop a region as background
             bw = background_color.shape[1]
@@ -244,35 +252,23 @@ class YCBObject(data.Dataset, datasets.imdb):
             y2 = npr.randint(int(2*bh/3), bh)
             background_color = background_color[y1:y2, x1:x2]
             background_color = cv2.resize(background_color, (self._width, self._height), interpolation=cv2.INTER_LINEAR)
+
+            if cfg.INPUT == 'DEPTH' or cfg.INPUT == 'RGBD':
+                background_depth = background_depth[y1:y2, x1:x2]
+                background_depth = cv2.resize(background_depth, (self._width, self._height), interpolation=cv2.INTER_LINEAR)
+                background_depth = self.backproject(background_depth, self._intrinsic_matrix, 1000.0)
+
         except:
             background_color = np.zeros((self._height, self._width, 3), dtype=np.uint8)
-            print 'bad background_color image'
+            if cfg.INPUT == 'DEPTH' or cfg.INPUT == 'RGBD':
+                background_depth = np.zeros((self._height, self._width, 3), dtype=np.uint8)
+            print 'bad background image'
 
         if len(background_color.shape) != 3:
             background_color = np.zeros((self._height, self._width, 3), dtype=np.uint8)
             print 'bad background_color image'
 
-        # add background to the depth image
         if cfg.INPUT == 'DEPTH' or cfg.INPUT == 'RGBD':
-            ind = np.random.randint(len(self._backgrounds_depth), size=1)[0]
-            filename = self._backgrounds_depth[ind]
-            background_depth = cv2.imread(filename, cv2.IMREAD_UNCHANGED)
-
-            try:
-                # randomly crop a region as background
-                bw = background_depth.shape[1]
-                bh = background_depth.shape[0]
-                x1 = npr.randint(0, int(bw/3))
-                y1 = npr.randint(0, int(bh/3))
-                x2 = npr.randint(int(2*bw/3), bw)
-                y2 = npr.randint(int(2*bh/3), bh)
-                background_depth = background_depth[y1:y2, x1:x2]
-                background_depth = cv2.resize(background_depth, (self._width, self._height), interpolation=cv2.INTER_LINEAR)
-                background_depth = self.backproject(background_depth, self._intrinsic_matrix, 1000.0)
-            except:
-                background_depth = np.zeros((self._height, self._width, 3), dtype=np.uint8)
-                print 'bad depth background image'
-
             if len(background_depth.shape) != 3:
                 background_depth = np.zeros((self._height, self._width, 3), dtype=np.uint8)
                 print 'bad depth background image'
@@ -647,7 +643,7 @@ class YCBObject(data.Dataset, datasets.imdb):
 
         is_syn = 0
         if ((cfg.MODE == 'TRAIN' and cfg.TRAIN.SYNTHESIZE) or (cfg.MODE == 'TEST' and cfg.TEST.SYNTHESIZE)) and \
-           (cfg.INPUT == 'DEPTH' or (index % cfg.TRAIN.SYN_RATIO != 0)):
+           (cfg.INPUT == 'DEPTH' or cfg.INPUT == 'RGBD' or (index % cfg.TRAIN.SYN_RATIO != 0)):
             is_syn = 1
 
         if is_syn:

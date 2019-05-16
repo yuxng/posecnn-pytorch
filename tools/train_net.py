@@ -107,13 +107,6 @@ if __name__ == '__main__':
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    if cfg.TRAIN.SYNTHESIZE:
-        print 'loading 3D models'
-        cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, render_marker=False)
-        cfg.renderer.load_objects(dataset.model_mesh_paths, dataset.model_texture_paths, dataset.model_colors)
-        cfg.renderer.set_camera_default()
-        print dataset.model_mesh_paths
-
     # prepare network
     if args.pretrained:
         network_data = torch.load(args.pretrained)
@@ -128,6 +121,13 @@ if __name__ == '__main__':
         print("Let's use", torch.cuda.device_count(), "GPUs!")
     network = torch.nn.DataParallel(network).cuda()
     cudnn.benchmark = True
+
+    if cfg.TRAIN.SYNTHESIZE:
+        print 'loading 3D models'
+        cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, render_marker=False)
+        cfg.renderer.load_objects(dataset.model_mesh_paths, dataset.model_texture_paths, dataset.model_colors)
+        cfg.renderer.set_camera_default()
+        print dataset.model_mesh_paths
 
     assert(args.solver in ['adam', 'sgd'])
     print('=> setting {} solver'.format(args.solver))

@@ -95,24 +95,6 @@ class imdb(object):
 
     def _build_background_images(self):
 
-        flag = 0
-        cache_file_color = os.path.join(self.cache_path, 'backgrounds_color.pkl')
-        cache_file_depth = os.path.join(self.cache_path, 'backgrounds_depth.pkl')
-        if os.path.exists(cache_file_color):
-            with open(cache_file_color, 'rb') as fid:
-                self._backgrounds_color = cPickle.load(fid)
-            print '{} backgrounds color loaded from {}'.format(self._name, cache_file_color)
-            flag += 1
-
-        if os.path.exists(cache_file_depth):
-            with open(cache_file_depth, 'rb') as fid:
-                self._backgrounds_depth = cPickle.load(fid)
-            print '{} backgrounds depth loaded from {}'.format(self._name, cache_file_depth)
-            flag += 1
-
-        if flag == 2:
-            return
-
         backgrounds_color = []
         backgrounds_depth = []
         if cfg.TRAIN.SYN_BACKGROUND_SPECIFIC:
@@ -186,6 +168,13 @@ class imdb(object):
                 filename = os.path.join(self.cache_path, '../Kinect', subdir, files[j])
                 backgrounds_depth.append(filename)
 
+        if cfg.INPUT == 'RGBD':
+            backgrounds_color = []
+            for i in xrange(len(backgrounds_depth)):
+                filename = backgrounds_depth[i]
+                filename = filename.replace('depth', 'color')
+                backgrounds_color.append(filename)
+
         for i in xrange(len(backgrounds_color)):
             if not os.path.isfile(backgrounds_color[i]):
                 print 'file not exist {}'.format(backgrounds_color[i])
@@ -198,11 +187,3 @@ class imdb(object):
         self._backgrounds_depth = backgrounds_depth
         print 'build color background images finished, {:d} images'.format(len(backgrounds_color))
         print 'build depth background images finished, {:d} images'.format(len(backgrounds_depth))
-
-        with open(cache_file_color, 'wb') as fid:
-            cPickle.dump(backgrounds_color, fid, cPickle.HIGHEST_PROTOCOL)
-        print 'wrote color backgrounds to {}'.format(cache_file_color)
-
-        with open(cache_file_depth, 'wb') as fid:
-            cPickle.dump(backgrounds_depth, fid, cPickle.HIGHEST_PROTOCOL)
-        print 'wrote depth backgrounds to {}'.format(cache_file_depth)
