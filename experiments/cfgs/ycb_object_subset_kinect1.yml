@@ -54,6 +54,6 @@ TEST:
   DET_THRESHOLD: 0.1
   SCALES_BASE: !!python/tuple [1.0]
   VISUALIZE: False
-  SYNTHESIZE: True
+  SYNTHESIZE: False
   POSE_REFINE: True
   ROS_CAMERA: kinect1
