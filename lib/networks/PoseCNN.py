@@ -13,7 +13,7 @@ from layers.pose_target_layer import pose_target_layer
 from fcn.config import cfg
 
 __all__ = [
-    'posecnn',
+    'posecnn', 'posecnn_rgbd',
 ]
 
 vgg16 = models.vgg16(pretrained=False)
@@ -223,6 +223,168 @@ class PoseCNN(nn.Module):
         return [param for name, param in self.named_parameters() if 'bias' in name]
 
 
+class PoseCNN_RGBD(nn.Module):
+
+    def __init__(self, num_classes, num_units):
+        super(PoseCNN_RGBD, self).__init__()
+        self.num_classes = num_classes
+
+        # conv features
+        features = list(vgg16.features)[:30]
+        self.features_color = nn.ModuleList(features)
+        self.features_depth = nn.ModuleList(features)
+        self.classifier = vgg16.classifier[:-1]
+        print(self.features_color)
+        print(self.features_depth)
+
+        # freeze some layers
+        if cfg.TRAIN.FREEZE_LAYERS:
+            for i in [0, 2, 5, 7, 10, 12, 14]:
+                self.features_color[i].weight.requires_grad = False
+                self.features_color[i].bias.requires_grad = False
+                self.features_depth[i].weight.requires_grad = False
+                self.features_depth[i].bias.requires_grad = False
+
+        # semantic labeling branch
+        self.conv4_embed = conv(512, num_units, kernel_size=1)
+        self.conv5_embed = conv(512, num_units, kernel_size=1)
+        self.upsample_conv5_embed = upsample(2.0)
+        self.upsample_embed = upsample(8.0)
+        self.conv_score = conv(num_units, num_classes, kernel_size=1)
+        self.hard_label = HardLabel(threshold=cfg.TRAIN.HARD_LABEL_THRESHOLD, sample_percentage=cfg.TRAIN.HARD_LABEL_SAMPLING)
+        self.dropout = nn.Dropout()
+
+        if cfg.TRAIN.VERTEX_REG:
+            # center regression branch
+            self.conv4_vertex_embed = conv(512, 2*num_units, kernel_size=1, relu=False)
+            self.conv5_vertex_embed = conv(512, 2*num_units, kernel_size=1, relu=False)
+            self.upsample_conv5_vertex_embed = upsample(2.0)
+            self.upsample_vertex_embed = upsample(8.0)
+            self.conv_vertex_score = conv(2*num_units, 3*num_classes, kernel_size=1, relu=False)
+            # hough voting
+            self.hough_voting = HoughVoting(is_train=0, skip_pixels=10, label_threshold=100, \
+                                            inlier_threshold=0.9, voting_threshold=-1, per_threshold=0.01)
+
+            self.roi_pool_conv4 = RoIPool(pool_height=7, pool_width=7, spatial_scale=1.0 / 8.0)
+            self.roi_pool_conv5 = RoIPool(pool_height=7, pool_width=7, spatial_scale=1.0 / 16.0)
+            self.fc8 = fc(4096, num_classes)
+            self.fc9 = fc(4096, 4 * num_classes, relu=False)
+            self.fc10 = fc(4096, 4 * num_classes, relu=False)
+            self.pml = PMLoss(hard_angle=cfg.TRAIN.HARD_ANGLE)
+
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
+                kaiming_normal_(m.weight.data)
+                if m.bias is not None:
+                    m.bias.data.zero_()
+            elif isinstance(m, nn.BatchNorm2d):
+                m.weight.data.fill_(1)
+                m.bias.data.zero_()
+
+
+    def forward(self, x_rgbd, label_gt, meta_data, extents, gt_boxes, poses, points, symmetry):
+
+        # conv features color
+        x = x_rgbd[:, :3, :, :]
+        for i, model in enumerate(self.features_color):
+            x = model(x)
+            if i == 22:
+                out_conv4_3_color = x
+            if i == 29:
+                out_conv5_3_color = x
+
+        # conv features depth
+        x = x_rgbd[:, 3:, :, :]
+        for i, model in enumerate(self.features_depth):
+            x = model(x)
+            if i == 22:
+                out_conv4_3_depth = x
+            if i == 29:
+                out_conv5_3_depth = x
+
+        # concatenate color and depth feature
+        out_conv4_3 = out_conv4_3_color + out_conv4_3_depth
+        out_conv5_3 = out_conv5_3_color + out_conv5_3_depth
+
+        # semantic labeling branch
+        out_conv4_embed = self.conv4_embed(out_conv4_3)
+        out_conv5_embed = self.conv5_embed(out_conv5_3)
+        out_conv5_embed_up = self.upsample_conv5_embed(out_conv5_embed)
+        out_embed = self.dropout(out_conv4_embed + out_conv5_embed_up)
+        out_embed_up = self.upsample_embed(out_embed)
+        out_score = self.conv_score(out_embed_up)
+        out_logsoftmax = log_softmax_high_dimension(out_score)
+        out_prob = softmax_high_dimension(out_score)
+        out_label = torch.max(out_prob, dim=1)[1].type(torch.IntTensor).cuda()
+        out_weight = self.hard_label(out_prob, label_gt, torch.rand(out_prob.size()).cuda())
+
+        if cfg.TRAIN.VERTEX_REG:
+            # center regression branch
+            out_conv4_vertex_embed = self.conv4_vertex_embed(out_conv4_3)
+            out_conv5_vertex_embed = self.conv5_vertex_embed(out_conv5_3)
+            out_conv5_vertex_embed_up = self.upsample_conv5_vertex_embed(out_conv5_vertex_embed)
+            out_vertex_embed = self.dropout(out_conv4_vertex_embed + out_conv5_vertex_embed_up)
+            out_vertex_embed_up = self.upsample_vertex_embed(out_vertex_embed)
+            out_vertex = self.conv_vertex_score(out_vertex_embed_up)
+
+            # hough voting
+            if self.training:
+                self.hough_voting.is_train = 1
+                self.hough_voting.label_threshold=cfg.TRAIN.HOUGH_LABEL_THRESHOLD
+                self.hough_voting.voting_threshold=cfg.TRAIN.HOUGH_VOTING_THRESHOLD
+                self.hough_voting.skip_pixels=cfg.TRAIN.HOUGH_SKIP_PIXELS
+            else:
+                self.hough_voting.is_train = 0
+                self.hough_voting.label_threshold=cfg.TEST.HOUGH_LABEL_THRESHOLD
+                self.hough_voting.voting_threshold=cfg.TEST.HOUGH_VOTING_THRESHOLD
+                self.hough_voting.skip_pixels=cfg.TEST.HOUGH_SKIP_PIXELS
+            out_box, out_pose = self.hough_voting(out_label, out_vertex, meta_data, extents)
+
+            # bounding box classification and regression branch
+            bbox_labels, bbox_targets, bbox_inside_weights, bbox_outside_weights = roi_target_layer(out_box, gt_boxes)
+            out_roi_conv4 = self.roi_pool_conv4(out_conv4_3, out_box)
+            out_roi_conv5 = self.roi_pool_conv5(out_conv5_3, out_box)
+            out_roi = out_roi_conv4 + out_roi_conv5
+            out_roi_flatten = out_roi.view(out_roi.size(0), -1)
+            out_fc7 = self.classifier(out_roi_flatten)
+            out_fc8 = self.fc8(out_fc7)
+            out_logsoftmax_box = log_softmax_high_dimension(out_fc8)
+            bbox_prob = softmax_high_dimension(out_fc8)
+            bbox_label_weights = self.hard_label(bbox_prob, bbox_labels, torch.rand(bbox_prob.size()).cuda())
+            bbox_pred = self.fc9(out_fc7)
+
+            # rotation regression branch
+            rois, poses_target, poses_weight = pose_target_layer(out_box, bbox_prob, bbox_pred, gt_boxes, poses, self.training)
+            out_qt_conv4 = self.roi_pool_conv4(out_conv4_3, rois)
+            out_qt_conv5 = self.roi_pool_conv5(out_conv5_3, rois)
+            out_qt = out_qt_conv4 + out_qt_conv5
+            out_qt_flatten = out_qt.view(out_qt.size(0), -1)
+            out_qt_fc7 = self.classifier(out_qt_flatten)
+            out_quaternion = self.fc10(out_qt_fc7)
+            # point matching loss
+            poses_pred = nn.functional.normalize(torch.mul(out_quaternion, poses_weight))
+            if self.training:
+                loss_pose = self.pml(poses_pred, poses_target, poses_weight, points, symmetry)
+
+        if self.training:
+            if cfg.TRAIN.VERTEX_REG:
+                return out_logsoftmax, out_weight, out_vertex, out_logsoftmax_box, bbox_label_weights, \
+                       bbox_pred, bbox_targets, bbox_inside_weights, loss_pose, poses_weight
+            else:
+                return out_logsoftmax, out_weight
+        else:
+            if cfg.TRAIN.VERTEX_REG:
+                return out_label, out_vertex, rois, out_pose, out_quaternion
+            else:
+                return out_label
+
+    def weight_parameters(self):
+        return [param for name, param in self.named_parameters() if 'weight' in name]
+
+    def bias_parameters(self):
+        return [param for name, param in self.named_parameters() if 'bias' in name]
+
+
 def posecnn(num_classes, num_units, data=None):
 
     model = PoseCNN(num_classes, num_units)
@@ -248,6 +410,55 @@ def posecnn(num_classes, num_units, data=None):
             print k
         print '================================================='
         model_dict.update(pretrained_dict) 
+        model.load_state_dict(model_dict)
+
+    return model
+
+
+def posecnn_rgbd(num_classes, num_units, data=None):
+
+    model = PoseCNN_RGBD(num_classes, num_units)
+
+    if data is not None:
+        model_dict = model.state_dict()
+        print 'model keys'
+        print '================================================='
+        for k, v in model_dict.items():
+            print k
+        print '================================================='
+
+        print 'data keys'
+        print '================================================='
+        for k, v in data.items():
+            print k
+        print '================================================='
+
+        # construct the dictionary for update
+        update_dict = dict()
+        for mk, mv in model_dict.items():
+            key = mk
+
+            if key in data:
+                update_dict[mk] = data[key]
+            else:
+                # remove color or depth in the model key
+                pos = mk.find('_color')
+                if pos > 0:
+                    key = mk[:pos] + mk[pos+6:]
+
+                pos = mk.find('_depth')
+                if pos > 0:
+                    key = mk[:pos] + mk[pos+6:]
+
+                if key in data:
+                    update_dict[mk] = data[key]
+
+        print 'load the following keys from the pretrained model'
+        print '================================================='
+        for k, v in update_dict.items():
+            print k
+        print '================================================='
+        model_dict.update(update_dict) 
         model.load_state_dict(model_dict)
 
     return model

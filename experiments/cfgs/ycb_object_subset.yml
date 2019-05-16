@@ -1,5 +1,5 @@
 EXP_DIR: ycb_object
-INPUT: COLOR
+INPUT: RGBD
 TRAIN:
   TRAINABLE: True
   WEIGHT_DECAY: 0.0001
@@ -25,7 +25,7 @@ TRAIN:
 #  CLASSES: !!python/tuple [0, 2, 3, 4, 5, 9]
 #  CLASSES: !!python/tuple [0, 2, 3, 4, 5, 9, 10, 13, 22, 23]
 #  SYMMETRY: !!python/tuple [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  CLASSES: !!python/tuple [0, 2, 7, 8, 9, 14]
+  CLASSES: !!python/tuple [0, 1, 2, 3, 4, 5]
   SYMMETRY: !!python/tuple [0, 0, 0, 0, 0, 0]
   SNAPSHOT_INFIX: ycb_object_pose
   SNAPSHOT_EPOCHS: 1

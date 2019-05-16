@@ -11,7 +11,7 @@ exec &> >(tee -a "$LOG")
 echo Logging output to "$LOG"
 
 time ./tools/train_net.py \
-  --network posecnn \
+  --network posecnn_rgbd \
   --pretrained data/checkpoints/vgg16-397923af.pth \
   --dataset ycb_object_train \
   --cfg experiments/cfgs/ycb_object_subset.yml \
