@@ -162,8 +162,11 @@ def test(test_loader, network, output_dir):
 
         if cfg.INPUT == 'DEPTH':
             inputs = sample['image_depth']
-        else:
+        elif cfg.INPUT == 'COLOR':
             inputs = sample['image_color']
+        elif cfg.INPUT == 'RGBD':
+            inputs = torch.cat((sample['image_color'], sample['image_depth']), dim=1)
+
         labels = sample['label'].cuda()
         meta_data = sample['meta_data'].cuda()
         extents = sample['extents'][0, :, :].repeat(cfg.TRAIN.GPUNUM, 1, 1).cuda()
@@ -235,7 +238,7 @@ def test_image(network, dataset, im_color, im_depth=None):
     im = np.transpose(im / 255.0, (2, 0, 1))
     im = im[np.newaxis, :, :, :]
 
-    if cfg.INPUT == 'DEPTH':
+    if cfg.INPUT == 'DEPTH' or cfg.INPUT == 'RGBD':
         im_xyz = dataset.backproject(im_depth, dataset._intrinsic_matrix, 1.0)
         im_xyz = np.transpose(im_xyz, (2, 0, 1))
         im_xyz = im_xyz[np.newaxis, :, :, :]
@@ -255,8 +258,13 @@ def test_image(network, dataset, im_color, im_depth=None):
     # transfer to GPU
     if cfg.INPUT == 'DEPTH':
         inputs = torch.from_numpy(im_xyz).cuda().float()
-    else:
+    elif cfg.INPUT == 'COLOR':
         inputs = torch.from_numpy(im).cuda()
+    elif cfg.INPUT == 'RGBD':
+        im_1 = torch.from_numpy(im).cuda()
+        im_2 = torch.from_numpy(im_xyz).cuda().float()
+        inputs = torch.cat((im_1, im_2), dim=1)
+
     labels = torch.from_numpy(label_blob).cuda()
     meta_data = torch.from_numpy(meta_data_blob).cuda()
     extents = torch.from_numpy(dataset._extents).cuda()
@@ -789,30 +797,48 @@ def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, sample, points
     if cfg.TRAIN.VERTEX_REG:
         vertex_targets = sample['vertex_targets'].numpy()
         vertex_pred = out_vertex.detach().cpu().numpy()
-    
+
+    m = 4
+    n = 4    
     for i in range(im_blob.shape[0]):
         fig = plt.figure()
-        # show image
-        im = im_blob[i, :, :, :].copy()
-        im = im.transpose((1, 2, 0)) * 255.0
-        im += cfg.PIXEL_MEANS
-        im = im[:, :, (2, 1, 0)]
-        im = im.astype(np.uint8)
-        ax = fig.add_subplot(3, 4, 1)
-        plt.imshow(im)
-        ax.set_title('gt boxes') 
+        start = 1
 
-        # show gt boxes
-        boxes = gt_boxes[i]
-        for j in range(boxes.shape[0]):
-            if boxes[j, 4] == 0:
-                continue
-            x1 = boxes[j, 0]
-            y1 = boxes[j, 1]
-            x2 = boxes[j, 2]
-            y2 = boxes[j, 3]
-            plt.gca().add_patch(
-                plt.Rectangle((x1, y1), x2-x1, y2-y1, fill=False, edgecolor='g', linewidth=3))
+        # show image
+        if cfg.INPUT == 'COLOR' or cfg.INPUT == 'RGBD':
+            if cfg.INPUT == 'COLOR':
+                im = im_blob[i, :, :, :].copy()
+            else:
+                im = im_blob[i, :3, :, :].copy()
+            im = im.transpose((1, 2, 0)) * 255.0
+            im += cfg.PIXEL_MEANS
+            im = im[:, :, (2, 1, 0)]
+            im = im.astype(np.uint8)
+            ax = fig.add_subplot(m, n, 1)
+            plt.imshow(im)
+            ax.set_title('color')
+            start += 1
+
+        if cfg.INPUT == 'DEPTH' or cfg.INPUT == 'RGBD':
+            if cfg.INPUT == 'DEPTH':
+                im_depth = im_blob[i, :, :, :].copy()
+            else:
+                im_depth = im_blob[i, 3:, :, :].copy()
+
+            ax = fig.add_subplot(m, n, start)
+            plt.imshow(im_depth[0, :, :])
+            ax.set_title('depth x')
+            start += 1
+
+            ax = fig.add_subplot(m, n, start)
+            plt.imshow(im_depth[1, :, :])
+            ax.set_title('depth y')
+            start += 1
+
+            ax = fig.add_subplot(m, n, start)
+            plt.imshow(im_depth[2, :, :])
+            ax.set_title('depth z')
+            start += 1
 
         # show gt label
         label_gt = label_blob[i, :, :, :]
@@ -825,7 +851,8 @@ def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, sample, points
             I = np.where(label_gt[:, :, j] > 0)
             im_label_gt[I[0], I[1], :] = class_colors[j]
 
-        ax = fig.add_subplot(3, 4, 5)
+        ax = fig.add_subplot(m, n, start)
+        start += 1
         plt.imshow(im_label_gt)
         ax.set_title('gt labels') 
 
@@ -838,15 +865,40 @@ def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, sample, points
             I = np.where(label == j)
             im_label[I[0], I[1], :] = class_colors[j]
 
-        ax = fig.add_subplot(3, 4, 6)
+        ax = fig.add_subplot(m, n, start)
+        start += 1
         plt.imshow(im_label)
         ax.set_title('predicted labels')
+
+        # show gt boxes
+        ax = fig.add_subplot(m, n, start)
+        start += 1
+        if cfg.INPUT == 'COLOR' or cfg.INPUT == 'RGBD':
+            plt.imshow(im)
+        else:
+            plt.imshow(im_depth[2, :, :])
+        ax.set_title('gt boxes') 
+        boxes = gt_boxes[i]
+        for j in range(boxes.shape[0]):
+            if boxes[j, 4] == 0:
+                continue
+            x1 = boxes[j, 0]
+            y1 = boxes[j, 1]
+            x2 = boxes[j, 2]
+            y2 = boxes[j, 3]
+            plt.gca().add_patch(
+                plt.Rectangle((x1, y1), x2-x1, y2-y1, fill=False, edgecolor='g', linewidth=3))
 
         if cfg.TRAIN.VERTEX_REG:
 
             # show predicted boxes
-            ax = fig.add_subplot(3, 4, 2)
-            plt.imshow(im)
+            ax = fig.add_subplot(m, n, start)
+            start += 1
+            if cfg.INPUT == 'COLOR' or cfg.INPUT == 'RGBD':
+                plt.imshow(im)
+            else:
+                plt.imshow(im_depth[2, :, :])
+
             ax.set_title('predicted boxes')
             for j in range(rois.shape[0]):
                 if rois[j, 0] != i:
@@ -864,9 +916,14 @@ def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, sample, points
                 plt.plot(cx, cy, 'yo')
 
             # show gt poses
-            ax = fig.add_subplot(3, 4, 9)
+            ax = fig.add_subplot(m, n, start)
+            start += 1
             ax.set_title('gt poses')
-            plt.imshow(im)
+            if cfg.INPUT == 'COLOR' or cfg.INPUT == 'RGBD':
+                plt.imshow(im)
+            else:
+                plt.imshow(im_depth[2, :, :])
+
             pose_blob = gt_poses[i]
             for j in range(pose_blob.shape[0]):
                 if pose_blob[j, 0] == 0:
@@ -892,9 +949,13 @@ def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, sample, points
                 plt.plot(x2d[0, :], x2d[1, :], '.', color=np.divide(class_colors[cls], 255.0), alpha=0.5)                    
 
             # show predicted poses
-            ax = fig.add_subplot(3, 4, 10)
+            ax = fig.add_subplot(m, n, start)
+            start += 1
             ax.set_title('predicted poses')
-            plt.imshow(im)
+            if cfg.INPUT == 'COLOR' or cfg.INPUT == 'RGBD':
+                plt.imshow(im)
+            else:
+                plt.imshow(im_depth[2, :, :])
             for j in xrange(rois.shape[0]):
                 cls = int(rois[j, 1])
                 print classes[cls], rois[j, -1]
@@ -923,15 +984,18 @@ def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, sample, points
                 if len(index[0]) > 0:
                     center[:, index[0], index[1]] = vertex_target[3*j:3*j+3, index[0], index[1]]
 
-            ax = fig.add_subplot(3, 4, 3)
+            ax = fig.add_subplot(m, n, start)
+            start += 1
             plt.imshow(center[0,:,:])
             ax.set_title('gt center x') 
 
-            ax = fig.add_subplot(3, 4, 7)
+            ax = fig.add_subplot(m, n, start)
+            start += 1
             plt.imshow(center[1,:,:])
             ax.set_title('gt center y')
 
-            ax = fig.add_subplot(3, 4, 11)
+            ax = fig.add_subplot(m, n, start)
+            start += 1
             plt.imshow(np.exp(center[2,:,:]))
             ax.set_title('gt z')
 
@@ -944,15 +1008,18 @@ def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, sample, points
                 if len(index[0]) > 0:
                     center[:, index[0], index[1]] = vertex_target[3*j:3*j+3, index[0], index[1]]
 
-            ax = fig.add_subplot(3, 4, 4)
+            ax = fig.add_subplot(m, n, start)
+            start += 1
             plt.imshow(center[0,:,:])
             ax.set_title('predicted center x') 
 
-            ax = fig.add_subplot(3, 4, 8)
+            ax = fig.add_subplot(m, n, start)
+            start += 1
             plt.imshow(center[1,:,:])
             ax.set_title('predicted center y')
 
-            ax = fig.add_subplot(3, 4, 12)
+            ax = fig.add_subplot(m, n, start)
+            start += 1
             plt.imshow(np.exp(center[2,:,:]))
             ax.set_title('predicted z')
 
