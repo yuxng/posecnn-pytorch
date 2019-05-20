@@ -3,6 +3,7 @@ import torch.nn as nn
 import torchvision.models as models
 import math
 import sys
+import copy
 from torch.nn.init import kaiming_normal_
 from layers.hard_label import HardLabel
 from layers.hough_voting import HoughVoting
@@ -232,7 +233,7 @@ class PoseCNN_RGBD(nn.Module):
         # conv features
         features = list(vgg16.features)[:30]
         self.features_color = nn.ModuleList(features)
-        self.features_depth = nn.ModuleList(features)
+        self.features_depth = copy.deepcopy(self.features_color)
         self.classifier = vgg16.classifier[:-1]
         print(self.features_color)
         print(self.features_depth)
