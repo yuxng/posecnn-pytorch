@@ -56,6 +56,16 @@ def loss_cross_entropy(scores, labels):
     return loss
 
 
+def BootstrapedMSEloss(pred, target, K=2000):
+    assert pred.dim() == target.dim(), "inconsistent dimensions"
+    batch_size = pred.size(0)
+    diff = torch.sum((target - pred)**2, 1)
+    diff = diff.view(batch_size, -1)
+    diff = torch.topk(diff, K, dim=1)
+    loss = diff[0].mean()
+    return loss
+
+
 def smooth_l1_loss(vertex_pred, vertex_targets, vertex_weights, sigma=1.0):
     sigma_2 = sigma ** 2
     vertex_diff = vertex_pred - vertex_targets
@@ -146,6 +156,75 @@ def train(train_loader, network, optimizer, epoch):
                % (epoch, cfg.epochs, i, epoch_size, loss, optimizer.param_groups[0]['lr'], batch_time.val))
 
         cfg.TRAIN.ITERS += 1
+
+
+def train_autoencoder(train_loader, network, optimizer, epoch):
+
+    batch_time = AverageMeter()
+    losses = AverageMeter()
+
+    epoch_size = len(train_loader)
+
+    # switch to train mode
+    network.train()
+
+    for i, sample in enumerate(train_loader):
+
+        end = time.time()
+    
+        if cfg.TRAIN.VISUALIZE:
+            _vis_minibatch_autoencoder(sample)
+
+        # compute output
+        inputs = sample['image_input']
+        out_images, embeddings = network(inputs)
+
+        # reconstruction loss
+        targets = sample['image_target']
+        loss = BootstrapedMSEloss(out_images, targets)
+
+        # record loss
+        losses.update(loss.data, inputs.size(0))
+
+        # compute gradient and do optimization step
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        # measure elapsed time
+        batch_time.update(time.time() - end)
+
+        print('[%d/%d][%d/%d], loss %.4f, lr %.6f, time %.2f' \
+           % (epoch, cfg.epochs, i, epoch_size, loss, optimizer.param_groups[0]['lr'], batch_time.val))
+        cfg.TRAIN.ITERS += 1
+
+
+def _vis_minibatch_autoencoder(sample):
+
+    im_blob = sample['image_input'].cpu().numpy()
+    targets = sample['image_target'].cpu().numpy()
+
+    import matplotlib.pyplot as plt
+    for i in range(im_blob.shape[0]):
+        fig = plt.figure()
+        # show image
+        im = im_blob[i, :, :, :].copy()
+        im = im.transpose((1, 2, 0)) * 255.0
+        im = im [:, :, (2, 1, 0)]
+        im = im.astype(np.uint8)
+        ax = fig.add_subplot(1, 2, 1)
+        plt.imshow(im)
+        ax.set_title('input')
+
+        # show target
+        im = targets[i, :, :, :].copy()
+        im = im.transpose((1, 2, 0)) * 255.0
+        im = im.astype(np.uint8)
+        im = im [:, :, (2, 1, 0)]
+        ax = fig.add_subplot(1, 2, 2)
+        plt.imshow(im)
+        ax.set_title('target')
+        plt.show()
 
 
 def test(test_loader, network, output_dir):

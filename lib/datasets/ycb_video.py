@@ -184,10 +184,11 @@ class YCBVideo(data.Dataset, datasets.imdb):
                 if self.pose_indexes[cls] >= len(self.pose_lists[cls]):
                     self.pose_indexes[cls] = 0
                     self.pose_lists[cls] = np.random.permutation(np.arange(len(self.eulers)))
-                roll = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][0] + 15 * np.random.randn()
+                yaw = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][0] + 15 * np.random.randn()
                 pitch = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][1] + 15 * np.random.randn()
-                yaw = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][2] + 15 * np.random.randn()
-                qt[3:] = euler2quat(roll * math.pi / 180.0, pitch * math.pi / 180.0, yaw * math.pi / 180.0)
+                pitch = np.clip(pitch, -90.0, 90.0)
+                roll = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][2] + 15 * np.random.randn()
+                qt[3:] = euler2quat(yaw * math.pi / 180.0, pitch * math.pi / 180.0, roll * math.pi / 180.0, 'syxz')
                 self.pose_indexes[cls] += 1
 
                 # translation

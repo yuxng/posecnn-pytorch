@@ -25,7 +25,7 @@ import cv2
 
 import _init_paths
 from fcn.config import cfg, cfg_from_file, get_output_dir, write_selected_class_file
-from fcn.train_test import train
+from fcn.train_test import train, train_autoencoder
 from datasets.factory import get_dataset
 import networks
 from ycb_renderer import YCBRenderer
@@ -147,7 +147,10 @@ if __name__ == '__main__':
     for epoch in range(args.startepoch, args.epochs):
         scheduler.step()
         
-        train(dataloader, network, optimizer, epoch)
+        if args.network_name == 'autoencoder':
+            train_autoencoder(dataloader, network, optimizer, epoch)
+        else:
+            train(dataloader, network, optimizer, epoch)
 
         # save checkpoint
         if (epoch+1) % cfg.TRAIN.SNAPSHOT_EPOCHS == 0 or epoch == args.epochs - 1:

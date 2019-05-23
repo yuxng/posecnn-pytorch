@@ -79,10 +79,11 @@ class imdb(object):
     def _build_uniform_poses(self):
 
         self.eulers = []
-        for roll in range(0, 360, 15):
-            for pitch in range(0, 360, 15):
-                for yaw in range(0, 360, 15):
-                    self.eulers.append([roll, pitch, yaw])
+        interval = cfg.TRAIN.UNIFORM_POSE_INTERVAL
+        for yaw in range(-180, 180, interval):
+            for pitch in range(-90, 90, interval):
+                for roll in range(-180, 180, interval):
+                    self.eulers.append([yaw, pitch, roll])
 
         # sample indexes
         num_poses = len(self.eulers)
