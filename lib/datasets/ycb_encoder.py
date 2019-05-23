@@ -290,50 +290,7 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         # affine transformation
         shift = np.float32([np.random.uniform(self.lb_shift, self.ub_shift), np.random.uniform(self.lb_shift, self.ub_shift)])
         scale = np.random.uniform(self.lb_scale, self.ub_scale)
-        affine_matrix = np.float32([[scale, 0, shift[0]], [0, scale, shift[1]]])
-        im = cv2.warpAffine(im, affine_matrix, (width, height))
-        im_label = cv2.warpAffine(im_label.astype(np.uint8), affine_matrix, (width, height), flags=cv2.INTER_NEAREST)
-
-        # add background to the color image
-        ind = np.random.randint(len(self._backgrounds_color), size=1)[0]
-        filename = self._backgrounds_color[ind]
-        background_color = cv2.imread(filename, cv2.IMREAD_UNCHANGED)
-
-        try:
-            # randomly crop a region as background
-            bw = background_color.shape[1]
-            bh = background_color.shape[0]
-            x1 = npr.randint(0, int(bw/3))
-            y1 = npr.randint(0, int(bh/3))
-            x2 = npr.randint(int(2*bw/3), bw)
-            y2 = npr.randint(int(2*bh/3), bh)
-            background_color = background_color[y1:y2, x1:x2]
-            background_color = cv2.resize(background_color, (self._width, self._height), interpolation=cv2.INTER_LINEAR)
-        except:
-            background_color = np.zeros((self._height, self._width, 3), dtype=np.uint8)
-            print 'bad background image'
-
-        if len(background_color.shape) != 3:
-            background_color = np.zeros((self._height, self._width, 3), dtype=np.uint8)
-            print 'bad background image'
-
-        # paste objects on background
-        I = np.where(im_label == 0)
-        im[I[0], I[1], :] = background_color[I[0], I[1], :3]
-        im_b = background_color.copy()
-        im = im.astype(np.uint8)
-        margin = 10
-        for i in range(len(cls_indexes)):
-            I = np.where(im_label == cls_indexes[i]+1)
-            if len(I[0]) > 0:
-                y1 = np.max((np.round(np.min(I[0])) - margin, 0))
-                x1 = np.max((np.round(np.min(I[1])) - margin, 0))
-                y2 = np.min((np.round(np.max(I[0])) + margin, self._height-1))
-                x2 = np.min((np.round(np.max(I[1])) + margin, self._width-1))
-                foreground = im[y1:y2, x1:x2].astype(np.uint8)
-                mask = 255 * np.ones((foreground.shape[0], foreground.shape[1]), dtype=np.uint8)
-                background_color = cv2.seamlessClone(foreground, background_color, mask, ((x1+x2)/2, (y1+y2)/2), cv2.NORMAL_CLONE)
-        im = background_color
+        affine_matrix = np.float32([[scale, 0, shift[0] / width], [0, scale, shift[1] / height]])
 
         # chromatic transform
         if cfg.TRAIN.CHROMATIC and cfg.MODE == 'TRAIN' and np.random.rand(1) > 0.1:
@@ -346,7 +303,9 @@ class YCBEncoder(data.Dataset, datasets.imdb):
 
         # im is pytorch tensor in gpu
         sample = {'image_input': im_cuda.permute(2, 0, 1),
-                  'image_target': image_target_tensor.permute(2, 0, 1)}
+                  'image_target': image_target_tensor.permute(2, 0, 1),
+                  'image_label': torch.from_numpy(im_label).unsqueeze(2).repeat(1, 1, 3).permute(2, 0, 1).float().cuda(),
+                  'affine_matrix': torch.from_numpy(affine_matrix).cuda()}
 
         return sample
 

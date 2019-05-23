@@ -117,6 +117,9 @@ __C.TRAIN.SYN_TFAR = 2.0
 __C.TRAIN.SYN_BOUND = 0.4
 __C.TRAIN.SYN_SAMPLE_DISTRACTOR = True
 
+# autoencoder
+__C.TRAIN.BOOSTRAP_PIXELS = 20
+
 # domain adaptation
 __C.TRAIN.ADAPT = False
 __C.TRAIN.ADAPT_ROOT = ''

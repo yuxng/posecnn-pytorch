@@ -14,6 +14,7 @@ import datasets.ycb_object
 import datasets.ycb_encoder
 import datasets.linemod
 import datasets.isaac_sim
+import datasets.background
 import numpy as np
 
 # ycb video dataset
@@ -57,6 +58,13 @@ for split in ['train', 'test']:
     print name
     __sets[name] = (lambda split=split:
             datasets.panda(split))
+
+# background dataset
+for split in ['pascal']:
+    name = 'background_{}'.format(split)
+    print(name)
+    __sets[name] = (lambda split=split:
+            datasets.BackgroundDataset(split))
 
 
 def get_dataset(name):

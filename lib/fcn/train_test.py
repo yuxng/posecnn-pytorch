@@ -158,12 +158,13 @@ def train(train_loader, network, optimizer, epoch):
         cfg.TRAIN.ITERS += 1
 
 
-def train_autoencoder(train_loader, network, optimizer, epoch):
+def train_autoencoder(train_loader, background_loader, network, optimizer, epoch):
 
     batch_time = AverageMeter()
     losses = AverageMeter()
 
     epoch_size = len(train_loader)
+    enum_background = enumerate(background_loader)
 
     # switch to train mode
     network.train()
@@ -171,17 +172,36 @@ def train_autoencoder(train_loader, network, optimizer, epoch):
     for i, sample in enumerate(train_loader):
 
         end = time.time()
-    
+
+        # construct input
+        image = sample['image_input']
+        label = sample['image_label']
+        affine_matrix = sample['affine_matrix']
+
+        # affine transformation
+        grids = nn.functional.affine_grid(affine_matrix, image.size())
+        image = nn.functional.grid_sample(image, grids)
+        label = nn.functional.grid_sample(label, grids, mode='nearest')
+        mask = (label == 0).float()
+
+        _, background = next(enum_background)
+        if image.size(0) != background.size(0):
+            enum_background = enumerate(background_loader)
+            _, background = next(enum_background)
+
+        background = background.cuda()
+        inputs = image + mask * background
+        inputs = torch.clamp(inputs, min=0.0, max=1.0)
+
         if cfg.TRAIN.VISUALIZE:
-            _vis_minibatch_autoencoder(sample)
+            _vis_minibatch_autoencoder(inputs, background, sample)
 
         # compute output
-        inputs = sample['image_input']
         out_images, embeddings = network(inputs)
 
         # reconstruction loss
         targets = sample['image_target']
-        loss = BootstrapedMSEloss(out_images, targets)
+        loss = BootstrapedMSEloss(out_images, targets, cfg.TRAIN.BOOSTRAP_PIXELS)
 
         # record loss
         losses.update(loss.data, inputs.size(0))
@@ -199,9 +219,10 @@ def train_autoencoder(train_loader, network, optimizer, epoch):
         cfg.TRAIN.ITERS += 1
 
 
-def _vis_minibatch_autoencoder(sample):
+def _vis_minibatch_autoencoder(inputs, background, sample):
 
-    im_blob = sample['image_input'].cpu().numpy()
+    im_blob = inputs.cpu().numpy()
+    background = background.cpu().numpy()
     targets = sample['image_target'].cpu().numpy()
 
     import matplotlib.pyplot as plt
@@ -212,7 +233,7 @@ def _vis_minibatch_autoencoder(sample):
         im = im.transpose((1, 2, 0)) * 255.0
         im = im [:, :, (2, 1, 0)]
         im = im.astype(np.uint8)
-        ax = fig.add_subplot(1, 2, 1)
+        ax = fig.add_subplot(1, 3, 1)
         plt.imshow(im)
         ax.set_title('input')
 
@@ -221,9 +242,19 @@ def _vis_minibatch_autoencoder(sample):
         im = im.transpose((1, 2, 0)) * 255.0
         im = im.astype(np.uint8)
         im = im [:, :, (2, 1, 0)]
-        ax = fig.add_subplot(1, 2, 2)
+        ax = fig.add_subplot(1, 3, 2)
         plt.imshow(im)
         ax.set_title('target')
+
+        # show background
+        im = background[i, :, :, :].copy()
+        im = im.transpose((1, 2, 0)) * 255.0
+        im = im [:, :, (2, 1, 0)]
+        im = im.astype(np.uint8)
+        ax = fig.add_subplot(1, 3, 3)
+        plt.imshow(im)
+        ax.set_title('background')
+
         plt.show()
 
 

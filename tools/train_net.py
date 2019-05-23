@@ -24,10 +24,11 @@ import os.path as osp
 import cv2
 
 import _init_paths
+import datasets
+import networks
 from fcn.config import cfg, cfg_from_file, get_output_dir, write_selected_class_file
 from fcn.train_test import train, train_autoencoder
 from datasets.factory import get_dataset
-import networks
 from ycb_renderer import YCBRenderer
 
 def parse_args():
@@ -96,6 +97,11 @@ if __name__ == '__main__':
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=cfg.TRAIN.IMS_PER_BATCH, shuffle=True, num_workers=0)
     print 'Use dataset `{:s}` for training'.format(dataset.name)
 
+    if args.network_name == 'autoencoder':
+        background_dataset = get_dataset('background_pascal')
+        background_loader = torch.utils.data.DataLoader(background_dataset, batch_size=cfg.TRAIN.IMS_PER_BATCH,
+                                                     shuffle=True, num_workers=8)
+
     # overwrite intrinsics
     if len(cfg.INTRINSICS) > 0:
         K = np.array(cfg.INTRINSICS).reshape(3, 3)
@@ -148,7 +154,7 @@ if __name__ == '__main__':
         scheduler.step()
         
         if args.network_name == 'autoencoder':
-            train_autoencoder(dataloader, network, optimizer, epoch)
+            train_autoencoder(dataloader, background_loader, network, optimizer, epoch)
         else:
             train(dataloader, network, optimizer, epoch)
 

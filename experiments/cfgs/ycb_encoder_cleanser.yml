@@ -19,7 +19,7 @@ TRAIN:
   CHROMATIC: True
   ADD_NOISE: True
   VISUALIZE: False
-  VERTEX_REG: True
+  BOOSTRAP_PIXELS: 20
   # synthetic data
   UNIFORM_POSE_INTERVAL: 5
   SYNTHESIZE: True
