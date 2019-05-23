@@ -13,7 +13,7 @@ TRAIN:
   NUM_UNITS: 128
   CLASSES: !!python/tuple [20]
   SNAPSHOT_INFIX: ycb_object_clamp
-  SNAPSHOT_EPOCHS: 1
+  SNAPSHOT_EPOCHS: 50
   SNAPSHOT_PREFIX: encoder
   USE_FLIPPED: False
   CHROMATIC: True
