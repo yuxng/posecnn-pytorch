@@ -56,8 +56,9 @@ class AutoEncoder(nn.Module):
         self.deconv4 = deconv(128, 3, kernel_size=5, stride=2, output_padding=1)
 
         for m in self.modules():
-            if isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
-                kaiming_normal_(m.weight.data)
+            if isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d) or isinstance(m, nn.Linear):
+                print(m)
+                nn.init.xavier_uniform_(m.weight)
                 if m.bias is not None:
                     m.bias.data.zero_()
             elif isinstance(m, nn.BatchNorm2d):

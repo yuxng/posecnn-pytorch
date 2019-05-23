@@ -56,7 +56,7 @@ def loss_cross_entropy(scores, labels):
     return loss
 
 
-def BootstrapedMSEloss(pred, target, K=2000):
+def BootstrapedMSEloss(pred, target, K=20):
     assert pred.dim() == target.dim(), "inconsistent dimensions"
     batch_size = pred.size(0)
     diff = torch.sum((target - pred)**2, 1)
