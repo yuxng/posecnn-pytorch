@@ -193,11 +193,11 @@ def train_autoencoder(train_loader, background_loader, network, optimizer, epoch
         inputs = image + mask * background
         inputs = torch.clamp(inputs, min=0.0, max=1.0)
 
-        if cfg.TRAIN.VISUALIZE:
-            _vis_minibatch_autoencoder(inputs, background, sample)
-
         # compute output
         out_images, embeddings = network(inputs)
+
+        if cfg.TRAIN.VISUALIZE:
+            _vis_minibatch_autoencoder(inputs, background, sample, out_images)
 
         # reconstruction loss
         targets = sample['image_target']
@@ -214,16 +214,17 @@ def train_autoencoder(train_loader, background_loader, network, optimizer, epoch
         # measure elapsed time
         batch_time.update(time.time() - end)
 
-        print('[%d/%d][%d/%d], loss %.4f, lr %.6f, time %.2f' \
-           % (epoch, cfg.epochs, i, epoch_size, loss, optimizer.param_groups[0]['lr'], batch_time.val))
+        print('[%d/%d][%d/%d], loss %.4f, lr %.6f, boost %d, time %.2f' \
+           % (epoch, cfg.epochs, i, epoch_size, loss, optimizer.param_groups[0]['lr'], cfg.TRAIN.BOOSTRAP_PIXELS, batch_time.val))
         cfg.TRAIN.ITERS += 1
 
 
-def _vis_minibatch_autoencoder(inputs, background, sample):
+def _vis_minibatch_autoencoder(inputs, background, sample, outputs):
 
     im_blob = inputs.cpu().numpy()
     background = background.cpu().numpy()
     targets = sample['image_target'].cpu().numpy()
+    im_output = outputs.cpu().detach().numpy()
 
     import matplotlib.pyplot as plt
     for i in range(im_blob.shape[0]):
@@ -233,7 +234,7 @@ def _vis_minibatch_autoencoder(inputs, background, sample):
         im = im.transpose((1, 2, 0)) * 255.0
         im = im [:, :, (2, 1, 0)]
         im = im.astype(np.uint8)
-        ax = fig.add_subplot(1, 3, 1)
+        ax = fig.add_subplot(2, 2, 1)
         plt.imshow(im)
         ax.set_title('input')
 
@@ -242,7 +243,7 @@ def _vis_minibatch_autoencoder(inputs, background, sample):
         im = im.transpose((1, 2, 0)) * 255.0
         im = im.astype(np.uint8)
         im = im [:, :, (2, 1, 0)]
-        ax = fig.add_subplot(1, 3, 2)
+        ax = fig.add_subplot(2, 2, 2)
         plt.imshow(im)
         ax.set_title('target')
 
@@ -251,11 +252,65 @@ def _vis_minibatch_autoencoder(inputs, background, sample):
         im = im.transpose((1, 2, 0)) * 255.0
         im = im [:, :, (2, 1, 0)]
         im = im.astype(np.uint8)
-        ax = fig.add_subplot(1, 3, 3)
+        ax = fig.add_subplot(2, 2, 3)
         plt.imshow(im)
         ax.set_title('background')
 
+        # show output
+        im = im_output[i, :, :, :].copy()
+        im = np.clip(im, 0, 1)
+        im = im.transpose((1, 2, 0)) * 255.0
+        im = im [:, :, (2, 1, 0)]
+        im = im.astype(np.uint8)
+        ax = fig.add_subplot(2, 2, 4)
+        plt.imshow(im)
+        ax.set_title('reconstruction')
+
         plt.show()
+
+
+def test_autoencoder(test_loader, background_loader, network, output_dir):
+
+    batch_time = AverageMeter()
+    epoch_size = len(test_loader)
+    enum_background = enumerate(background_loader)
+
+    # switch to test mode
+    network.eval()
+
+    for i, sample in enumerate(test_loader):
+
+        end = time.time()
+
+        # construct input
+        image = sample['image_input']
+        label = sample['image_label']
+        affine_matrix = sample['affine_matrix']
+
+        # affine transformation
+        grids = nn.functional.affine_grid(affine_matrix, image.size())
+        image = nn.functional.grid_sample(image, grids)
+        label = nn.functional.grid_sample(label, grids, mode='nearest')
+        mask = (label == 0).float()
+
+        _, background = next(enum_background)
+        if image.size(0) != background.size(0):
+            enum_background = enumerate(background_loader)
+            _, background = next(enum_background)
+
+        background = background.cuda()
+        inputs = image + mask * background
+        inputs = torch.clamp(inputs, min=0.0, max=1.0)
+
+        # compute output
+        out_images, embeddings = network(inputs)
+
+        if cfg.TEST.VISUALIZE:
+            _vis_minibatch_autoencoder(inputs, background, sample, out_images)
+
+        # measure elapsed time
+        batch_time.update(time.time() - end)
+        print('[%d/%d], batch time %.2f' % (i, epoch_size, batch_time.val))
 
 
 def test(test_loader, network, output_dir):

@@ -22,7 +22,7 @@ import numpy as np
 import random
 
 import _init_paths
-from fcn.train_test import test
+from fcn.train_test import test, test_autoencoder
 from fcn.config import cfg, cfg_from_file, get_output_dir, write_selected_class_file
 from datasets.factory import get_dataset
 import networks
@@ -94,21 +94,19 @@ if __name__ == '__main__':
         shuffle = False
     cfg.MODE = 'TEST'
     dataset = get_dataset(args.dataset_name)
-    dataloader = torch.utils.data.DataLoader(dataset, shuffle=shuffle, num_workers=0)
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=cfg.TRAIN.IMS_PER_BATCH, shuffle=shuffle, num_workers=0)
     print 'Use dataset `{:s}` for training'.format(dataset.name)
+
+    if args.network_name == 'autoencoder':
+        background_dataset = get_dataset('background_pascal')
+        background_loader = torch.utils.data.DataLoader(background_dataset, batch_size=cfg.TRAIN.IMS_PER_BATCH,
+                                                     shuffle=True, num_workers=8)
 
     output_dir = get_output_dir(dataset, None)
     output_dir = osp.join(output_dir, cfg.TRAIN.SNAPSHOT_INFIX)
     print 'Output will be saved to `{:s}`'.format(output_dir)
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-
-    if cfg.TEST.SYNTHESIZE:
-        print 'loading 3D models'
-        cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, render_marker=False)
-        cfg.renderer.load_objects(dataset.model_mesh_paths, dataset.model_texture_paths, dataset.model_colors)
-        cfg.renderer.set_camera_default()
-        print dataset.model_mesh_paths
 
     # prepare network
     if args.pretrained:
@@ -123,8 +121,18 @@ if __name__ == '__main__':
     network = torch.nn.DataParallel(network, device_ids=[args.gpu_id]).cuda(device=cfg.device)
     cudnn.benchmark = True
 
+    if cfg.TEST.SYNTHESIZE:
+        print 'loading 3D models'
+        cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, render_marker=False)
+        cfg.renderer.load_objects(dataset.model_mesh_paths, dataset.model_texture_paths, dataset.model_colors)
+        cfg.renderer.set_camera_default()
+        print dataset.model_mesh_paths
+
     # test network
-    test(dataloader, network, output_dir)
+    if args.network_name == 'autoencoder':
+        test_autoencoder(dataloader, background_loader, network, output_dir)
+    else:
+        test(dataloader, network, output_dir)
 
     # evaluation
     dataset.evaluation(output_dir)

@@ -204,6 +204,8 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         image_target_tensor = image_target_tensor[:, :, (2, 1, 0)]
         seg_tensor = seg_tensor.flip(0)
         seg = torch.sum(seg_tensor[:, :, :3], dim=2)
+        mask_background = (seg == 0)
+        image_target_tensor[mask_background, :] = 0.5
         mask = (seg != 0).cpu().numpy()
 
         if np.random.rand(1) < 0.3:

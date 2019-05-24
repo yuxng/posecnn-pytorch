@@ -94,4 +94,28 @@ class AutoEncoder(nn.Module):
 
 def autoencoder(num_classes=1, num_units=128, data=None):
     model = AutoEncoder(num_units)
+
+    if data is not None:
+        model_dict = model.state_dict()
+        print 'model keys'
+        print '================================================='
+        for k, v in model_dict.items():
+            print k
+        print '================================================='
+
+        print 'data keys'
+        print '================================================='
+        for k, v in data.items():
+            print k
+        print '================================================='
+
+        pretrained_dict = {k: v for k, v in data.items() if k in model_dict and v.size() == model_dict[k].size()}
+        print 'load the following keys from the pretrained model'
+        print '================================================='
+        for k, v in pretrained_dict.items():
+            print k
+        print '================================================='
+        model_dict.update(pretrained_dict) 
+        model.load_state_dict(model_dict)
+
     return model
