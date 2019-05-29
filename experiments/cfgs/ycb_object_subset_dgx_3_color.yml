@@ -29,6 +29,7 @@ TRAIN:
   ADD_NOISE: True
   VISUALIZE: False
   VERTEX_REG: True
+  POSE_REG: False
   # synthetic data
   SYNTHESIZE: True
   SYNNUM: 40000

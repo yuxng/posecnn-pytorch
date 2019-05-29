@@ -122,8 +122,10 @@ class PoseCNN(nn.Module):
             self.roi_pool_conv5 = RoIPool(pool_height=7, pool_width=7, spatial_scale=1.0 / 16.0)
             self.fc8 = fc(4096, num_classes)
             self.fc9 = fc(4096, 4 * num_classes, relu=False)
-            self.fc10 = fc(4096, 4 * num_classes, relu=False)
-            self.pml = PMLoss(hard_angle=cfg.TRAIN.HARD_ANGLE)
+
+            if cfg.TRAIN.POSE_REG:
+                self.fc10 = fc(4096, 4 * num_classes, relu=False)
+                self.pml = PMLoss(hard_angle=cfg.TRAIN.HARD_ANGLE)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
@@ -194,26 +196,34 @@ class PoseCNN(nn.Module):
 
             # rotation regression branch
             rois, poses_target, poses_weight = pose_target_layer(out_box, bbox_prob, bbox_pred, gt_boxes, poses, self.training)
-            out_qt_conv4 = self.roi_pool_conv4(out_conv4_3, rois)
-            out_qt_conv5 = self.roi_pool_conv5(out_conv5_3, rois)
-            out_qt = out_qt_conv4 + out_qt_conv5
-            out_qt_flatten = out_qt.view(out_qt.size(0), -1)
-            out_qt_fc7 = self.classifier(out_qt_flatten)
-            out_quaternion = self.fc10(out_qt_fc7)
-            # point matching loss
-            poses_pred = nn.functional.normalize(torch.mul(out_quaternion, poses_weight))
-            if self.training:
-                loss_pose = self.pml(poses_pred, poses_target, poses_weight, points, symmetry)
+            if cfg.TRAIN.POSE_REG:    
+                out_qt_conv4 = self.roi_pool_conv4(out_conv4_3, rois)
+                out_qt_conv5 = self.roi_pool_conv5(out_conv5_3, rois)
+                out_qt = out_qt_conv4 + out_qt_conv5
+                out_qt_flatten = out_qt.view(out_qt.size(0), -1)
+                out_qt_fc7 = self.classifier(out_qt_flatten)
+                out_quaternion = self.fc10(out_qt_fc7)
+                # point matching loss
+                poses_pred = nn.functional.normalize(torch.mul(out_quaternion, poses_weight))
+                if self.training:
+                    loss_pose = self.pml(poses_pred, poses_target, poses_weight, points, symmetry)
 
         if self.training:
             if cfg.TRAIN.VERTEX_REG:
-                return out_logsoftmax, out_weight, out_vertex, out_logsoftmax_box, bbox_label_weights, \
-                       bbox_pred, bbox_targets, bbox_inside_weights, loss_pose, poses_weight
+                if cfg.TRAIN.POSE_REG:
+                    return out_logsoftmax, out_weight, out_vertex, out_logsoftmax_box, bbox_label_weights, \
+                           bbox_pred, bbox_targets, bbox_inside_weights, loss_pose, poses_weight
+                else:
+                    return out_logsoftmax, out_weight, out_vertex, out_logsoftmax_box, bbox_label_weights, \
+                           bbox_pred, bbox_targets, bbox_inside_weights
             else:
                 return out_logsoftmax, out_weight
         else:
             if cfg.TRAIN.VERTEX_REG:
-                return out_label, out_vertex, rois, out_pose, out_quaternion
+                if cfg.TRAIN.POSE_REG:
+                    return out_label, out_vertex, rois, out_pose, out_quaternion
+                else:
+                    return out_label, out_vertex, rois, out_pose
             else:
                 return out_label
 

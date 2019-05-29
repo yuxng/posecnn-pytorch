@@ -119,16 +119,27 @@ def train(train_loader, network, optimizer, epoch):
 
         # compute output
         if cfg.TRAIN.VERTEX_REG:
-            out_logsoftmax, out_weight, out_vertex, out_logsoftmax_box, \
-                bbox_labels, bbox_pred, bbox_targets, bbox_inside_weights, loss_pose_tensor, poses_weight \
-                = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
+            if cfg.TRAIN.POSE_REG:
+                out_logsoftmax, out_weight, out_vertex, out_logsoftmax_box, \
+                    bbox_labels, bbox_pred, bbox_targets, bbox_inside_weights, loss_pose_tensor, poses_weight \
+                    = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
 
-            loss_label = loss_cross_entropy(out_logsoftmax, out_weight)
-            loss_vertex = cfg.TRAIN.VERTEX_W * smooth_l1_loss(out_vertex, vertex_targets, vertex_weights)
-            loss_box = loss_cross_entropy(out_logsoftmax_box, bbox_labels)
-            loss_location = smooth_l1_loss(bbox_pred, bbox_targets, bbox_inside_weights)
-            loss_pose = torch.mean(loss_pose_tensor)
-            loss = loss_label + loss_vertex + loss_box + loss_location + loss_pose
+                loss_label = loss_cross_entropy(out_logsoftmax, out_weight)
+                loss_vertex = cfg.TRAIN.VERTEX_W * smooth_l1_loss(out_vertex, vertex_targets, vertex_weights)
+                loss_box = loss_cross_entropy(out_logsoftmax_box, bbox_labels)
+                loss_location = smooth_l1_loss(bbox_pred, bbox_targets, bbox_inside_weights)
+                loss_pose = torch.mean(loss_pose_tensor)
+                loss = loss_label + loss_vertex + loss_box + loss_location + loss_pose
+            else:
+                out_logsoftmax, out_weight, out_vertex, out_logsoftmax_box, \
+                    bbox_labels, bbox_pred, bbox_targets, bbox_inside_weights \
+                    = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
+
+                loss_label = loss_cross_entropy(out_logsoftmax, out_weight)
+                loss_vertex = cfg.TRAIN.VERTEX_W * smooth_l1_loss(out_vertex, vertex_targets, vertex_weights)
+                loss_box = loss_cross_entropy(out_logsoftmax_box, bbox_labels)
+                loss_location = smooth_l1_loss(bbox_pred, bbox_targets, bbox_inside_weights)
+                loss = loss_label + loss_vertex + loss_box + loss_location
         else:
             out_logsoftmax, out_weight = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
             loss = loss_cross_entropy(out_logsoftmax, out_weight)
@@ -145,12 +156,19 @@ def train(train_loader, network, optimizer, epoch):
         batch_time.update(time.time() - end)
 
         if cfg.TRAIN.VERTEX_REG:
-            num_bg = torch.sum(bbox_labels[:, 0])
-            num_fg = torch.sum(torch.sum(bbox_labels[:, 1:], dim=1))
-            num_fg_pose = torch.sum(torch.sum(poses_weight[:, 4:], dim=1)) / 4
-            print('[%d/%d][%d/%d], %.4f, label %.4f, center %.4f, box %.4f (%03d, %03d), loc %.4f, pose %.4f (%03d), lr %.6f, time %.2f' \
-               % (epoch, cfg.epochs, i, epoch_size, loss.data, loss_label.data, loss_vertex.data, loss_box.data, num_fg.data, num_bg.data, \
-                  loss_location.data, loss_pose.data, num_fg_pose, optimizer.param_groups[0]['lr'], batch_time.val))
+            if cfg.TRAIN.POSE_REG:
+                num_bg = torch.sum(bbox_labels[:, 0])
+                num_fg = torch.sum(torch.sum(bbox_labels[:, 1:], dim=1))
+                num_fg_pose = torch.sum(torch.sum(poses_weight[:, 4:], dim=1)) / 4
+                print('[%d/%d][%d/%d], %.4f, label %.4f, center %.4f, box %.4f (%03d, %03d), loc %.4f, pose %.4f (%03d), lr %.6f, time %.2f' \
+                   % (epoch, cfg.epochs, i, epoch_size, loss.data, loss_label.data, loss_vertex.data, loss_box.data, num_fg.data, num_bg.data, \
+                      loss_location.data, loss_pose.data, num_fg_pose, optimizer.param_groups[0]['lr'], batch_time.val))
+            else:
+                num_bg = torch.sum(bbox_labels[:, 0])
+                num_fg = torch.sum(torch.sum(bbox_labels[:, 1:], dim=1))
+                print('[%d/%d][%d/%d], %.4f, label %.4f, center %.4f, box %.4f (%03d, %03d), loc %.4f, lr %.6f, time %.2f' \
+                   % (epoch, cfg.epochs, i, epoch_size, loss.data, loss_label.data, loss_vertex.data, loss_box.data, num_fg.data, num_bg.data, \
+                      loss_location.data, optimizer.param_groups[0]['lr'], batch_time.val))
         else:
             print('[%d/%d][%d/%d], loss %.4f, lr %.6f, time %.2f' \
                % (epoch, cfg.epochs, i, epoch_size, loss, optimizer.param_groups[0]['lr'], batch_time.val))
