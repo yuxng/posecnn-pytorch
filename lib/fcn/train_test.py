@@ -284,7 +284,7 @@ def render_images(dataset, poses):
     return im_output
 
 
-def _vis_minibatch_autoencoder(inputs, background, sample, outputs, im_render):
+def _vis_minibatch_autoencoder(inputs, background, sample, outputs, im_render=None):
 
     im_blob = inputs.cpu().numpy()
     if cfg.TEST.BUILD_CODEBOOK == False:
