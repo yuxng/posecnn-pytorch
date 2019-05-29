@@ -94,12 +94,12 @@ if __name__ == '__main__':
         shuffle = False
     cfg.MODE = 'TEST'
     dataset = get_dataset(args.dataset_name)
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size=cfg.TRAIN.IMS_PER_BATCH, shuffle=shuffle, num_workers=0)
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=cfg.TEST.IMS_PER_BATCH, shuffle=shuffle, num_workers=0)
     print 'Use dataset `{:s}` for training'.format(dataset.name)
 
     if args.network_name == 'autoencoder':
         background_dataset = get_dataset('background_pascal')
-        background_loader = torch.utils.data.DataLoader(background_dataset, batch_size=cfg.TRAIN.IMS_PER_BATCH,
+        background_loader = torch.utils.data.DataLoader(background_dataset, batch_size=cfg.TEST.IMS_PER_BATCH,
                                                      shuffle=True, num_workers=8)
 
     output_dir = get_output_dir(dataset, None)
@@ -134,5 +134,5 @@ if __name__ == '__main__':
     else:
         test(dataloader, network, output_dir)
 
-    # evaluation
-    dataset.evaluation(output_dir)
+        # evaluation
+        dataset.evaluation(output_dir)

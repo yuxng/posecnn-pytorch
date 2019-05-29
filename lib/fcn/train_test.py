@@ -219,10 +219,58 @@ def train_autoencoder(train_loader, background_loader, network, optimizer, epoch
         cfg.TRAIN.ITERS += 1
 
 
-def _vis_minibatch_autoencoder(inputs, background, sample, outputs):
+def render_images(dataset, poses):
+
+    intrinsic_matrix = dataset._intrinsic_matrix
+    height = dataset._height
+    width = dataset._width
+
+    fx = intrinsic_matrix[0, 0]
+    fy = intrinsic_matrix[1, 1]
+    px = intrinsic_matrix[0, 2]
+    py = intrinsic_matrix[1, 2]
+    zfar = 6.0
+    znear = 0.25
+    num = poses.shape[0]
+
+    im_output = np.zeros((num, height, width, 3), dtype=np.uint8)
+    image_tensor = torch.cuda.FloatTensor(height, width, 4)
+    seg_tensor = torch.cuda.FloatTensor(height, width, 4)
+
+    # set renderer
+    cfg.renderer.set_light_pos([0, 0, 0])
+    cfg.renderer.set_light_color([1, 1, 1])
+    cfg.renderer.set_projection_matrix(width, height, fx, fy, px, py, znear, zfar)
+
+    # render images
+    for i in range(num):
+
+        cls_indexes = []
+        poses_all = []
+
+        cls_index = cfg.TRAIN.CLASSES[0] - 1
+        cls_indexes.append(cls_index)
+        poses_all.append(poses[i,:])
+
+        # rendering
+        cfg.renderer.set_poses(poses_all)
+        cfg.renderer.render(cls_indexes, image_tensor, seg_tensor)
+        image_tensor = image_tensor.flip(0)
+
+        im_render = image_tensor.cpu().numpy()
+        im_render = np.clip(im_render, 0, 1)
+        im_render = im_render[:, :, :3] * 255
+        im_render = im_render.astype(np.uint8)
+        im_output[i] = im_render
+
+    return im_output
+
+
+def _vis_minibatch_autoencoder(inputs, background, sample, outputs, im_render):
 
     im_blob = inputs.cpu().numpy()
-    background = background.cpu().numpy()
+    if cfg.TEST.BUILD_CODEBOOK == False:
+        background = background.cpu().numpy()
     targets = sample['image_target'].cpu().numpy()
     im_output = outputs.cpu().detach().numpy()
 
@@ -247,14 +295,12 @@ def _vis_minibatch_autoencoder(inputs, background, sample, outputs):
         plt.imshow(im)
         ax.set_title('target')
 
-        # show background
-        im = background[i, :, :, :].copy()
-        im = im.transpose((1, 2, 0)) * 255.0
-        im = im [:, :, (2, 1, 0)]
-        im = im.astype(np.uint8)
-        ax = fig.add_subplot(2, 2, 3)
-        plt.imshow(im)
-        ax.set_title('background')
+        # show matched codebook
+        if im_render is not None:
+            im = im_render[i].copy()
+            ax = fig.add_subplot(2, 2, 3)
+            plt.imshow(im)
+            ax.set_title('matched code')
 
         # show output
         im = im_output[i, :, :, :].copy()
@@ -269,11 +315,39 @@ def _vis_minibatch_autoencoder(inputs, background, sample, outputs):
         plt.show()
 
 
+def pairwise_cosine_distances(x, y, eps=1e-8):
+    """
+    :param x: batch of code from the encoder (batch size x code size)
+    :param y: code book (codebook size x code size)
+    :return: cosine similarity matrix (batch size x code book size)
+    """
+    dot_product = torch.mm(x, torch.t(y))
+    x_norm = torch.norm(x, 2, 1).unsqueeze(1)
+    y_norm = torch.norm(y, 2, 1).unsqueeze(1)
+    normalizer = torch.mm(x_norm, torch.t(y_norm))
+
+    return dot_product / normalizer.clamp(min=eps)
+
+
 def test_autoencoder(test_loader, background_loader, network, output_dir):
 
     batch_time = AverageMeter()
     epoch_size = len(test_loader)
     enum_background = enumerate(background_loader)
+
+    if cfg.TEST.BUILD_CODEBOOK:
+        num = len(test_loader.dataset.eulers)
+        codes = np.zeros((num, cfg.TRAIN.NUM_UNITS), dtype=np.float32)
+        poses = np.zeros((num, 7), dtype=np.float32)
+        count = 0
+    else:
+        # check if codebook exists
+        filename = os.path.join(output_dir, 'codebook_%s.mat' % test_loader.dataset.name)
+        if os.path.exists(filename):
+            codebook = scipy.io.loadmat(filename)
+            codes_gpu = torch.from_numpy(codebook['codes']).cuda()
+        else:
+            codebook = None
 
     # switch to test mode
     network.eval()
@@ -284,33 +358,68 @@ def test_autoencoder(test_loader, background_loader, network, output_dir):
 
         # construct input
         image = sample['image_input']
-        label = sample['image_label']
-        affine_matrix = sample['affine_matrix']
 
-        # affine transformation
-        grids = nn.functional.affine_grid(affine_matrix, image.size())
-        image = nn.functional.grid_sample(image, grids)
-        label = nn.functional.grid_sample(label, grids, mode='nearest')
-        mask = (label == 0).float()
+        if cfg.TEST.BUILD_CODEBOOK == False:
+            label = sample['image_label']
+            affine_matrix = sample['affine_matrix']
 
-        _, background = next(enum_background)
-        if image.size(0) != background.size(0):
-            enum_background = enumerate(background_loader)
+            # affine transformation
+            grids = nn.functional.affine_grid(affine_matrix, image.size())
+            image = nn.functional.grid_sample(image, grids)
+            label = nn.functional.grid_sample(label, grids, mode='nearest')
+            mask = (label == 0).float()
+
             _, background = next(enum_background)
+            if image.size(0) != background.size(0):
+                enum_background = enumerate(background_loader)
+                _, background = next(enum_background)
 
-        background = background.cuda()
-        inputs = image + mask * background
-        inputs = torch.clamp(inputs, min=0.0, max=1.0)
+            background = background.cuda()
+            inputs = image + mask * background
+            inputs = torch.clamp(inputs, min=0.0, max=1.0)
+        else:
+            inputs = image
+            background = None
 
         # compute output
         out_images, embeddings = network(inputs)
 
+        im_render = None
+        if cfg.TEST.BUILD_CODEBOOK:
+            num = embeddings.shape[0]
+            codes[count:count+num] = embeddings.cpu().detach().numpy()
+            poses[count:count+num] = sample['pose_target']
+            count += num
+        elif codebook is not None:
+            # codebook matching
+            distance_matrix = pairwise_cosine_distances(embeddings, codes_gpu)
+            best_match = torch.argmax(distance_matrix, dim=1).cpu().numpy()
+            quaternions_match = codebook['quaternions'][best_match, :]
+
+            # render codebook images
+            if cfg.TEST.VISUALIZE:
+                num = quaternions_match.shape[0]
+                poses = np.zeros((num, 7), dtype=np.float32)
+                poses[:, 2] = codebook['distance']
+                poses[:, 3:] = quaternions_match
+                im_render = render_images(test_loader.dataset, poses)
+
         if cfg.TEST.VISUALIZE:
-            _vis_minibatch_autoencoder(inputs, background, sample, out_images)
+            _vis_minibatch_autoencoder(inputs, background, sample, out_images, im_render)
 
         # measure elapsed time
         batch_time.update(time.time() - end)
-        print('[%d/%d], batch time %.2f' % (i, epoch_size, batch_time.val))
+        if cfg.TEST.BUILD_CODEBOOK:
+            print('[%d/%d], code index %d, batch time %.2f' % (i, epoch_size, count, batch_time.val))
+        else:
+            print('[%d/%d], batch time %.2f' % (i, epoch_size, batch_time.val))
+
+    # save codebook
+    if cfg.TEST.BUILD_CODEBOOK:
+        codebook = {'codes': codes, 'quaternions': poses[:, 3:], 'distance': poses[0, 2]}
+        filename = os.path.join(output_dir, 'codebook_%s.mat' % test_loader.dataset.name)
+        print('save codebook to %s' % (filename))
+        scipy.io.savemat(filename, codebook, do_compression=True)
 
 
 def test(test_loader, network, output_dir):

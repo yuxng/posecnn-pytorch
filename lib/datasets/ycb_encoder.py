@@ -171,6 +171,10 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         seg_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
         cfg.renderer.set_projection_matrix(width, height, fx, fy, px, py, znear, zfar)
         classes = np.array(cfg.TRAIN.CLASSES)
+        if cfg.TEST.BUILD_CODEBOOK:
+            interval = 0
+        else:
+            interval = cfg.TRAIN.UNIFORM_POSE_INTERVAL
 
         # sample target object
         cls_indexes = []
@@ -184,15 +188,16 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         if self.pose_indexes[cls] >= len(self.pose_lists[cls]):
             self.pose_indexes[cls] = 0
             self.pose_lists[cls] = np.random.permutation(np.arange(len(self.eulers)))
-        yaw = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][0] + 5 * np.random.randn()
-        pitch = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][1] + 5 * np.random.randn()
-        roll = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][2] + 5 * np.random.randn()
+        yaw = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][0] + interval * np.random.randn()
+        pitch = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][1] + interval * np.random.randn()
+        roll = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][2] + interval * np.random.randn()
         qt[3:] = euler2quat(roll * math.pi / 180.0, pitch * math.pi / 180.0, yaw * math.pi / 180.0, 'syxz')
         self.pose_indexes[cls] += 1
 
         qt[0] = 0
         qt[1] = 0
         qt[2] = self.render_depths[cls_target]
+        pose_target = qt.copy()
 
         # render target with constant lighting
         poses_all.append(qt.copy())
@@ -206,9 +211,10 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         seg = torch.sum(seg_tensor[:, :, :3], dim=2)
         mask_background = (seg == 0)
         image_target_tensor[mask_background, :] = 0.5
+        image_target_tensor = torch.clamp(image_target_tensor, min=0.0, max=1.0)
         mask = (seg != 0).cpu().numpy()
 
-        if np.random.rand(1) < 0.3:
+        if np.random.rand(1) < 0.3 and cfg.TEST.BUILD_CODEBOOK == False:
             # sample an occluder
             cls_indexes.append(0)
             poses_all.append(np.zeros((7, ), dtype=np.float32))
@@ -268,46 +274,61 @@ class YCBEncoder(data.Dataset, datasets.imdb):
                 if per_occ < 0.5:
                     break
         else:
-            # rendering
-            cfg.renderer.set_light_pos(np.random.uniform(-0.5, 0.5, 3))
-            intensity = np.random.uniform(0.8, 2)
-            light_color = intensity * np.random.uniform(0.9, 1.1, 3)
-            cfg.renderer.set_light_color(light_color)
-            cfg.renderer.render(cls_indexes, image_tensor, seg_tensor)
 
-            seg_tensor = seg_tensor.flip(0)
-            im_label = seg_tensor.cpu().numpy()
-            im_label = im_label[:, :, (2, 1, 0)] * 255
-            im_label = np.round(im_label).astype(np.uint8)
-            im_label = np.clip(im_label, 0, 255)
-            im_label_only, im_label = self.process_label_image(im_label)
+            if cfg.TEST.BUILD_CODEBOOK:
+                im_label = seg_tensor.cpu().numpy()
+                im_label = im_label[:, :, (2, 1, 0)] * 255
+                im_label = np.round(im_label).astype(np.uint8)
+                im_label = np.clip(im_label, 0, 255)
+                im_label_only, im_label = self.process_label_image(im_label)
+            else:
+                # rendering
+                cfg.renderer.set_light_pos(np.random.uniform(-0.5, 0.5, 3))
+                intensity = np.random.uniform(0.8, 2)
+                light_color = intensity * np.random.uniform(0.9, 1.1, 3)
+                cfg.renderer.set_light_color(light_color)
+                cfg.renderer.render(cls_indexes, image_tensor, seg_tensor)
 
-        # RGB to BGR order
-        image_tensor = image_tensor.flip(0)
-        im = image_tensor.cpu().numpy()
-        im = np.clip(im, 0, 1)
-        im = im[:, :, (2, 1, 0)] * 255
-        im = im.astype(np.uint8)
+                seg_tensor = seg_tensor.flip(0)
+                im_label = seg_tensor.cpu().numpy()
+                im_label = im_label[:, :, (2, 1, 0)] * 255
+                im_label = np.round(im_label).astype(np.uint8)
+                im_label = np.clip(im_label, 0, 255)
+                im_label_only, im_label = self.process_label_image(im_label)
 
-        # affine transformation
-        shift = np.float32([np.random.uniform(self.lb_shift, self.ub_shift), np.random.uniform(self.lb_shift, self.ub_shift)])
-        scale = np.random.uniform(self.lb_scale, self.ub_scale)
-        affine_matrix = np.float32([[scale, 0, shift[0] / width], [0, scale, shift[1] / height]])
+        if cfg.TEST.BUILD_CODEBOOK == False:
 
-        # chromatic transform
-        if cfg.TRAIN.CHROMATIC and cfg.MODE == 'TRAIN' and np.random.rand(1) > 0.1:
-            im = chromatic_transform(im)
+            # RGB to BGR order
+            image_tensor = image_tensor.flip(0)
+            im = image_tensor.cpu().numpy()
+            im = np.clip(im, 0, 1)
+            im = im[:, :, (2, 1, 0)] * 255
+            im = im.astype(np.uint8)
 
-        im_cuda = torch.from_numpy(im).cuda().float() / 255.0
-        if cfg.TRAIN.ADD_NOISE and cfg.MODE == 'TRAIN' and np.random.rand(1) > 0.1:
-            im_cuda = add_noise_cuda(im_cuda)
-        im_cuda = torch.clamp(im_cuda, min=0.0, max=1.0)
+            # affine transformation
+            shift = np.float32([np.random.uniform(self.lb_shift, self.ub_shift), np.random.uniform(self.lb_shift, self.ub_shift)])
+            scale = np.random.uniform(self.lb_scale, self.ub_scale)
+            affine_matrix = np.float32([[scale, 0, shift[0] / width], [0, scale, shift[1] / height]])
 
-        # im is pytorch tensor in gpu
-        sample = {'image_input': im_cuda.permute(2, 0, 1),
+            # chromatic transform
+            if cfg.TRAIN.CHROMATIC and cfg.MODE == 'TRAIN' and np.random.rand(1) > 0.1:
+                im = chromatic_transform(im)
+
+            im_cuda = torch.from_numpy(im).cuda().float() / 255.0
+            if cfg.TRAIN.ADD_NOISE and cfg.MODE == 'TRAIN' and np.random.rand(1) > 0.1:
+                im_cuda = add_noise_cuda(im_cuda)
+            im_cuda = torch.clamp(im_cuda, min=0.0, max=1.0)
+
+            # im is pytorch tensor in gpu
+            sample = {'image_input': im_cuda.permute(2, 0, 1),
                   'image_target': image_target_tensor.permute(2, 0, 1),
                   'image_label': torch.from_numpy(im_label).unsqueeze(2).repeat(1, 1, 3).permute(2, 0, 1).float().cuda(),
                   'affine_matrix': torch.from_numpy(affine_matrix).cuda()}
+        else:
+            sample = {'image_input': image_target_tensor.permute(2, 0, 1),
+                  'image_target': image_target_tensor.permute(2, 0, 1),
+                  'image_label': torch.from_numpy(im_label).unsqueeze(2).repeat(1, 1, 3).permute(2, 0, 1).float().cuda(),
+                  'pose_target': pose_target}
 
         return sample
 
