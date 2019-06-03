@@ -11,6 +11,7 @@ setup(
             'hard_label_kernel.cu',
             'hough_voting_kernel.cu',
             'roi_pooling_kernel.cu',
+            'ROIAlign_cuda.cu',
             'point_matching_loss_kernel.cu'],
             include_dirs = ['/usr/local/include/eigen3'])
     ],

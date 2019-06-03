@@ -20,6 +20,7 @@ import time, os, sys
 import os.path as osp
 import numpy as np
 import random
+import scipy.io
 
 import _init_paths
 from fcn.train_test import test, test_autoencoder
@@ -27,6 +28,7 @@ from fcn.config import cfg, cfg_from_file, get_output_dir, write_selected_class_
 from datasets.factory import get_dataset
 import networks
 from ycb_renderer import YCBRenderer
+from fcn.pose_rbpf import PoseRBPF
 
 def parse_args():
     """
@@ -84,6 +86,7 @@ if __name__ == '__main__':
 
     # device
     cfg.device = torch.device('cuda:{:d}'.format(args.gpu_id))
+    cfg.gpu_id = args.gpu_id
     print 'GPU device {:d}'.format(args.gpu_id)
 
     # prepare dataset
@@ -121,6 +124,9 @@ if __name__ == '__main__':
     network = torch.nn.DataParallel(network, device_ids=[args.gpu_id]).cuda(device=cfg.device)
     cudnn.benchmark = True
 
+    # prepare autoencoder and codebook
+    pose_rbpf = PoseRBPF(dataset)
+
     if cfg.TEST.SYNTHESIZE:
         print 'loading 3D models'
         cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, render_marker=False)
@@ -132,7 +138,7 @@ if __name__ == '__main__':
     if args.network_name == 'autoencoder':
         test_autoencoder(dataloader, background_loader, network, output_dir)
     else:
-        test(dataloader, network, output_dir)
+        test(dataloader, network, pose_rbpf, output_dir)
 
         # evaluation
         dataset.evaluation(output_dir)

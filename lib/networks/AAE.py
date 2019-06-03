@@ -92,6 +92,19 @@ class AutoEncoder(nn.Module):
         return [param for name, param in self.named_parameters() if 'bias' in name]
 
 
+    """
+    :param x: batch of code from the encoder (batch size x code size)
+    :param y: code book (codebook size x code size)
+    :return: cosine similarity matrix (batch size x code book size)
+    """
+    def pairwise_cosine_distances(self, x, y, eps=1e-8):
+        dot_product = torch.mm(x, torch.t(y))
+        x_norm = torch.norm(x, 2, 1).unsqueeze(1)
+        y_norm = torch.norm(y, 2, 1).unsqueeze(1)
+        normalizer = torch.mm(x_norm, torch.t(y_norm))
+        return dot_product / normalizer.clamp(min=eps)
+
+
 def autoencoder(num_classes=1, num_units=128, data=None):
     model = AutoEncoder(num_units)
 

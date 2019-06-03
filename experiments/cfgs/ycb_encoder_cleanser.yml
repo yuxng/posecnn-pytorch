@@ -31,6 +31,7 @@ TRAIN:
   SYN_HEIGHT: 128
 TEST:
   SCALES_BASE: !!python/tuple [1.0]
-  VISUALIZE: True
+  IMS_PER_BATCH: 256
+  VISUALIZE: False
   SYNTHESIZE: True
-  ROS_CAMERA: camera
+  BUILD_CODEBOOK: True

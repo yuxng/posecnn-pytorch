@@ -114,9 +114,9 @@ __global__ void compute_hough_kernel(const int nthreads, float* hough_space, flo
       offset = VERTEX_CHANNELS * cls * height * width + y * width + x;
       float u = vertmap[offset];
       offset = VERTEX_CHANNELS * cls * height * width + height * width + y * width + x;
-      float v = vertmap[offset + 1];
+      float v = vertmap[offset];
       offset = VERTEX_CHANNELS * cls * height * width + 2 * height * width + y * width + x;
-      float d = exp(vertmap[offset + 2]);
+      float d = exp(vertmap[offset]);
 
       // vote
       if (angle_distance(cx, cy, x, y, u, v) > inlierThreshold)
@@ -149,7 +149,7 @@ __global__ void compute_hough_kernel(const int nthreads, float* hough_space, flo
         offset = VERTEX_CHANNELS * cls * height * width + y * width + x;
         float u = vertmap[offset];
         offset = VERTEX_CHANNELS * cls * height * width + height * width + y * width + x;
-        float v = vertmap[offset + 1];
+        float v = vertmap[offset];
 
         // vote
         if (angle_distance(cx, cy, x, y, u, v) > inlierThreshold)

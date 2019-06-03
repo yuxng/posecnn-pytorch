@@ -126,6 +126,55 @@ std::vector<at::Tensor> roi_pool_backward(
   return roi_pool_cuda_backward(batch_size, height, width, spatial_scale, top_diff, bottom_rois, argmax_data);
 }
 
+
+/************************************************************
+ roi align layer
+*************************************************************/
+
+at::Tensor ROIAlign_forward_cuda(const at::Tensor& input,
+                                 const at::Tensor& rois,
+                                 const float spatial_scale,
+                                 const int pooled_height,
+                                 const int pooled_width,
+                                 const int sampling_ratio);
+
+at::Tensor ROIAlign_backward_cuda(const at::Tensor& grad,
+                                  const at::Tensor& rois,
+                                  const float spatial_scale,
+                                  const int pooled_height,
+                                  const int pooled_width,
+                                  const int batch_size,
+                                  const int channels,
+                                  const int height,
+                                  const int width,
+                                  const int sampling_ratio);
+
+// Interface for Python
+at::Tensor ROIAlign_forward(const at::Tensor& input,
+                            const at::Tensor& rois,
+                            const float spatial_scale,
+                            const int pooled_height,
+                            const int pooled_width,
+                            const int sampling_ratio) 
+{
+  return ROIAlign_forward_cuda(input, rois, spatial_scale, pooled_height, pooled_width, sampling_ratio);
+}
+
+at::Tensor ROIAlign_backward(const at::Tensor& grad,
+                             const at::Tensor& rois,
+                             const float spatial_scale,
+                             const int pooled_height,
+                             const int pooled_width,
+                             const int batch_size,
+                             const int channels,
+                             const int height,
+                             const int width,
+                             const int sampling_ratio)
+{
+  return ROIAlign_backward_cuda(grad, rois, spatial_scale, pooled_height, pooled_width, batch_size, channels, height, width, sampling_ratio);
+}
+
+
 /************************************************************
  point matching loss layer
 *************************************************************/
@@ -176,6 +225,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("hough_voting_forward", &hough_voting_forward, "hough_voting forward (CUDA)");
   m.def("roi_pool_forward", &roi_pool_forward, "roi_pool forward (CUDA)");
   m.def("roi_pool_backward", &roi_pool_backward, "roi_pool backward (CUDA)");
+  m.def("roi_align_forward", &ROIAlign_forward, "ROIAlign_forward");
+  m.def("roi_align_backward", &ROIAlign_backward, "ROIAlign_backward");
   m.def("pml_forward", &pml_forward, "pml forward (CUDA)");
   m.def("pml_backward", &pml_backward, "pml backward (CUDA)");
 }

@@ -333,20 +333,6 @@ def _vis_minibatch_autoencoder(inputs, background, sample, outputs, im_render=No
         plt.show()
 
 
-def pairwise_cosine_distances(x, y, eps=1e-8):
-    """
-    :param x: batch of code from the encoder (batch size x code size)
-    :param y: code book (codebook size x code size)
-    :return: cosine similarity matrix (batch size x code book size)
-    """
-    dot_product = torch.mm(x, torch.t(y))
-    x_norm = torch.norm(x, 2, 1).unsqueeze(1)
-    y_norm = torch.norm(y, 2, 1).unsqueeze(1)
-    normalizer = torch.mm(x_norm, torch.t(y_norm))
-
-    return dot_product / normalizer.clamp(min=eps)
-
-
 def test_autoencoder(test_loader, background_loader, network, output_dir):
 
     batch_time = AverageMeter()
@@ -410,7 +396,7 @@ def test_autoencoder(test_loader, background_loader, network, output_dir):
             count += num
         elif codebook is not None:
             # codebook matching
-            distance_matrix = pairwise_cosine_distances(embeddings, codes_gpu)
+            distance_matrix = network.module.pairwise_cosine_distances(embeddings, codes_gpu)
             best_match = torch.argmax(distance_matrix, dim=1).cpu().numpy()
             quaternions_match = codebook['quaternions'][best_match, :]
 
@@ -434,13 +420,46 @@ def test_autoencoder(test_loader, background_loader, network, output_dir):
 
     # save codebook
     if cfg.TEST.BUILD_CODEBOOK:
-        codebook = {'codes': codes, 'quaternions': poses[:, 3:], 'distance': poses[0, 2]}
+        codebook = {'codes': codes, 'quaternions': poses[:, 3:], 'distance': poses[0, 2], 'intrinsic_matrix': test_loader.dataset._intrinsic_matrix}
         filename = os.path.join(output_dir, 'codebook_%s.mat' % test_loader.dataset.name)
         print('save codebook to %s' % (filename))
         scipy.io.savemat(filename, codebook, do_compression=True)
 
 
-def test(test_loader, network, output_dir):
+def test_pose_rbpf(pose_rbpf, inputs, rois, poses):
+
+    n_init_samples = 300
+    num = rois.shape[0]
+    uv_init = np.zeros((2, ), dtype=np.float32)
+    pixel_mean = torch.tensor(cfg.PIXEL_MEANS / 255.0).cuda().float()
+    poses_return = poses.copy()
+
+    intrinsic_matrix = pose_rbpf.dataset._intrinsic_matrix
+    fx = intrinsic_matrix[0, 0]
+    fy = intrinsic_matrix[1, 1]
+    px = intrinsic_matrix[0, 2]
+    py = intrinsic_matrix[1, 2]
+
+    for i in range(num):
+        ind = int(rois[i, 0])
+        image = inputs[ind].permute(1, 2, 0) + pixel_mean
+        cls = int(rois[i, 1])
+
+        # project the 3D translation to get the center
+        uv_init[0] = fx * poses[i, 4] / poses[i, 6] + px
+        uv_init[1] = fy * poses[i, 5] / poses[i, 6] + py
+
+        roi_w = rois[i, 4] - rois[i, 2]
+        roi_h = rois[i, 5] - rois[i, 3]
+        roi_s = max(roi_w, roi_h)
+
+        pose = pose_rbpf.initialize(image, uv_init, n_init_samples, cls, roi_s)
+        if pose[-1] > 0:
+            poses_return[i, :] = pose
+    return poses_return
+
+
+def test(test_loader, network, pose_rbpf, output_dir):
 
     batch_time = AverageMeter()
     epoch_size = len(test_loader)
@@ -469,25 +488,45 @@ def test(test_loader, network, output_dir):
         
         # compute output
         if cfg.TRAIN.VERTEX_REG:
-            out_label, out_vertex, rois, out_pose, out_quaternion = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
+            if cfg.TRAIN.POSE_REG:
+                out_label, out_vertex, rois, out_pose, out_quaternion = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
                 
-            # combine poses
-            rois = rois.detach().cpu().numpy()
-            out_pose = out_pose.detach().cpu().numpy()
-            out_quaternion = out_quaternion.detach().cpu().numpy()
-            num = rois.shape[0]
-            poses = out_pose.copy()
-            for j in xrange(num):
-                cls = int(rois[j, 1])
-                if cls >= 0:
-                    qt = out_quaternion[j, 4*cls:4*cls+4]
-                    qt = qt / np.linalg.norm(qt)
-                    # allocentric to egocentric
-                    T = poses[j, 4:]
-                    poses[j, :4] = allocentric2egocentric(qt, T)
+                # combine poses
+                rois = rois.detach().cpu().numpy()
+                out_pose = out_pose.detach().cpu().numpy()
+                out_quaternion = out_quaternion.detach().cpu().numpy()
+                num = rois.shape[0]
+                poses = out_pose.copy()
+                for j in xrange(num):
+                    cls = int(rois[j, 1])
+                    if cls >= 0:
+                        qt = out_quaternion[j, 4*cls:4*cls+4]
+                        qt = qt / np.linalg.norm(qt)
+                        # allocentric to egocentric
+                        T = poses[j, 4:]
+                        poses[j, :4] = allocentric2egocentric(qt, T)
 
-            # optimize depths
-            poses, poses_refined = optimize_depths(rois, poses, test_loader.dataset._points_all, test_loader.dataset._intrinsic_matrix)
+                # optimize depths
+                poses, poses_refined = optimize_depths(rois, poses, test_loader.dataset._points_all, test_loader.dataset._intrinsic_matrix)
+            else:
+                out_label, out_vertex, rois, out_pose = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
+                rois = rois.detach().cpu().numpy()
+                out_pose = out_pose.detach().cpu().numpy()
+                poses = out_pose.copy()
+                poses_refined = []
+
+                # non-maximum suppression within class
+                index = nms(rois, 0.5)
+                rois = rois[index, :]
+                poses = poses[index, :]
+
+                num = rois.shape[0]
+                for j in range(num):
+                    poses[j, 4] *= poses[j, 6] 
+                    poses[j, 5] *= poses[j, 6]
+
+                # run poseRBPF for codebook matching
+                poses = test_pose_rbpf(pose_rbpf, inputs, rois, poses)
         else:
             out_label = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
             out_vertex = []
@@ -566,39 +605,65 @@ def test_image(network, dataset, im_color, im_depth=None):
     symmetry = torch.from_numpy(dataset._symmetry).cuda()
 
     if cfg.TRAIN.VERTEX_REG:
-        out_label, out_vertex, rois, out_pose, out_quaternion = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
-        labels = out_label.detach().cpu().numpy()[0]
 
-        # combine poses
-        rois = rois.detach().cpu().numpy()
-        out_pose = out_pose.detach().cpu().numpy()
-        out_quaternion = out_quaternion.detach().cpu().numpy()
-        num = rois.shape[0]
-        poses = out_pose.copy()
-        for j in xrange(num):
-            cls = int(rois[j, 1])
-            if cls >= 0:
-                qt = out_quaternion[j, 4*cls:4*cls+4]
-                qt = qt / np.linalg.norm(qt)
-                # allocentric to egocentric
-                T = poses[j, 4:]
-                poses[j, :4] = allocentric2egocentric(qt, T)
+        if cfg.TRAIN.POSE_REG:
+            out_label, out_vertex, rois, out_pose, out_quaternion = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
+            labels = out_label.detach().cpu().numpy()[0]
 
-        # filter out detections
-        index = np.where(rois[:, -1] > cfg.TEST.DET_THRESHOLD)[0]
-        rois = rois[index, :]
-        poses = poses[index, :]
+            # combine poses
+            rois = rois.detach().cpu().numpy()
+            out_pose = out_pose.detach().cpu().numpy()
+            out_quaternion = out_quaternion.detach().cpu().numpy()
+            num = rois.shape[0]
+            poses = out_pose.copy()
+            for j in xrange(num):
+                cls = int(rois[j, 1])
+                if cls >= 0:
+                    qt = out_quaternion[j, 4*cls:4*cls+4]
+                    qt = qt / np.linalg.norm(qt)
+                    # allocentric to egocentric
+                    T = poses[j, 4:]
+                    poses[j, :4] = allocentric2egocentric(qt, T)
 
-        # non-maximum suppression within class
-        index = nms(rois, 0.5)
-        rois = rois[index, :]
-        poses = poses[index, :]
+            # filter out detections
+            index = np.where(rois[:, -1] > cfg.TEST.DET_THRESHOLD)[0]
+            rois = rois[index, :]
+            poses = poses[index, :]
+
+            # non-maximum suppression within class
+            index = nms(rois, 0.5)
+            rois = rois[index, :]
+            poses = poses[index, :]
            
-        # optimize depths
-        if cfg.TEST.POSE_REFINE and im_depth is not None:
-            poses = refine_pose(labels, im_depth, rois, poses, dataset._intrinsic_matrix)
+            # optimize depths
+            if cfg.TEST.POSE_REFINE and im_depth is not None:
+                poses = refine_pose(labels, im_depth, rois, poses, dataset._intrinsic_matrix)
+            else:
+                poses_tmp, poses = optimize_depths(rois, poses, dataset._points_all, dataset._intrinsic_matrix)
+
         else:
-            poses_tmp, poses = optimize_depths(rois, poses, dataset._points_all, dataset._intrinsic_matrix)
+
+            out_label, out_vertex, rois, out_pose = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
+            labels = out_label.detach().cpu().numpy()[0]
+
+            rois = rois.detach().cpu().numpy()
+            out_pose = out_pose.detach().cpu().numpy()
+            poses = out_pose.copy()
+
+            # filter out detections
+            index = np.where(rois[:, -1] > cfg.TEST.DET_THRESHOLD)[0]
+            rois = rois[index, :]
+            poses = poses[index, :]
+
+            # non-maximum suppression within class
+            index = nms(rois, 0.5)
+            rois = rois[index, :]
+            poses = poses[index, :]
+
+            num = rois.shape[0]
+            for i in range(num):
+                poses[i, 4] *= poses[i, 6] 
+                poses[i, 5] *= poses[i, 6]
 
     else:
         out_label = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
@@ -814,7 +879,7 @@ def render_image(dataset, im, rois, poses, labels):
             cv2.rectangle(im_label, (x1, y1), (x2, y2), class_colors[cls], 2)
 
     # rendering
-    if len(cls_indexes) > 0:
+    if len(cls_indexes) > 0 and cfg.TRAIN.POSE_REG:
         cfg.renderer.set_poses(poses_all)
         frame = cfg.renderer.render(cls_indexes, image_tensor, seg_tensor)
         image_tensor = image_tensor.flip(0)
@@ -1091,7 +1156,7 @@ def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, sample, points
         vertex_pred = out_vertex.detach().cpu().numpy()
 
     m = 4
-    n = 4    
+    n = 4
     for i in range(im_blob.shape[0]):
         fig = plt.figure()
         start = 1
@@ -1249,6 +1314,8 @@ def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, sample, points
             else:
                 plt.imshow(im_depth[2, :, :])
             for j in xrange(rois.shape[0]):
+                if rois[j, 0] != i:
+                    continue
                 cls = int(rois[j, 1])
                 print classes[cls], rois[j, -1]
                 if cls > 0:
@@ -1374,27 +1441,28 @@ def vis_test(dataset, im, label, out_vertex, rois, poses, im_pose):
             plt.plot(cx, cy, 'yo')
 
         # show predicted poses
-        ax = fig.add_subplot(2, 4, 4)
-        ax.set_title('predicted poses')
-        plt.imshow(im)
-        for j in xrange(rois.shape[0]):
-            cls = int(rois[j, 1])
-            print classes[cls], rois[j, -1]
-            if cls > 0 and rois[j, -1] > cfg.TEST.DET_THRESHOLD:
-                # extract 3D points
-                x3d = np.ones((4, points.shape[1]), dtype=np.float32)
-                x3d[0, :] = points[cls,:,0]
-                x3d[1, :] = points[cls,:,1]
-                x3d[2, :] = points[cls,:,2]
+        if cfg.TRAIN.POSE_REG:
+            ax = fig.add_subplot(2, 4, 4)
+            ax.set_title('predicted poses')
+            plt.imshow(im)
+            for j in xrange(rois.shape[0]):
+                cls = int(rois[j, 1])
+                print classes[cls], rois[j, -1]
+                if cls > 0 and rois[j, -1] > cfg.TEST.DET_THRESHOLD:
+                    # extract 3D points
+                    x3d = np.ones((4, points.shape[1]), dtype=np.float32)
+                    x3d[0, :] = points[cls,:,0]
+                    x3d[1, :] = points[cls,:,1]
+                    x3d[2, :] = points[cls,:,2]
 
-                # projection
-                RT = np.zeros((3, 4), dtype=np.float32)
-                RT[:3, :3] = quat2mat(poses[j, :4])
-                RT[:, 3] = poses[j, 4:7]
-                x2d = np.matmul(intrinsic_matrix, np.matmul(RT, x3d))
-                x2d[0, :] = np.divide(x2d[0, :], x2d[2, :])
-                x2d[1, :] = np.divide(x2d[1, :], x2d[2, :])
-                plt.plot(x2d[0, :], x2d[1, :], '.', color=np.divide(class_colors[cls], 255.0), alpha=0.5)
+                    # projection
+                    RT = np.zeros((3, 4), dtype=np.float32)
+                    RT[:3, :3] = quat2mat(poses[j, :4])
+                    RT[:, 3] = poses[j, 4:7]
+                    x2d = np.matmul(intrinsic_matrix, np.matmul(RT, x3d))
+                    x2d[0, :] = np.divide(x2d[0, :], x2d[2, :])
+                    x2d[1, :] = np.divide(x2d[1, :], x2d[2, :])
+                    plt.plot(x2d[0, :], x2d[1, :], '.', color=np.divide(class_colors[cls], 255.0), alpha=0.5)
 
         # show predicted vertex targets
         vertex_target = vertex_pred[0, :, :, :]
