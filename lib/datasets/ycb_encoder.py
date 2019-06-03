@@ -149,36 +149,36 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         print('depth for rendering:')
         print(self.render_depths)
 
-        self.lb_shift = -5.0
-        self.ub_shift = 5.0
-        self.lb_scale = 0.975
-        self.ub_scale = 1.025
+        self.lb_shift = -margin
+        self.ub_shift = margin
+        self.lb_scale = 0.8
+        self.ub_scale = 1.2
 
 
     def _render_item(self):
 
-        height = cfg.TRAIN.SYN_HEIGHT
-        width = cfg.TRAIN.SYN_WIDTH
+        image_target_tensor = torch.cuda.FloatTensor(self._height, self._width, 4).detach()
+        seg_target_tensor = torch.cuda.FloatTensor(self._height, self._width, 4).detach()
+        image_tensor = torch.cuda.FloatTensor(self._height, self._width, 4).detach()
+        seg_tensor = torch.cuda.FloatTensor(self._height, self._width, 4).detach()
+        qt = np.zeros((7, ), dtype=np.float32)
+        if cfg.MODE == 'TEST' and cfg.TEST.BUILD_CODEBOOK:
+            interval = 0
+        else:
+            interval = cfg.TRAIN.UNIFORM_POSE_INTERVAL
+
+        # initialize renderer
         fx = self._intrinsic_matrix[0, 0]
         fy = self._intrinsic_matrix[1, 1]
         px = self._intrinsic_matrix[0, 2]
         py = self._intrinsic_matrix[1, 2]
         zfar = 6.0
         znear = 0.01
-        qt = np.zeros((7, ), dtype=np.float32)
-        image_target_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
-        image_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
-        seg_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
-        cfg.renderer.set_projection_matrix(width, height, fx, fy, px, py, znear, zfar)
-        classes = np.array(cfg.TRAIN.CLASSES)
-        if cfg.TEST.BUILD_CODEBOOK:
-            interval = 0
-        else:
-            interval = cfg.TRAIN.UNIFORM_POSE_INTERVAL
+        cfg.renderer.set_projection_matrix(self._width, self._height, fx, fy, px, py, znear, zfar)
 
-        # sample target object
+        # sample target object (train one object only)
         cls_indexes = []
-        cls_target = np.random.randint(len(cfg.TRAIN.CLASSES), size=1)[0]
+        cls_target = 0
         cls_indexes.append(cfg.TRAIN.CLASSES[cls_target]-1)
 
         # sample target pose
@@ -204,21 +204,25 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         cfg.renderer.set_poses(poses_all)
         cfg.renderer.set_light_pos([0, 0, 0])
         cfg.renderer.set_light_color([1.0, 1.0, 1.0])
-        cfg.renderer.render(cls_indexes, image_target_tensor, seg_tensor)
+        cfg.renderer.render(cls_indexes, image_target_tensor, seg_target_tensor)
         image_target_tensor = image_target_tensor.flip(0)
         image_target_tensor = image_target_tensor[:, :, (2, 1, 0)]
-        seg_tensor = seg_tensor.flip(0)
-        seg = torch.sum(seg_tensor[:, :, :3], dim=2)
+        seg_target_tensor = seg_target_tensor.flip(0)
+        seg = torch.sum(seg_target_tensor[:, :, :3], dim=2)
         mask_background = (seg == 0)
         image_target_tensor[mask_background, :] = 0.5
         image_target_tensor = torch.clamp(image_target_tensor, min=0.0, max=1.0)
-        mask = (seg != 0).cpu().numpy()
+        seg_target = seg_target_tensor[:,:,2] + 256*seg_target_tensor[:,:,1] + 256*256*seg_target_tensor[:,:,0]
+        seg_target = seg_target.cpu().numpy()
 
-        if np.random.rand(1) < 0.3 and cfg.TEST.BUILD_CODEBOOK == False:
+        # render input image
+        if cfg.MODE == 'TRAIN' or cfg.TEST.BUILD_CODEBOOK == False:
+
             # sample an occluder
-            cls_indexes.append(0)
-            poses_all.append(np.zeros((7, ), dtype=np.float32))
-            while 1:
+            if np.random.rand(1) < 0.3:
+
+                cls_indexes.append(0)
+                poses_all.append(np.zeros((7, ), dtype=np.float32))
 
                 ind = np.random.randint(self._num_classes_other, size=1)[0]
                 cls_occ = self._classes_other[ind]
@@ -253,50 +257,32 @@ class YCBEncoder(data.Dataset, datasets.imdb):
                 poses_all[1] = qt
                 cfg.renderer.set_poses(poses_all)
 
-                # rendering
-                cfg.renderer.set_light_pos(np.random.uniform(-0.5, 0.5, 3))
-                intensity = np.random.uniform(0.8, 2)
-                light_color = intensity * np.random.uniform(0.9, 1.1, 3)
-                cfg.renderer.set_light_color(light_color)
-                cfg.renderer.render(cls_indexes, image_tensor, seg_tensor)
+            # rendering
+            # light pose
+            theta = np.random.uniform(-np.pi/2, np.pi/2)
+            phi = np.random.uniform(0, np.pi/2)
+            r = np.random.uniform(0.25, 3.0)
+            light_pos = [r * np.sin(theta) * np.sin(phi), r * np.cos(phi) + np.random.uniform(-2, 2), r * np.cos(theta) * np.sin(phi)]
+            cfg.renderer.set_light_pos(light_pos)
 
-                seg_tensor = seg_tensor.flip(0)
-                im_label = seg_tensor.cpu().numpy()
-                im_label = im_label[:, :, (2, 1, 0)] * 255
-                im_label = np.round(im_label).astype(np.uint8)
-                im_label = np.clip(im_label, 0, 255)
-                im_label_only, im_label = self.process_label_image(im_label)
+            # light color
+            intensity = np.random.uniform(0.3, 3.0)
+            light_color = intensity * np.random.uniform(0.2, 1.8, 3)
+            cfg.renderer.set_light_color(light_color)
+            cfg.renderer.render(cls_indexes, image_tensor, seg_tensor)
 
-                # compute occlusion percentage
-                mask_target = (im_label == cls_indexes[0]+1).astype(np.int32)
+            seg_tensor = seg_tensor.flip(0)
+            seg = seg_tensor[:,:,2] + 256*seg_tensor[:,:,1] + 256*256*seg_tensor[:,:,0]
+            seg_input = seg.clone().cpu().numpy()
+            
+            non_occluded = np.sum(np.logical_and(seg_target > 0, seg_target == seg_input)).astype(np.float)
+            occluded_ratio = 1 - non_occluded / np.sum(seg_target>0).astype(np.float)
 
-                per_occ = 1.0 - np.sum(mask & mask_target) / np.sum(mask)
-                if per_occ < 0.5:
-                    break
-        else:
+            if occluded_ratio > 0.9:
+                image_target_tensor[:] = 0.5
 
-            if cfg.TEST.BUILD_CODEBOOK:
-                im_label = seg_tensor.cpu().numpy()
-                im_label = im_label[:, :, (2, 1, 0)] * 255
-                im_label = np.round(im_label).astype(np.uint8)
-                im_label = np.clip(im_label, 0, 255)
-                im_label_only, im_label = self.process_label_image(im_label)
-            else:
-                # rendering
-                cfg.renderer.set_light_pos(np.random.uniform(-0.5, 0.5, 3))
-                intensity = np.random.uniform(0.8, 2)
-                light_color = intensity * np.random.uniform(0.9, 1.1, 3)
-                cfg.renderer.set_light_color(light_color)
-                cfg.renderer.render(cls_indexes, image_tensor, seg_tensor)
-
-                seg_tensor = seg_tensor.flip(0)
-                im_label = seg_tensor.cpu().numpy()
-                im_label = im_label[:, :, (2, 1, 0)] * 255
-                im_label = np.round(im_label).astype(np.uint8)
-                im_label = np.clip(im_label, 0, 255)
-                im_label_only, im_label = self.process_label_image(im_label)
-
-        if cfg.TEST.BUILD_CODEBOOK == False:
+            # foreground mask
+            mask = (seg != 0).unsqueeze(0).repeat((3, 1, 1)).float()
 
             # RGB to BGR order
             image_tensor = image_tensor.flip(0)
@@ -308,7 +294,7 @@ class YCBEncoder(data.Dataset, datasets.imdb):
             # affine transformation
             shift = np.float32([np.random.uniform(self.lb_shift, self.ub_shift), np.random.uniform(self.lb_shift, self.ub_shift)])
             scale = np.random.uniform(self.lb_scale, self.ub_scale)
-            affine_matrix = np.float32([[scale, 0, shift[0] / width], [0, scale, shift[1] / height]])
+            affine_matrix = np.float32([[scale, 0, shift[0] / self._width], [0, scale, shift[1] / self._height]])
 
             # chromatic transform
             if cfg.TRAIN.CHROMATIC and cfg.MODE == 'TRAIN' and np.random.rand(1) > 0.1:
@@ -322,12 +308,11 @@ class YCBEncoder(data.Dataset, datasets.imdb):
             # im is pytorch tensor in gpu
             sample = {'image_input': im_cuda.permute(2, 0, 1),
                   'image_target': image_target_tensor.permute(2, 0, 1),
-                  'image_label': torch.from_numpy(im_label).unsqueeze(2).repeat(1, 1, 3).permute(2, 0, 1).float().cuda(),
+                  'mask': mask,
                   'affine_matrix': torch.from_numpy(affine_matrix).cuda()}
         else:
             sample = {'image_input': image_target_tensor.permute(2, 0, 1),
                   'image_target': image_target_tensor.permute(2, 0, 1),
-                  'image_label': torch.from_numpy(im_label).unsqueeze(2).repeat(1, 1, 3).permute(2, 0, 1).float().cuda(),
                   'pose_target': pose_target}
 
         return sample

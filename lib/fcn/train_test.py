@@ -193,14 +193,13 @@ def train_autoencoder(train_loader, background_loader, network, optimizer, epoch
 
         # construct input
         image = sample['image_input']
-        label = sample['image_label']
+        mask = sample['mask']
         affine_matrix = sample['affine_matrix']
 
         # affine transformation
         grids = nn.functional.affine_grid(affine_matrix, image.size())
         image = nn.functional.grid_sample(image, grids)
-        label = nn.functional.grid_sample(label, grids, mode='nearest')
-        mask = (label == 0).float()
+        mask = nn.functional.grid_sample(mask, grids, mode='nearest')
 
         _, background = next(enum_background)
         if image.size(0) != background.size(0):
@@ -208,7 +207,7 @@ def train_autoencoder(train_loader, background_loader, network, optimizer, epoch
             _, background = next(enum_background)
 
         background = background.cuda()
-        inputs = image + mask * background
+        inputs = image + (1 - mask) * background
         inputs = torch.clamp(inputs, min=0.0, max=1.0)
 
         # compute output
