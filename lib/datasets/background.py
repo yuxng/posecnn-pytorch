@@ -38,26 +38,36 @@ class BackgroundDataset(data.Dataset, datasets.imdb):
 
     def load(self, filename):
 
-        background_color = cv2.imread(filename, cv2.IMREAD_UNCHANGED)
-        try:
-            # randomly crop a region as background
-            bw = background_color.shape[1]
-            bh = background_color.shape[0]
-            x1 = npr.randint(0, int(bw/3))
-            y1 = npr.randint(0, int(bh/3))
-            x2 = npr.randint(int(2*bw/3), bw)
-            y2 = npr.randint(int(2*bh/3), bh)
-            background_color = background_color[y1:y2, x1:x2]
-            background_color = cv2.resize(background_color, (self._width, self._height), interpolation=cv2.INTER_LINEAR)
-        except:
-            background_color = np.zeros((self._height, self._width, 3), dtype=np.uint8)
-            print 'bad background image'
+        if np.random.rand(1) < 0.1:
+            # constant background image
+            background_color = np.ones((self._height, self._width, 3), dtype=np.uint8)
+            color = np.random.randint(256, size=3)
+            background_color[:, :, 0] = color[0]
+            background_color[:, :, 1] = color[1]
+            background_color[:, :, 2] = color[2]
+        else:
+            background_color = cv2.imread(filename, cv2.IMREAD_UNCHANGED)
+            try:
+                # randomly crop a region as background
+                bw = background_color.shape[1]
+                bh = background_color.shape[0]
+                x1 = npr.randint(0, int(bw/3))
+                y1 = npr.randint(0, int(bh/3))
+                x2 = npr.randint(int(2*bw/3), bw)
+                y2 = npr.randint(int(2*bh/3), bh)
+                background_color = background_color[y1:y2, x1:x2]
+                background_color = cv2.resize(background_color, (self._width, self._height), interpolation=cv2.INTER_LINEAR)
+            except:
+                background_color = np.zeros((self._height, self._width, 3), dtype=np.uint8)
+                print 'bad background image'
 
-        if len(background_color.shape) != 3:
-            background_color = np.zeros((self._height, self._width, 3), dtype=np.uint8)
-            print 'bad background_color image'
+            if len(background_color.shape) != 3:
+                background_color = np.zeros((self._height, self._width, 3), dtype=np.uint8)
+                print 'bad background_color image'
+            if np.random.rand(1) > 0.1:
+                background_color = chromatic_transform(background_color)
 
-        background = chromatic_transform(background_color)
-        background = add_noise(background)
+        if np.random.rand(1) > 0.1:
+            background_color = add_noise(background_color)
         background_color = background_color.transpose(2, 0, 1).astype(np.float32) / 255.0
         return background_color

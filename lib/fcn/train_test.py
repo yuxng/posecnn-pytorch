@@ -198,7 +198,7 @@ def train_autoencoder(train_loader, background_loader, network, optimizer, epoch
 
         # affine transformation
         grids = nn.functional.affine_grid(affine_matrix, image.size())
-        image = nn.functional.grid_sample(image, grids)
+        image = nn.functional.grid_sample(image, grids, padding_mode='border')
         mask = nn.functional.grid_sample(mask, grids, mode='nearest')
 
         _, background = next(enum_background)
@@ -214,7 +214,7 @@ def train_autoencoder(train_loader, background_loader, network, optimizer, epoch
         out_images, embeddings = network(inputs)
 
         if cfg.TRAIN.VISUALIZE:
-            _vis_minibatch_autoencoder(inputs, background, sample, out_images)
+            _vis_minibatch_autoencoder(inputs, sample, out_images)
 
         # reconstruction loss
         targets = sample['image_target']
@@ -283,11 +283,9 @@ def render_images(dataset, poses):
     return im_output
 
 
-def _vis_minibatch_autoencoder(inputs, background, sample, outputs, im_render=None):
+def _vis_minibatch_autoencoder(inputs, sample, outputs, im_render=None):
 
     im_blob = inputs.cpu().numpy()
-    if cfg.TEST.BUILD_CODEBOOK == False:
-        background = background.cpu().numpy()
     targets = sample['image_target'].cpu().numpy()
     im_output = outputs.cpu().detach().numpy()
 
@@ -363,14 +361,13 @@ def test_autoencoder(test_loader, background_loader, network, output_dir):
         image = sample['image_input']
 
         if cfg.TEST.BUILD_CODEBOOK == False:
-            label = sample['image_label']
+            mask = sample['mask']
             affine_matrix = sample['affine_matrix']
 
             # affine transformation
             grids = nn.functional.affine_grid(affine_matrix, image.size())
-            image = nn.functional.grid_sample(image, grids)
-            label = nn.functional.grid_sample(label, grids, mode='nearest')
-            mask = (label == 0).float()
+            image = nn.functional.grid_sample(image, grids, padding_mode='border')
+            mask = nn.functional.grid_sample(mask, grids, mode='nearest')
 
             _, background = next(enum_background)
             if image.size(0) != background.size(0):
@@ -378,7 +375,7 @@ def test_autoencoder(test_loader, background_loader, network, output_dir):
                 _, background = next(enum_background)
 
             background = background.cuda()
-            inputs = image + mask * background
+            inputs = image + (1 - mask) * background
             inputs = torch.clamp(inputs, min=0.0, max=1.0)
         else:
             inputs = image
