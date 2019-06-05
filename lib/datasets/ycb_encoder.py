@@ -314,7 +314,7 @@ class YCBEncoder(data.Dataset, datasets.imdb):
             sample = {'image_input': im_cuda.permute(2, 0, 1),
                   'image_target': image_target_tensor.permute(2, 0, 1),
                   'mask': mask,
-                  'index_euler': index_euler,
+                  'index_euler': torch.from_numpy(np.array([index_euler])),
                   'affine_matrix': torch.from_numpy(affine_matrix).cuda()}
         else:
             sample = {'image_input': image_target_tensor.permute(2, 0, 1),

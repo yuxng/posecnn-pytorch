@@ -220,7 +220,7 @@ def train_autoencoder(train_loader, background_loader, network, optimizer, epoch
 
         # record the losses for each euler pose
         index_euler = sample['index_euler']
-        train_loader.dataset._losses_pose[index_euler] = losses_euler
+        train_loader.dataset._losses_pose[torch.flatten(index_euler)] = losses_euler
 
         if cfg.TRAIN.VISUALIZE:
             _vis_minibatch_autoencoder(inputs, sample, out_images)
