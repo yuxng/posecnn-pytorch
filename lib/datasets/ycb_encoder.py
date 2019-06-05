@@ -194,6 +194,7 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         # use hard pose
         if (sample_index + 1) % cfg.TRAIN.IMS_PER_BATCH == 0:
             loss, index_euler = torch.max(self._losses_pose, 0)
+            index_euler = index_euler.cpu().detach().numpy()
 
         yaw = self.eulers[index_euler][0] + interval * np.random.randn()
         pitch = self.eulers[index_euler][1] + interval * np.random.randn()
