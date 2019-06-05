@@ -56,14 +56,15 @@ def loss_cross_entropy(scores, labels):
     return loss
 
 
-def BootstrapedMSEloss(pred, target, K=20):
+def BootstrapedMSEloss(pred, target, K=20, factor=10):
     assert pred.dim() == target.dim(), "inconsistent dimensions"
     batch_size = pred.size(0)
     diff = torch.sum((target - pred)**2, 1)
     diff = diff.view(batch_size, -1)
     diff = torch.topk(diff, K, dim=1)
-    loss = diff[0].mean()
-    return loss
+    loss = factor * diff[0].mean()
+    loss_batch = factor * torch.mean(diff[0], dim=1)
+    return loss, loss_batch
 
 
 def smooth_l1_loss(vertex_pred, vertex_targets, vertex_weights, sigma=1.0):
@@ -213,12 +214,16 @@ def train_autoencoder(train_loader, background_loader, network, optimizer, epoch
         # compute output
         out_images, embeddings = network(inputs)
 
-        if cfg.TRAIN.VISUALIZE:
-            _vis_minibatch_autoencoder(inputs, sample, out_images)
-
         # reconstruction loss
         targets = sample['image_target']
-        loss = BootstrapedMSEloss(out_images, targets, cfg.TRAIN.BOOSTRAP_PIXELS)
+        loss, losses_euler = BootstrapedMSEloss(out_images, targets, cfg.TRAIN.BOOSTRAP_PIXELS)
+
+        # record the losses for each euler pose
+        index_euler = sample['index_euler']
+        train_loader.dataset._losses_pose[index_euler] = losses_euler
+
+        if cfg.TRAIN.VISUALIZE:
+            _vis_minibatch_autoencoder(inputs, sample, out_images)
 
         # record loss
         losses.update(loss.data, inputs.size(0))
@@ -405,7 +410,7 @@ def test_autoencoder(test_loader, background_loader, network, output_dir):
                 im_render = render_images(test_loader.dataset, poses)
 
         if cfg.TEST.VISUALIZE:
-            _vis_minibatch_autoencoder(inputs, background, sample, out_images, im_render)
+            _vis_minibatch_autoencoder(inputs, sample, out_images, im_render)
 
         # measure elapsed time
         batch_time.update(time.time() - end)

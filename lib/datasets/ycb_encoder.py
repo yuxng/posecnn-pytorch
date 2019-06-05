@@ -135,6 +135,7 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         if cfg.MODE == 'TRAIN' or (cfg.MODE == 'TEST' and cfg.TEST.SYNTHESIZE == True):
             self._build_background_images()
         self._build_uniform_poses()
+        self._losses_pose = torch.cuda.FloatTensor(self._size).detach()
 
         assert os.path.exists(self._ycb_object_path), \
                 'ycb_object path does not exist: {}'.format(self._ycb_object_path)
@@ -155,7 +156,7 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         self.ub_scale = 1.2
 
 
-    def _render_item(self):
+    def _render_item(self, sample_index):
 
         image_target_tensor = torch.cuda.FloatTensor(self._height, self._width, 4).detach()
         seg_target_tensor = torch.cuda.FloatTensor(self._height, self._width, 4).detach()
@@ -188,9 +189,15 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         if self.pose_indexes[cls] >= len(self.pose_lists[cls]):
             self.pose_indexes[cls] = 0
             self.pose_lists[cls] = np.random.permutation(np.arange(len(self.eulers)))
-        yaw = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][0] + interval * np.random.randn()
-        pitch = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][1] + interval * np.random.randn()
-        roll = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][2] + interval * np.random.randn()
+        index_euler = self.pose_lists[cls][self.pose_indexes[cls]]
+
+        # use hard pose
+        if (sample_index + 1) % cfg.TRAIN.IMS_PER_BATCH == 0:
+            loss, index_euler = torch.max(self._losses_pose, 0)
+
+        yaw = self.eulers[index_euler][0] + interval * np.random.randn()
+        pitch = self.eulers[index_euler][1] + interval * np.random.randn()
+        roll = self.eulers[index_euler][2] + interval * np.random.randn()
         qt[3:] = euler2quat(roll * math.pi / 180.0, pitch * math.pi / 180.0, yaw * math.pi / 180.0, 'syxz')
         self.pose_indexes[cls] += 1
 
@@ -208,9 +215,6 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         image_target_tensor = image_target_tensor.flip(0)
         image_target_tensor = image_target_tensor[:, :, (2, 1, 0)]
         seg_target_tensor = seg_target_tensor.flip(0)
-        seg = torch.sum(seg_target_tensor[:, :, :3], dim=2)
-        mask_background = (seg == 0)
-        image_target_tensor[mask_background, :] = 0.5
         image_target_tensor = torch.clamp(image_target_tensor, min=0.0, max=1.0)
         seg_target = seg_target_tensor[:,:,2] + 256*seg_target_tensor[:,:,1] + 256*256*seg_target_tensor[:,:,0]
         seg_target = seg_target.cpu().numpy()
@@ -278,8 +282,8 @@ class YCBEncoder(data.Dataset, datasets.imdb):
             non_occluded = np.sum(np.logical_and(seg_target > 0, seg_target == seg_input)).astype(np.float)
             occluded_ratio = 1 - non_occluded / np.sum(seg_target>0).astype(np.float)
 
-            if occluded_ratio > 0.9:
-                image_target_tensor[:] = 0.5
+            if occluded_ratio > 0.8:
+                image_target_tensor[:] = 0.0
 
             # foreground mask
             mask = (seg != 0).unsqueeze(0).repeat((3, 1, 1)).float()
@@ -309,6 +313,7 @@ class YCBEncoder(data.Dataset, datasets.imdb):
             sample = {'image_input': im_cuda.permute(2, 0, 1),
                   'image_target': image_target_tensor.permute(2, 0, 1),
                   'mask': mask,
+                  'index_euler': index_euler,
                   'affine_matrix': torch.from_numpy(affine_matrix).cuda()}
         else:
             sample = {'image_input': image_target_tensor.permute(2, 0, 1),
@@ -320,7 +325,7 @@ class YCBEncoder(data.Dataset, datasets.imdb):
 
     def __getitem__(self, index):
 
-        return self._render_item()
+        return self._render_item(index)
 
 
     def __len__(self):
