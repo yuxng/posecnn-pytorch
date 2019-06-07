@@ -119,3 +119,4 @@ for i in range(len(classes)):
         f.write('    "portMappings": []\n')
         f.write('  }\n')
         f.write('}\n')
+    f.close()
