@@ -98,7 +98,7 @@ for i in range(len(classes)):
     with open(filename, 'w') as f:
         f.write('{\n')
         f.write('  "jobDefinition": {\n')
-        f.write('    "name": "pytorch ycb encoder ' + cls + '",\n')
+        f.write('    "name": "encoder ' + cls + '",\n')
         f.write('    "clusterId": 425,\n')
         f.write('    "dockerImage": "nvidian_general/posecnn-pytorch:0.2",\n')
         f.write('    "jobType": "BATCH",\n')
