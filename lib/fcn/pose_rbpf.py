@@ -57,7 +57,7 @@ class PoseRBPF:
         intrinsics = self.dataset._intrinsic_matrix
 
         # sample around the center of bounding box
-        bound = 5
+        bound = roi_size * 0.1
         uv_h = np.array([uv_init[0], uv_init[1], 1])
         uv_h = np.repeat(np.expand_dims(uv_h, axis=0), n_init_samples, axis=0)
         uv_h[:, :2] += np.random.uniform(-bound, bound, (n_init_samples, 2))
@@ -66,7 +66,7 @@ class PoseRBPF:
 
         # sample around z
         z_init = (128 - 40) * render_dist / roi_size * intrinsics[0, 0] / cfg.TRAIN.FU
-        z = np.random.uniform(z_init - 0.2, z_init + 0.2, (n_init_samples, 1))
+        z = np.random.uniform(0.8 * z_init, 1.2 * z_init, (n_init_samples, 1))
 
         # evaluate translation
         distribution, out_images = self.evaluate_particles(autoencoder, codebook, codes_gpu, image, intrinsics, uv_h, z, render_dist, 0.1)
@@ -81,7 +81,6 @@ class PoseRBPF:
 
         pose[4:] = self.back_project(uv_star, intrinsics, z_star)
         pose[:4] = codebook['quaternions'][index_star[1], :]
-        print(pose)
 
         im_render = self.render_image(self.dataset, cls, pose)
         self.visualize(image, im_render, out_images[index_star[0]], box_center, box_size)

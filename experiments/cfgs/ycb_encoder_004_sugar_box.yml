@@ -11,15 +11,15 @@ TRAIN:
   SCALES_BASE: !!python/tuple [1.0]
   IMS_PER_BATCH: 128
   NUM_UNITS: 128
-  CLASSES: !!python/tuple [4]
-  SNAPSHOT_INFIX: ycb_object
-  SNAPSHOT_EPOCHS: 50
+  CLASSES: !!python/tuple [3]
+  SNAPSHOT_INFIX: ycb_object_004_sugar_box
+  SNAPSHOT_EPOCHS: 20
   SNAPSHOT_PREFIX: encoder
   USE_FLIPPED: False
   CHROMATIC: True
   ADD_NOISE: True
   VISUALIZE: False
-  VERTEX_REG: True
+  BOOSTRAP_PIXELS: 2000
   # synthetic data
   UNIFORM_POSE_INTERVAL: 5
   SYNTHESIZE: True
@@ -30,8 +30,8 @@ TRAIN:
   SYN_WIDTH: 128
   SYN_HEIGHT: 128
 TEST:
-  SINGLE_FRAME: True
   SCALES_BASE: !!python/tuple [1.0]
-  VISUALIZE: False
+  IMS_PER_BATCH: 256
+  VISUALIZE: True
   SYNTHESIZE: True
-  ROS_CAMERA: camera
+  BUILD_CODEBOOK: False

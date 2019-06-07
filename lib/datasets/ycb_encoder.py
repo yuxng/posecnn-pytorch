@@ -16,30 +16,25 @@ from transforms3d.quaternions import *
 from transforms3d.euler import *
 from scipy.optimize import minimize
 from utils.blob import pad_im, chromatic_transform, add_noise, add_noise_cuda, add_noise_depth_cuda
+from utils.se3 import *
 
 
-def get_bb3D(extent):
+def get_bb3D(points):
 
-    orders = np.array([[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]])
-    num = orders.shape[0]
-    bb = np.zeros((3, 8 * num), dtype=np.float32)
-    
-    for i in range(num):
-        xi = orders[i, 0]
-        yi = orders[i, 1]
-        zi = orders[i, 2]
-        xHalf = extent[xi] * 0.5
-        yHalf = extent[yi] * 0.5
-        zHalf = extent[zi] * 0.5
-        bb[:, i*num+0] = [xHalf, yHalf, zHalf]
-        bb[:, i*num+1] = [-xHalf, yHalf, zHalf]
-        bb[:, i*num+2] = [xHalf, -yHalf, zHalf]
-        bb[:, i*num+3] = [-xHalf, -yHalf, zHalf]
-        bb[:, i*num+4] = [xHalf, yHalf, -zHalf]
-        bb[:, i*num+5] = [-xHalf, yHalf, -zHalf]
-        bb[:, i*num+6] = [xHalf, -yHalf, -zHalf]
-        bb[:, i*num+7] = [-xHalf, -yHalf, -zHalf]
-    return bb
+    num = points.shape[1]
+    bb_all = np.zeros((3, num * 864), dtype=np.float32)
+    count = 0
+
+    interval = 30
+    for yaw in range(-180, 180, interval):
+        for pitch in range(-90, 90, interval):
+            for roll in range(-180, 180, interval):
+                qt = euler2quat(roll * math.pi / 180.0, pitch * math.pi / 180.0, yaw * math.pi / 180.0, 'syxz')
+                R = quat2mat(qt)
+                bb_all[:, num*count:num*count+num] = np.matmul(R, points)
+                count += 1
+
+    return bb_all
 
 
 def optimize_depths(width, height, points, intrinsic_matrix):
@@ -50,7 +45,7 @@ def optimize_depths(width, height, points, intrinsic_matrix):
 
     # optimization
     x0 = 2.0
-    res = minimize(objective_depth, x0, args=(width, height, x3d, intrinsic_matrix), method='nelder-mead', options={'xtol': 1e-8, 'disp': False})
+    res = minimize(objective_depth, x0, args=(width, height, x3d, intrinsic_matrix), method='nelder-mead', options={'xtol': 1e-1, 'disp': False})
     return res.x
 
 
@@ -71,7 +66,19 @@ def objective_depth(x, width, height, x3d, intrinsic_matrix):
     roi_pred[3] = np.max(x2d[1, :])
     w = roi_pred[2] - roi_pred[0]
     h = roi_pred[3] - roi_pred[1]
-    return np.abs(w * h - width * height)
+
+    '''
+    import matplotlib.pyplot as plt
+    fig = plt.figure()
+    ax = fig.add_subplot(1, 1, 1)
+    plt.scatter(x2d[0, :], x2d[1, :])
+    print(width, height)
+    print(w, h)
+    plt.show()
+    '''
+
+    return np.abs(w - width)
+    # return np.abs(w * h - width * height)
 
 
 class YCBEncoder(data.Dataset, datasets.imdb):
@@ -108,6 +115,7 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         self._num_classes = len(self._classes)
         self._class_colors = [self._class_colors_all[i] for i in cfg.TRAIN.CLASSES]
         self._extents = self._extents_all[cfg.TRAIN.CLASSES]
+        self._points = self._load_object_points()
 
         # other classes as occluder
         self._classes_other = []
@@ -144,8 +152,7 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         self.render_depths = np.zeros((self._extents.shape[0], ), dtype=np.float32)
         margin = 20
         for i in range(self._extents.shape[0]):
-            extent = self._extents[i, :]
-            points = get_bb3D(extent)
+            points = get_bb3D(np.transpose(self._points[i]))
             self.render_depths[i] = optimize_depths(self._width - margin, self._height - margin, points, self._intrinsic_matrix)
         print('depth for rendering:')
         print(self.render_depths)
@@ -350,6 +357,18 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         extents[1:, :] = np.loadtxt(extent_file)
 
         return extents
+
+
+    def _load_object_points(self):
+
+        points = [[] for _ in xrange(len(self._classes))]
+        for i in xrange(len(self._classes)):
+            point_file = os.path.join(self._ycb_object_path, 'models', self._classes[i], 'points.xyz')
+            print point_file
+            assert os.path.exists(point_file), 'Path does not exist: {}'.format(point_file)
+            points[i] = np.loadtxt(point_file)
+
+        return points
 
 
     def process_label_image(self, label_image):
