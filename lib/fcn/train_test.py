@@ -79,12 +79,14 @@ def smooth_l1_loss(vertex_pred, vertex_targets, vertex_weights, sigma=1.0):
     return loss
 
 
-def train(train_loader, network, optimizer, epoch):
+def train(train_loader, background_loader, network, optimizer, epoch):
 
     batch_time = AverageMeter()
     losses = AverageMeter()
 
     epoch_size = len(train_loader)
+    enum_background = enumerate(background_loader)
+    pixel_mean = torch.from_numpy(cfg.PIXEL_MEANS.transpose(2, 0, 1) / 255.0).float()
 
     # switch to train mode
     network.train()
@@ -99,6 +101,20 @@ def train(train_loader, network, optimizer, epoch):
             inputs = sample['image_color']
         elif cfg.INPUT == 'RGBD':
             inputs = torch.cat((sample['image_color'], sample['image_depth']), dim=1)
+        im_info = sample['im_info']
+
+        # add background
+        mask = sample['mask']
+        _, background = next(enum_background)
+        if inputs.size(0) != background.size(0):
+            enum_background = enumerate(background_loader)
+            _, background = next(enum_background)
+        background = background.cuda()
+
+        for j in range(inputs.size(0)):
+            is_syn = im_info[j, -1]
+            if is_syn or np.random.rand(1) > 0.5:
+                inputs[j] = mask[j] * inputs[j] + (1 - mask[j]) * background[j]
 
         labels = sample['label'].cuda()
         meta_data = sample['meta_data'].cuda()
@@ -985,8 +1001,6 @@ def _vis_minibatch(inputs, labels, vertex_targets, sample, class_colors):
     label_blob = labels.cpu().numpy()
     gt_poses = sample['poses'].numpy()
     meta_data_blob = sample['meta_data'].numpy()
-    metadata = meta_data_blob[0, :]
-    intrinsic_matrix = metadata[:9].reshape((3,3))
     gt_boxes = sample['gt_boxes'].numpy()
     extents = sample['extents'][0, :, :].numpy()
 
@@ -1004,6 +1018,9 @@ def _vis_minibatch(inputs, labels, vertex_targets, sample, class_colors):
         fig = plt.figure()
         start = 1
 
+        metadata = meta_data_blob[i, :]
+        intrinsic_matrix = metadata[:9].reshape((3,3))
+
         # show image
         if cfg.INPUT == 'COLOR' or cfg.INPUT == 'RGBD':
             if cfg.INPUT == 'COLOR':
@@ -1013,6 +1030,7 @@ def _vis_minibatch(inputs, labels, vertex_targets, sample, class_colors):
             im = im.transpose((1, 2, 0)) * 255.0
             im += cfg.PIXEL_MEANS
             im = im[:, :, (2, 1, 0)]
+            im = np.clip(im, 0, 255)
             im = im.astype(np.uint8)
             ax = fig.add_subplot(m, n, 1)
             plt.imshow(im)
@@ -1259,7 +1277,7 @@ def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, sample, points
 
             ax.set_title('predicted boxes')
             for j in range(rois.shape[0]):
-                if rois[j, 0] != i:
+                if rois[j, 0] != i or rois[j, -1] < cfg.TEST.DET_THRESHOLD:
                     continue
                 cls = rois[j, 1]
                 x1 = rois[j, 2]
@@ -1315,7 +1333,7 @@ def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, sample, points
             else:
                 plt.imshow(im_depth[2, :, :])
             for j in xrange(rois.shape[0]):
-                if rois[j, 0] != i:
+                if rois[j, 0] != i or rois[j, -1] < cfg.TEST.DET_THRESHOLD:
                     continue
                 cls = int(rois[j, 1])
                 print classes[cls], rois[j, -1]

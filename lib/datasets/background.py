@@ -25,8 +25,10 @@ class BackgroundDataset(data.Dataset, datasets.imdb):
                 self.files.append(os.path.join(background_dir, filename))
 
         self.num = len(self.files)
+        self.subtract_mean = cfg.TRAIN.SYN_BACKGROUND_SUBTRACT_MEAN
         self._height = cfg.TRAIN.SYN_HEIGHT
         self._width = cfg.TRAIN.SYN_WIDTH
+        self._pixel_mean = cfg.PIXEL_MEANS
         print('{} background images'.format(self.num))
 
 
@@ -69,5 +71,8 @@ class BackgroundDataset(data.Dataset, datasets.imdb):
 
         if np.random.rand(1) > 0.1:
             background_color = add_noise(background_color)
-        background_color = background_color.transpose(2, 0, 1).astype(np.float32) / 255.0
+        background_color = background_color.astype(np.float32)
+        if self.subtract_mean:
+            background_color -= self._pixel_mean
+        background_color = background_color.transpose(2, 0, 1) / 255.0
         return background_color

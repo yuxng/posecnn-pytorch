@@ -97,10 +97,9 @@ if __name__ == '__main__':
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=cfg.TRAIN.IMS_PER_BATCH, shuffle=True, num_workers=0)
     print 'Use dataset `{:s}` for training'.format(dataset.name)
 
-    if args.network_name == 'autoencoder':
-        background_dataset = get_dataset('background_pascal')
-        background_loader = torch.utils.data.DataLoader(background_dataset, batch_size=cfg.TRAIN.IMS_PER_BATCH,
-                                                     shuffle=True, num_workers=8)
+    background_dataset = get_dataset('background_pascal')
+    background_loader = torch.utils.data.DataLoader(background_dataset, batch_size=cfg.TRAIN.IMS_PER_BATCH,
+                                                    shuffle=True, num_workers=8)
 
     # overwrite intrinsics
     if len(cfg.INTRINSICS) > 0:
@@ -156,7 +155,7 @@ if __name__ == '__main__':
         if args.network_name == 'autoencoder':
             train_autoencoder(dataloader, background_loader, network, optimizer, epoch)
         else:
-            train(dataloader, network, optimizer, epoch)
+            train(dataloader, background_loader, network, optimizer, epoch)
 
         # save checkpoint
         if (epoch+1) % cfg.TRAIN.SNAPSHOT_EPOCHS == 0 or epoch == args.epochs - 1:

@@ -102,7 +102,7 @@ def chromatic_transform(im, label=None, d_h=None, d_s=None, d_l=None):
     return new_im
 
 
-def add_noise(image):
+def add_noise(image, level = 0.1):
 
     # random number
     r = np.random.rand(1)
@@ -111,8 +111,8 @@ def add_noise(image):
     if r < 0.9:
         row,col,ch= image.shape
         mean = 0
-        var = np.random.rand(1) * 0.3 * 256
-        sigma = var**0.5
+        noise_level = random.uniform(0, level)
+        sigma = np.random.rand(1) * noise_level * 256
         gauss = sigma * np.random.randn(row,col) + mean
         gauss = np.repeat(gauss[:, :, np.newaxis], ch, axis=2)
         noisy = image + gauss
@@ -131,13 +131,13 @@ def add_noise(image):
 
     return noisy.astype('uint8')
 
-def add_noise_depth_cuda(image):
-    noise_level = random.uniform(0, 0.05)
+def add_noise_depth_cuda(image, level = 0.1):
+    noise_level = random.uniform(0, level)
     gauss = torch.randn_like(image) * noise_level
     noisy = image + gauss
     return noisy
 
-def add_noise_cuda(image, level = 0.05):
+def add_noise_cuda(image, level = 0.1):
     # random number
     r = np.random.rand(1)
 

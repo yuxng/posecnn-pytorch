@@ -207,6 +207,10 @@ class YCBObject(data.Dataset, datasets.imdb):
         if pc_tensor is not None:
             pc_tensor = pc_tensor.flip(0)
 
+        # foreground mask
+        seg = seg_tensor[:,:,2] + 256*seg_tensor[:,:,1] + 256*256*seg_tensor[:,:,0]
+        mask = (seg != 0).unsqueeze(0).repeat((3, 1, 1)).float()
+
         # RGB to BGR order
         im = image_tensor.cpu().numpy()
         im = np.clip(im, 0, 1)
@@ -230,70 +234,6 @@ class YCBObject(data.Dataset, datasets.imdb):
             centers[i, 0] = rcenters[i][1] * width
             centers[i, 1] = rcenters[i][0] * height
         centers = centers[:num_target, :]
-
-        # add background to the image
-        ind = np.random.randint(len(self._backgrounds_color), size=1)[0]
-        filename = self._backgrounds_color[ind]
-        background_color = cv2.imread(filename, cv2.IMREAD_UNCHANGED)
-
-        if cfg.INPUT == 'DEPTH':
-            ind = np.random.randint(len(self._backgrounds_depth), size=1)[0]
-
-        if cfg.INPUT == 'DEPTH' or cfg.INPUT == 'RGBD':
-            filename = self._backgrounds_depth[ind]
-            background_depth = cv2.imread(filename, cv2.IMREAD_UNCHANGED)
-
-        try:
-            # randomly crop a region as background
-            bw = background_color.shape[1]
-            bh = background_color.shape[0]
-            x1 = npr.randint(0, int(bw/3))
-            y1 = npr.randint(0, int(bh/3))
-            x2 = npr.randint(int(2*bw/3), bw)
-            y2 = npr.randint(int(2*bh/3), bh)
-            background_color = background_color[y1:y2, x1:x2]
-            background_color = cv2.resize(background_color, (self._width, self._height), interpolation=cv2.INTER_LINEAR)
-
-            if cfg.INPUT == 'DEPTH' or cfg.INPUT == 'RGBD':
-                background_depth = background_depth[y1:y2, x1:x2]
-                background_depth = cv2.resize(background_depth, (self._width, self._height), interpolation=cv2.INTER_LINEAR)
-                background_depth = self.backproject(background_depth, self._intrinsic_matrix, 1000.0)
-
-        except:
-            background_color = np.zeros((self._height, self._width, 3), dtype=np.uint8)
-            if cfg.INPUT == 'DEPTH' or cfg.INPUT == 'RGBD':
-                background_depth = np.zeros((self._height, self._width, 3), dtype=np.uint8)
-            print 'bad background image'
-
-        if len(background_color.shape) != 3:
-            background_color = np.zeros((self._height, self._width, 3), dtype=np.uint8)
-            print 'bad background_color image'
-
-        if cfg.INPUT == 'DEPTH' or cfg.INPUT == 'RGBD':
-            if len(background_depth.shape) != 3:
-                background_depth = np.zeros((self._height, self._width, 3), dtype=np.uint8)
-                print 'bad depth background image'
-
-        # paste objects on background
-        I = np.where(im_label_all == 0)
-        im[I[0], I[1], :] = background_color[I[0], I[1], :3]
-        im = im.astype(np.uint8)
-        margin = 10
-        for i in range(num):
-            I = np.where(im_label_all == cls_indexes[i]+1)
-            if len(I[0]) > 0:
-                y1 = np.max((np.round(np.min(I[0])) - margin, 0))
-                x1 = np.max((np.round(np.min(I[1])) - margin, 0))
-                y2 = np.min((np.round(np.max(I[0])) + margin, self._height-1))
-                x2 = np.min((np.round(np.max(I[1])) + margin, self._width-1))
-                foreground = im[y1:y2, x1:x2].astype(np.uint8)
-                mask = 255 * np.ones((foreground.shape[0], foreground.shape[1]), dtype=np.uint8)
-                background_color = cv2.seamlessClone(foreground, background_color, mask, ((x1+x2)/2, (y1+y2)/2), cv2.NORMAL_CLONE)
-        im = background_color
-
-        if cfg.INPUT == 'DEPTH' or cfg.INPUT == 'RGBD':
-            I = np.where(im_label_all == 0)
-            im_depth[I[0], I[1], :] = background_depth[I[0], I[1], :3]
 
         '''
         import matplotlib.pyplot as plt
@@ -319,7 +259,7 @@ class YCBObject(data.Dataset, datasets.imdb):
 
         im_cuda = torch.from_numpy(im).cuda().float() / 255.0
         if cfg.TRAIN.ADD_NOISE and cfg.MODE == 'TRAIN' and np.random.rand(1) > 0.1:
-            im_cuda = add_noise_cuda(im_cuda, cfg.TRAIN.NOISE_LEVEL)
+            im_cuda = add_noise_cuda(im_cuda)
         im_cuda -= self._pixel_mean
         im_cuda = im_cuda.permute(2, 0, 1)
 
@@ -397,11 +337,12 @@ class YCBObject(data.Dataset, datasets.imdb):
             vertex_targets = []
             vertex_weights = []
 
-        im_info = np.array([im.shape[1], im.shape[2], cfg.TRAIN.SCALES_BASE[0]], dtype=np.float32)
+        im_info = np.array([im.shape[1], im.shape[2], cfg.TRAIN.SCALES_BASE[0], 1], dtype=np.float32)
 
         sample = {'image_color': im_cuda,
                   'image_depth': im_cuda_depth,
                   'label': label_blob,
+                  'mask': mask,
                   'meta_data': meta_data_blob,
                   'poses': pose_blob,
                   'extents': self._extents,
@@ -548,44 +489,10 @@ class YCBObject(data.Dataset, datasets.imdb):
             plt.show()
             #'''
 
-        # add background to the image
-        ind = np.random.randint(len(self._backgrounds_color), size=1)[0]
-        filename = self._backgrounds_color[ind]
-        background = cv2.imread(filename, cv2.IMREAD_UNCHANGED)
-        try:
-            # randomly crop a region as background
-            bw = background.shape[1]
-            bh = background.shape[0]
-            x1 = npr.randint(0, int(bw/3))
-            y1 = npr.randint(0, int(bh/3))
-            x2 = npr.randint(int(2*bw/3), bw)
-            y2 = npr.randint(int(2*bh/3), bh)
-            background = background[y1:y2, x1:x2]
-            background = cv2.resize(background, (self._width, self._height), interpolation=cv2.INTER_LINEAR)
-        except:
-            background = np.zeros((self._height, self._width, 3), dtype=np.uint8)
-            print 'bad background image'
-
-        if len(background.shape) != 3:
-            background = np.zeros((self._height, self._width, 3), dtype=np.uint8)
-            print 'bad background image'
-
-        # paste objects on background
-        I = np.where(im_label_all == 0)
-        im_color[I[0], I[1], :] = background[I[0], I[1], :3]
-        im = im_color.astype(np.uint8)
-        margin = 10
-        for i in range(num):
-            I = np.where(im_label_all == cls_indexes[i]+1)
-            if len(I[0]) > 0:
-                y1 = np.max((np.round(np.min(I[0])) - margin, 0))
-                x1 = np.max((np.round(np.min(I[1])) - margin, 0))
-                y2 = np.min((np.round(np.max(I[0])) + margin, self._height-1))
-                x2 = np.min((np.round(np.max(I[1])) + margin, self._width-1))
-                foreground = im[y1:y2, x1:x2].astype(np.uint8)
-                mask = 255 * np.ones((foreground.shape[0], foreground.shape[1]), dtype=np.uint8)
-                background = cv2.seamlessClone(foreground, background, mask, ((x1+x2)/2, (y1+y2)/2), cv2.NORMAL_CLONE)
-        im = background
+        # foreground mask
+        seg = torch.from_numpy((im_label_all != 0).astype(np.float32))
+        mask = seg.unsqueeze(0).repeat((3, 1, 1)).float().cuda()
+        im = im_color
 
         # chromatic transform
         if cfg.TRAIN.CHROMATIC and cfg.MODE == 'TRAIN' and np.random.rand(1) > 0.1:
@@ -593,7 +500,7 @@ class YCBObject(data.Dataset, datasets.imdb):
 
         im_cuda = torch.from_numpy(im).cuda().float() / 255.0
         if cfg.TRAIN.ADD_NOISE and cfg.MODE == 'TRAIN' and np.random.rand(1) > 0.1:
-            im_cuda = add_noise_cuda(im_cuda, cfg.TRAIN.NOISE_LEVEL)
+            im_cuda = add_noise_cuda(im_cuda)
         im_cuda -= self._pixel_mean
         im_cuda = im_cuda.permute(2, 0, 1)
 
@@ -619,11 +526,12 @@ class YCBObject(data.Dataset, datasets.imdb):
         pose_blob = np.zeros((self.num_classes, 9), dtype=np.float32)
         vertex_targets = np.zeros((3 * self.num_classes, height, width), dtype=np.float32)
         vertex_weights = np.zeros((3 * self.num_classes, height, width), dtype=np.float32)
-        im_info = np.array([im.shape[1], im.shape[2], cfg.TRAIN.SCALES_BASE[0]], dtype=np.float32)
+        im_info = np.array([im.shape[1], im.shape[2], cfg.TRAIN.SCALES_BASE[0], 1], dtype=np.float32)
 
         sample = {'image_color': im_cuda,
                   'image_depth': im_cuda,
                   'label': label_blob,
+                  'mask': mask,
                   'meta_data': meta_data_blob,
                   'poses': pose_blob,
                   'extents': self._extents,

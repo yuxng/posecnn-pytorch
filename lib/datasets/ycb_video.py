@@ -73,12 +73,17 @@ class YCBVideo(data.Dataset, datasets.imdb):
         self._class_colors = [self._class_colors_all[i] for i in cfg.TRAIN.CLASSES]
         self._symmetry = self._symmetry_all[cfg.TRAIN.CLASSES]
         self._extents = self._extents_all[cfg.TRAIN.CLASSES]
-        self._points, self._points_all, self._point_blob = self._load_object_points()
+        self._points, self._points_all, self._point_blob, self._points_clamp = self._load_object_points()
         self._pixel_mean = torch.tensor(cfg.PIXEL_MEANS / 255.0).cuda().float()
 
         self._classes_other = []
         for i in range(self._num_classes_all):
             if i not in cfg.TRAIN.CLASSES:
+                # do not use clamp
+                if i == 19 and 20 in cfg.TRAIN.CLASSES:
+                    continue
+                if i == 20 and 19 in cfg.TRAIN.CLASSES:
+                    continue
                 self._classes_other.append(i)
         self._num_classes_other = len(self._classes_other)
 
@@ -186,7 +191,6 @@ class YCBVideo(data.Dataset, datasets.imdb):
                     self.pose_lists[cls] = np.random.permutation(np.arange(len(self.eulers)))
                 yaw = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][0] + 15 * np.random.randn()
                 pitch = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][1] + 15 * np.random.randn()
-                pitch = np.clip(pitch, -90.0, 90.0)
                 roll = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][2] + 15 * np.random.randn()
                 qt[3:] = euler2quat(yaw * math.pi / 180.0, pitch * math.pi / 180.0, roll * math.pi / 180.0, 'syxz')
                 self.pose_indexes[cls] += 1
@@ -228,10 +232,16 @@ class YCBVideo(data.Dataset, datasets.imdb):
         cfg.renderer.set_poses(poses_all)
 
         # sample lighting
-        cfg.renderer.set_light_pos(np.random.uniform(-0.5, 0.5, 3))
+        # light pose
+        theta = np.random.uniform(-np.pi/2, np.pi/2)
+        phi = np.random.uniform(0, np.pi/2)
+        r = np.random.uniform(0.25, 3.0)
+        light_pos = [r * np.sin(theta) * np.sin(phi), r * np.cos(phi) + np.random.uniform(-2, 2), r * np.cos(theta) * np.sin(phi)]
+        cfg.renderer.set_light_pos(light_pos)
 
-        intensity = np.random.uniform(0.8, 2)
-        light_color = intensity * np.random.uniform(0.9, 1.1, 3)
+        # light color
+        intensity = np.random.uniform(0.5, 3.0)
+        light_color = intensity * np.random.uniform(0.5, 1.5, 3)
         cfg.renderer.set_light_color(light_color)
             
         # rendering
@@ -241,6 +251,10 @@ class YCBVideo(data.Dataset, datasets.imdb):
         cfg.renderer.render(cls_indexes, image_tensor, seg_tensor)
         image_tensor = image_tensor.flip(0)
         seg_tensor = seg_tensor.flip(0)
+
+        # foreground mask
+        seg = seg_tensor[:,:,2] + 256*seg_tensor[:,:,1] + 256*256*seg_tensor[:,:,0]
+        mask = (seg != 0).unsqueeze(0).repeat((3, 1, 1)).float()
 
         # RGB to BGR order
         im = image_tensor.cpu().numpy()
@@ -261,52 +275,13 @@ class YCBVideo(data.Dataset, datasets.imdb):
             centers[i, 1] = rcenters[i][0] * height
         centers = centers[:num_target, :]
 
-        # add background to the image
-        ind = np.random.randint(len(self._backgrounds), size=1)[0]
-        filename = self._backgrounds[ind]
-        background = cv2.imread(filename, cv2.IMREAD_UNCHANGED)
-        try:
-            # randomly crop a region as background
-            bw = background.shape[1]
-            bh = background.shape[0]
-            x1 = npr.randint(0, int(bw/3))
-            y1 = npr.randint(0, int(bh/3))
-            x2 = npr.randint(int(2*bw/3), bw)
-            y2 = npr.randint(int(2*bh/3), bh)
-            background = background[y1:y2, x1:x2]
-            background = cv2.resize(background, (self._width, self._height), interpolation=cv2.INTER_LINEAR)
-        except:
-            background = np.zeros((self._height, self._width, 3), dtype=np.uint8)
-            print 'bad background image'
-
-        if len(background.shape) != 3:
-            background = np.zeros((self._height, self._width, 3), dtype=np.uint8)
-            print 'bad background image'
-
-        # paste objects on background
-        I = np.where(im_label_all == 0)
-        im[I[0], I[1], :] = background[I[0], I[1], :3]
-        im = im.astype(np.uint8)
-        margin = 10
-        for i in range(num):
-            I = np.where(im_label_all == cls_indexes[i]+1)
-            if len(I[0]) > 0:
-                y1 = np.max((np.round(np.min(I[0])) - margin, 0))
-                x1 = np.max((np.round(np.min(I[1])) - margin, 0))
-                y2 = np.min((np.round(np.max(I[0])) + margin, self._height-1))
-                x2 = np.min((np.round(np.max(I[1])) + margin, self._width-1))
-                foreground = im[y1:y2, x1:x2].astype(np.uint8)
-                mask = 255 * np.ones((foreground.shape[0], foreground.shape[1]), dtype=np.uint8)
-                background = cv2.seamlessClone(foreground, background, mask, ((x1+x2)/2, (y1+y2)/2), cv2.NORMAL_CLONE)
-        im = background
-
         # chromatic transform
         if cfg.TRAIN.CHROMATIC and cfg.MODE == 'TRAIN' and np.random.rand(1) > 0.1:
             im = chromatic_transform(im)
 
         im_cuda = torch.from_numpy(im).cuda().float() / 255.0
         if cfg.TRAIN.ADD_NOISE and cfg.MODE == 'TRAIN' and np.random.rand(1) > 0.1:
-            im_cuda = add_noise_cuda(im_cuda, cfg.TRAIN.NOISE_LEVEL)
+            im_cuda = add_noise_cuda(im_cuda)
         im_cuda -= self._pixel_mean
         im_cuda = im_cuda.permute(2, 0, 1)
 
@@ -355,7 +330,6 @@ class YCBVideo(data.Dataset, datasets.imdb):
             gt_boxes[i, 3] = np.max(x2d[1, :])
             gt_boxes[i, 4] = cls
 
-
         # construct the meta data
         """
         format of the meta_data
@@ -376,10 +350,11 @@ class YCBVideo(data.Dataset, datasets.imdb):
             vertex_targets = []
             vertex_weights = []
 
-        im_info = np.array([im.shape[1], im.shape[2], cfg.TRAIN.SCALES_BASE[0]], dtype=np.float32)
+        im_info = np.array([im.shape[1], im.shape[2], cfg.TRAIN.SCALES_BASE[0], 1], dtype=np.float32)
 
-        sample = {'image': im_cuda,
+        sample = {'image_color': im_cuda,
                   'label': label_blob,
+                  'mask': mask,
                   'meta_data': meta_data_blob,
                   'poses': pose_blob,
                   'extents': self._extents,
@@ -419,13 +394,14 @@ class YCBVideo(data.Dataset, datasets.imdb):
         im_blob, im_scale, height, width = self._get_image_blob(roidb, random_scale_ind)
 
         # build the label blob
-        label_blob, meta_data_blob, pose_blob, gt_boxes, vertex_targets, vertex_weights \
+        label_blob, mask, meta_data_blob, pose_blob, gt_boxes, vertex_targets, vertex_weights \
             = self._get_label_blob(roidb, self._num_classes, im_scale, height, width)
 
-        im_info = np.array([im_blob.shape[1], im_blob.shape[2], im_scale], dtype=np.float32)
+        im_info = np.array([im_blob.shape[1], im_blob.shape[2], im_scale, is_syn], dtype=np.float32)
 
-        sample = {'image': im_blob,
+        sample = {'image_color': im_blob,
                   'label': label_blob,
+                  'mask': mask,
                   'meta_data': meta_data_blob,
                   'poses': pose_blob,
                   'extents': self._extents,
@@ -456,7 +432,8 @@ class YCBVideo(data.Dataset, datasets.imdb):
             im = rgba
 
         im_scale = cfg.TRAIN.SCALES_BASE[scale_ind]
-        im = cv2.resize(im, None, None, fx=im_scale, fy=im_scale, interpolation=cv2.INTER_LINEAR)
+        if im_scale != 1.0:
+            im = cv2.resize(im, None, None, fx=im_scale, fy=im_scale, interpolation=cv2.INTER_LINEAR)
         height = im.shape[0]
         width = im.shape[1]
 
@@ -490,7 +467,14 @@ class YCBVideo(data.Dataset, datasets.imdb):
                 im_label = im_label[:, ::-1]
             else:
                 im_label = im_label[:, ::-1, :]
-        im_label = cv2.resize(im_label, None, None, fx=im_scale, fy=im_scale, interpolation=cv2.INTER_NEAREST)
+        if im_scale != 1.0:
+            im_label = cv2.resize(im_label, None, None, fx=im_scale, fy=im_scale, interpolation=cv2.INTER_NEAREST)
+
+        # change large clamp to extra large clamp
+        im_label_original = im_label.copy()
+        I = np.where(im_label == 19)
+        im_label[I] = 20
+
         label_blob = np.zeros((num_classes, height, width), dtype=np.float32)
         label_blob[0, :, :] = 1.0
         for i in range(1, num_classes):
@@ -498,6 +482,10 @@ class YCBVideo(data.Dataset, datasets.imdb):
             if len(I[0]) > 0:
                 label_blob[i, I[0], I[1]] = 1.0
                 label_blob[0, I[0], I[1]] = 0.0
+
+        # foreground mask
+        seg = torch.from_numpy((im_label != 0).astype(np.float32))
+        mask = seg.unsqueeze(0).repeat((3, 1, 1)).float().cuda()
 
         # poses
         poses = meta_data['poses']
@@ -512,6 +500,14 @@ class YCBVideo(data.Dataset, datasets.imdb):
         count = 0
         for i in xrange(num):
             cls = int(meta_data['cls_indexes'][i])
+
+            # change large clamp to extra large clamp
+            if cls == 19:
+                clamp = 1
+                cls = 20
+            else:
+                clamp = 0
+
             ind = np.where(classes == cls)[0]
             if len(ind) > 0:
                 R = poses[:, :3, i]
@@ -529,13 +525,18 @@ class YCBVideo(data.Dataset, datasets.imdb):
 
                 # compute box
                 x3d = np.ones((4, self._points_all.shape[1]), dtype=np.float32)
-                x3d[0, :] = self._points_all[cls,:,0]
-                x3d[1, :] = self._points_all[cls,:,1]
-                x3d[2, :] = self._points_all[cls,:,2]
+                if clamp:
+                    x3d[0, :] = self._points_clamp[:,0]
+                    x3d[1, :] = self._points_clamp[:,1]
+                    x3d[2, :] = self._points_clamp[:,2]
+                else:
+                    x3d[0, :] = self._points_all[ind,:,0]
+                    x3d[1, :] = self._points_all[ind,:,1]
+                    x3d[2, :] = self._points_all[ind,:,2]
                 RT = np.zeros((3, 4), dtype=np.float32)
                 RT[:3, :3] = quat2mat(qt)
                 RT[:, 3] = T
-                x2d = np.matmul(self._intrinsic_matrix, np.matmul(RT, x3d))
+                x2d = np.matmul(meta_data['intrinsic_matrix'], np.matmul(RT, x3d))
                 x2d[0, :] = np.divide(x2d[0, :], x2d[2, :])
                 x2d[1, :] = np.divide(x2d[1, :], x2d[2, :])
         
@@ -564,12 +565,12 @@ class YCBVideo(data.Dataset, datasets.imdb):
             center = meta_data['center']
             if roidb['flipped']:
                 center[:, 0] = width - center[:, 0]
-            vertex_targets, vertex_weights = self._generate_vertex_targets(im_label, meta_data['cls_indexes'], center, poses, classes, num_classes)
+            vertex_targets, vertex_weights = self._generate_vertex_targets(im_label_original, meta_data['cls_indexes'], center, poses, classes, num_classes)
         else:
             vertex_targets = []
             vertex_weights = []
 
-        return label_blob, meta_data_blob, pose_blob, gt_boxes, vertex_targets, vertex_weights
+        return label_blob, mask, meta_data_blob, pose_blob, gt_boxes, vertex_targets, vertex_weights
 
 
     # compute the voting label image in 2D
@@ -608,6 +609,35 @@ class YCBVideo(data.Dataset, datasets.imdb):
                 vertex_weights[3*i+0, y, x] = cfg.TRAIN.VERTEX_W_INSIDE
                 vertex_weights[3*i+1, y, x] = cfg.TRAIN.VERTEX_W_INSIDE
                 vertex_weights[3*i+2, y, x] = cfg.TRAIN.VERTEX_W_INSIDE
+
+        # handle clamp
+        y, x = np.where(im_label == 19)
+        I = np.where(im_label == 19)
+        ind = np.where(cls_indexes == 19)[0]
+        i = np.where(classes == 20)[0]
+        if len(x) > 0 and len(ind) > 0 and len(i) > 0:
+            c[0] = center[ind, 0]
+            c[1] = center[ind, 1]
+            if isinstance(poses, list):
+                z = poses[int(ind)][2]
+            else:
+                if len(poses.shape) == 3:
+                    z = poses[2, 3, ind]
+                else:
+                    z = poses[ind, -1]
+            R = np.tile(c, (1, len(x))) - np.vstack((x, y))
+            # compute the norm
+            N = np.linalg.norm(R, axis=0) + 1e-10
+            # normalization
+            R = np.divide(R, np.tile(N, (2,1)))
+            # assignment
+            vertex_targets[3*i+0, y, x] = R[0,:]
+            vertex_targets[3*i+1, y, x] = R[1,:]
+            vertex_targets[3*i+2, y, x] = math.log(z)
+
+            vertex_weights[3*i+0, y, x] = cfg.TRAIN.VERTEX_W_INSIDE
+            vertex_weights[3*i+1, y, x] = cfg.TRAIN.VERTEX_W_INSIDE
+            vertex_weights[3*i+2, y, x] = cfg.TRAIN.VERTEX_W_INSIDE
 
         return vertex_targets, vertex_weights
 
@@ -700,7 +730,12 @@ class YCBVideo(data.Dataset, datasets.imdb):
             else:
                 point_blob[i, :, :] = weight * point_blob[i, :, :]
 
-        return points, points_all, point_blob
+        # points of large clamp
+        point_file = os.path.join(self._ycb_video_path, 'models', '051_large_clamp', 'points.xyz')
+        points_clamp = np.loadtxt(point_file)
+        points_clamp = points_clamp[:num, :]
+
+        return points, points_all, point_blob, points_clamp
 
 
     def _load_object_extents(self):
