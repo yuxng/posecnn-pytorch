@@ -105,8 +105,9 @@ def train(train_loader, background_loader, network, optimizer, epoch):
 
         # add background
         mask = sample['mask']
-        _, background = next(enum_background)
-        if inputs.size(0) != background.size(0):
+        try:
+            _, background = next(enum_background)
+        except:
             enum_background = enumerate(background_loader)
             _, background = next(enum_background)
         background = background.cuda()
@@ -218,11 +219,11 @@ def train_autoencoder(train_loader, background_loader, network, optimizer, epoch
         image = nn.functional.grid_sample(image, grids, padding_mode='border')
         mask = nn.functional.grid_sample(mask, grids, mode='nearest')
 
-        _, background = next(enum_background)
-        if image.size(0) != background.size(0):
+        try:
+            _, background = next(enum_background)
+        except:
             enum_background = enumerate(background_loader)
             _, background = next(enum_background)
-
         background = background.cuda()
         inputs = image + (1 - mask) * background
         inputs = torch.clamp(inputs, min=0.0, max=1.0)
