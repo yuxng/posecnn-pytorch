@@ -236,7 +236,7 @@ def train_autoencoder(train_loader, background_loader, network, optimizer, epoch
             _, background = next(enum_background)
 
         background = background.cuda()
-        inputs = image + (1 - mask) * background
+        inputs = mask * image + (1 - mask) * background
         inputs = torch.clamp(inputs, min=0.0, max=1.0)
 
         # compute output
@@ -251,7 +251,7 @@ def train_autoencoder(train_loader, background_loader, network, optimizer, epoch
         train_loader.dataset._losses_pose[torch.flatten(index_euler)] = losses_euler
 
         if cfg.TRAIN.VISUALIZE:
-            _vis_minibatch_autoencoder(inputs, sample, out_images)
+            _vis_minibatch_autoencoder(inputs, background, mask, sample, out_images)
 
         # record loss
         losses.update(loss.data, inputs.size(0))
@@ -316,9 +316,11 @@ def render_images(dataset, poses):
     return im_output
 
 
-def _vis_minibatch_autoencoder(inputs, sample, outputs, im_render=None):
+def _vis_minibatch_autoencoder(inputs, background, mask, sample, outputs, im_render=None):
 
     im_blob = inputs.cpu().numpy()
+    background_blob = background.cpu().numpy()
+    mask_blob = mask.cpu().numpy()
     targets = sample['image_target'].cpu().numpy()
     im_output = outputs.cpu().detach().numpy()
 
@@ -330,7 +332,7 @@ def _vis_minibatch_autoencoder(inputs, sample, outputs, im_render=None):
         im = im.transpose((1, 2, 0)) * 255.0
         im = im [:, :, (2, 1, 0)]
         im = im.astype(np.uint8)
-        ax = fig.add_subplot(2, 2, 1)
+        ax = fig.add_subplot(2, 3, 1)
         plt.imshow(im)
         ax.set_title('input')
 
@@ -339,16 +341,34 @@ def _vis_minibatch_autoencoder(inputs, sample, outputs, im_render=None):
         im = im.transpose((1, 2, 0)) * 255.0
         im = im.astype(np.uint8)
         im = im [:, :, (2, 1, 0)]
-        ax = fig.add_subplot(2, 2, 2)
+        ax = fig.add_subplot(2, 3, 2)
         plt.imshow(im)
         ax.set_title('target')
 
         # show matched codebook
         if im_render is not None:
             im = im_render[i].copy()
-            ax = fig.add_subplot(2, 2, 3)
+            ax = fig.add_subplot(2, 3, 3)
             plt.imshow(im)
             ax.set_title('matched code')
+ 
+        # show background
+        im = background_blob[i, :, :, :].copy()
+        im = im.transpose((1, 2, 0)) * 255.0
+        im = im [:, :, (2, 1, 0)]
+        im = im.astype(np.uint8)
+        ax = fig.add_subplot(2, 3, 4)
+        plt.imshow(im)
+        ax.set_title('background')
+
+        # show mask
+        im = mask_blob[i, :, :, :].copy()
+        im = im.transpose((1, 2, 0)) * 255.0
+        im = im [:, :, (2, 1, 0)]
+        im = im.astype(np.uint8)
+        ax = fig.add_subplot(2, 3, 5)
+        plt.imshow(im)
+        ax.set_title('mask')
 
         # show output
         im = im_output[i, :, :, :].copy()
@@ -356,7 +376,7 @@ def _vis_minibatch_autoencoder(inputs, sample, outputs, im_render=None):
         im = im.transpose((1, 2, 0)) * 255.0
         im = im [:, :, (2, 1, 0)]
         im = im.astype(np.uint8)
-        ax = fig.add_subplot(2, 2, 4)
+        ax = fig.add_subplot(2, 3, 6)
         plt.imshow(im)
         ax.set_title('reconstruction')
 
@@ -413,7 +433,7 @@ def test_autoencoder(test_loader, background_loader, network, output_dir):
             _, background = next(enum_background)
 
         background = background.cuda()
-        inputs = image + (1 - mask) * background
+        inputs = mask * image + (1 - mask) * background
         inputs = torch.clamp(inputs, min=0.0, max=1.0)
 
         # compute output
@@ -440,7 +460,7 @@ def test_autoencoder(test_loader, background_loader, network, output_dir):
                 im_render = render_images(test_loader.dataset, poses)
 
         if cfg.TEST.VISUALIZE:
-            _vis_minibatch_autoencoder(inputs, sample, out_images, im_render)
+            _vis_minibatch_autoencoder(inputs, background, mask, sample, out_images, im_render)
 
         # measure elapsed time
         batch_time.update(time.time() - end)

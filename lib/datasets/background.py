@@ -72,6 +72,7 @@ class BackgroundDataset(data.Dataset, datasets.imdb):
         if np.random.rand(1) > 0.1:
             background_color = add_noise(background_color)
         background_color = background_color.astype(np.float32)
+
         if self.subtract_mean:
             background_color -= self._pixel_mean
         background_color = background_color.transpose(2, 0, 1) / 255.0
