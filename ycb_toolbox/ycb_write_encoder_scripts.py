@@ -87,9 +87,9 @@ for i in range(len(classes)):
         f.write('TEST:\n')
         f.write('  SCALES_BASE: !!python/tuple [1.0]\n')
         f.write('  IMS_PER_BATCH: 256\n')
-        f.write('  VISUALIZE: True\n')
+        f.write('  VISUALIZE: False\n')
         f.write('  SYNTHESIZE: True\n')
-        f.write('  BUILD_CODEBOOK: False\n')
+        f.write('  BUILD_CODEBOOK: True\n')
     f.close()
 
     # write docker

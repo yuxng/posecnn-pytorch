@@ -110,6 +110,11 @@ def train(train_loader, background_loader, network, optimizer, epoch):
         except:
             enum_background = enumerate(background_loader)
             _, background = next(enum_background)
+
+        if inputs.size(0) != background.size(0):
+            enum_background = enumerate(background_loader)
+            _, background = next(enum_background)
+
         background = background.cuda()
 
         for j in range(inputs.size(0)):
@@ -201,6 +206,7 @@ def train_autoencoder(train_loader, background_loader, network, optimizer, epoch
 
     epoch_size = len(train_loader)
     enum_background = enumerate(background_loader)
+    cls = train_loader.dataset.classes[0]
 
     # switch to train mode
     network.train()
@@ -224,6 +230,11 @@ def train_autoencoder(train_loader, background_loader, network, optimizer, epoch
         except:
             enum_background = enumerate(background_loader)
             _, background = next(enum_background)
+
+        if image.size(0) != background.size(0):
+            enum_background = enumerate(background_loader)
+            _, background = next(enum_background)
+
         background = background.cuda()
         inputs = image + (1 - mask) * background
         inputs = torch.clamp(inputs, min=0.0, max=1.0)
@@ -253,8 +264,8 @@ def train_autoencoder(train_loader, background_loader, network, optimizer, epoch
         # measure elapsed time
         batch_time.update(time.time() - end)
 
-        print('[%d/%d][%d/%d], loss %.4f, lr %.6f, boost %d, time %.2f' \
-           % (epoch, cfg.epochs, i, epoch_size, loss, optimizer.param_groups[0]['lr'], cfg.TRAIN.BOOSTRAP_PIXELS, batch_time.val))
+        print('%s, [%d/%d][%d/%d], loss %.4f, lr %.6f, boost %d, time %.2f' \
+           % (cls, epoch, cfg.epochs, i, epoch_size, loss, optimizer.param_groups[0]['lr'], cfg.TRAIN.BOOSTRAP_PIXELS, batch_time.val))
         cfg.TRAIN.ITERS += 1
 
 
@@ -357,6 +368,7 @@ def test_autoencoder(test_loader, background_loader, network, output_dir):
     batch_time = AverageMeter()
     epoch_size = len(test_loader)
     enum_background = enumerate(background_loader)
+    cls = test_loader.dataset.classes[0]
 
     if cfg.TEST.BUILD_CODEBOOK:
         num = len(test_loader.dataset.eulers)
@@ -365,7 +377,7 @@ def test_autoencoder(test_loader, background_loader, network, output_dir):
         count = 0
     else:
         # check if codebook exists
-        filename = os.path.join(output_dir, 'codebook_%s.mat' % test_loader.dataset.name)
+        filename = os.path.join(output_dir, 'codebook_%s.mat' % (test_loader.dataset.name + '_' + cls))
         if os.path.exists(filename):
             codebook = scipy.io.loadmat(filename)
             codes_gpu = torch.from_numpy(codebook['codes']).cuda()
@@ -381,27 +393,28 @@ def test_autoencoder(test_loader, background_loader, network, output_dir):
 
         # construct input
         image = sample['image_input']
+        mask = sample['mask']
 
         if cfg.TEST.BUILD_CODEBOOK == False:
-            mask = sample['mask']
-            affine_matrix = sample['affine_matrix']
-
             # affine transformation
+            affine_matrix = sample['affine_matrix']
             grids = nn.functional.affine_grid(affine_matrix, image.size())
             image = nn.functional.grid_sample(image, grids, padding_mode='border')
             mask = nn.functional.grid_sample(mask, grids, mode='nearest')
 
+        try:
             _, background = next(enum_background)
-            if image.size(0) != background.size(0):
-                enum_background = enumerate(background_loader)
-                _, background = next(enum_background)
+        except:
+            enum_background = enumerate(background_loader)
+            _, background = next(enum_background)
 
-            background = background.cuda()
-            inputs = image + (1 - mask) * background
-            inputs = torch.clamp(inputs, min=0.0, max=1.0)
-        else:
-            inputs = image
-            background = None
+        if image.size(0) != background.size(0):
+            enum_background = enumerate(background_loader)
+            _, background = next(enum_background)
+
+        background = background.cuda()
+        inputs = image + (1 - mask) * background
+        inputs = torch.clamp(inputs, min=0.0, max=1.0)
 
         # compute output
         out_images, embeddings = network(inputs)
@@ -432,21 +445,21 @@ def test_autoencoder(test_loader, background_loader, network, output_dir):
         # measure elapsed time
         batch_time.update(time.time() - end)
         if cfg.TEST.BUILD_CODEBOOK:
-            print('[%d/%d], code index %d, batch time %.2f' % (i, epoch_size, count, batch_time.val))
+            print('%s, [%d/%d], code index %d, batch time %.2f' % (cls, i, epoch_size, count, batch_time.val))
         else:
-            print('[%d/%d], batch time %.2f' % (i, epoch_size, batch_time.val))
+            print('%s, [%d/%d], batch time %.2f' % (cls, i, epoch_size, batch_time.val))
 
     # save codebook
     if cfg.TEST.BUILD_CODEBOOK:
         codebook = {'codes': codes, 'quaternions': poses[:, 3:], 'distance': poses[0, 2], 'intrinsic_matrix': test_loader.dataset._intrinsic_matrix}
-        filename = os.path.join(output_dir, 'codebook_%s.mat' % test_loader.dataset.name)
+        filename = os.path.join(output_dir, 'codebook_%s.mat' % (test_loader.dataset.name + '_' + cls))
         print('save codebook to %s' % (filename))
         scipy.io.savemat(filename, codebook, do_compression=True)
 
 
 def test_pose_rbpf(pose_rbpf, inputs, rois, poses):
 
-    n_init_samples = 300
+    n_init_samples = 100
     num = rois.shape[0]
     uv_init = np.zeros((2, ), dtype=np.float32)
     pixel_mean = torch.tensor(cfg.PIXEL_MEANS / 255.0).cuda().float()

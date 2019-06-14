@@ -87,7 +87,7 @@ if __name__ == '__main__':
     # device
     cfg.device = torch.device('cuda:{:d}'.format(args.gpu_id))
     cfg.gpu_id = args.gpu_id
-    print 'GPU device {:d}'.format(args.gpu_id)
+    print('GPU device {:d}'.format(args.gpu_id))
 
     # prepare dataset
     if cfg.TEST.VISUALIZE:
@@ -98,7 +98,7 @@ if __name__ == '__main__':
     cfg.MODE = 'TEST'
     dataset = get_dataset(args.dataset_name)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=cfg.TEST.IMS_PER_BATCH, shuffle=shuffle, num_workers=0)
-    print 'Use dataset `{:s}` for training'.format(dataset.name)
+    print('Use dataset `{:s}` for training'.format(dataset.name))
 
     if args.network_name == 'autoencoder':
         background_dataset = get_dataset('background_pascal')
@@ -107,7 +107,7 @@ if __name__ == '__main__':
 
     output_dir = get_output_dir(dataset, None)
     output_dir = osp.join(output_dir, cfg.TRAIN.SNAPSHOT_INFIX)
-    print 'Output will be saved to `{:s}`'.format(output_dir)
+    print('Output will be saved to `{:s}`'.format(output_dir))
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
@@ -125,11 +125,11 @@ if __name__ == '__main__':
     cudnn.benchmark = True
 
     if cfg.TEST.SYNTHESIZE:
-        print 'loading 3D models'
+        print('loading 3D models')
         cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, render_marker=False)
         cfg.renderer.load_objects(dataset.model_mesh_paths, dataset.model_texture_paths, dataset.model_colors)
         cfg.renderer.set_camera_default()
-        print dataset.model_mesh_paths
+        print(dataset.model_mesh_paths)
 
     # test network
     if args.network_name == 'autoencoder':

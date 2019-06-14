@@ -18,7 +18,7 @@ class PoseRBPF:
             ind = cfg.TRAIN.CLASSES[i]
             cls = dataset._classes_all[ind]
 
-            filename = os.path.join('data', 'checkpoints', 'encoder_' + cls + '_epoch_60.checkpoint.pth')
+            filename = os.path.join('data', 'checkpoints', 'encoder_ycb_object_' + cls + '_epoch_200.checkpoint.pth')
             if os.path.exists(filename):
                 autoencoder_data = torch.load(filename)
                 autoencoders[i] = networks.__dict__['autoencoder'](1, 128, autoencoder_data).cuda(device=cfg.device)
@@ -26,7 +26,7 @@ class PoseRBPF:
                 print(filename)
 
                 # load codebook
-                filename = os.path.join('data', 'codebooks', 'codebook_' + cls + '.mat')
+                filename = os.path.join('data', 'codebooks', 'codebook_ycb_encoder_test_' + cls + '.mat')
                 codebooks[i] = scipy.io.loadmat(filename)
                 codes_gpu[i] = torch.from_numpy(codebooks[i]['codes']).cuda()
                 print(filename)
