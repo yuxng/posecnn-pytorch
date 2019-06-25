@@ -232,68 +232,70 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         # render input image
         if cfg.MODE == 'TRAIN' or cfg.TEST.BUILD_CODEBOOK == False:
 
-            # sample an occluder
-            if np.random.rand(1) < 0.3:
+            while 1:
+                # sample an occluder
+                if np.random.rand(1) < 0.3:
 
-                cls_indexes.append(0)
-                poses_all.append(np.zeros((7, ), dtype=np.float32))
+                    if len(cls_indexes) == 1:
+                        cls_indexes.append(0)
+                        poses_all.append(np.zeros((7, ), dtype=np.float32))
 
-                ind = np.random.randint(self._num_classes_other, size=1)[0]
-                cls_occ = self._classes_other[ind]
-                cls_indexes[1] = cls_occ - 1
+                    ind = np.random.randint(self._num_classes_other, size=1)[0]
+                    cls_occ = self._classes_other[ind]
+                    cls_indexes[1] = cls_occ - 1
 
-                # sample poses
-                cls = int(cls_indexes[1])
-                if self.pose_indexes[cls] >= len(self.pose_lists[cls]):
-                    self.pose_indexes[cls] = 0
-                    self.pose_lists[cls] = np.random.permutation(np.arange(len(self.eulers)))
-                yaw = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][0] + 5 * np.random.randn()
-                pitch = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][1] + 5 * np.random.randn()
-                roll = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][2] + 5 * np.random.randn()
-                qt[3:] = euler2quat(roll * math.pi / 180.0, pitch * math.pi / 180.0, yaw * math.pi / 180.0, 'syxz')
-                self.pose_indexes[cls] += 1
+                    # sample poses
+                    cls = int(cls_indexes[1])
+                    if self.pose_indexes[cls] >= len(self.pose_lists[cls]):
+                        self.pose_indexes[cls] = 0
+                        self.pose_lists[cls] = np.random.permutation(np.arange(len(self.eulers)))
+                    yaw = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][0] + 5 * np.random.randn()
+                    pitch = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][1] + 5 * np.random.randn()
+                    roll = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][2] + 5 * np.random.randn()
+                    qt[3:] = euler2quat(roll * math.pi / 180.0, pitch * math.pi / 180.0, yaw * math.pi / 180.0, 'syxz')
+                    self.pose_indexes[cls] += 1
 
-                # translation, sample an object nearby
-                object_id = 0
-                extent = np.maximum(np.mean(self._extents_all[cls+1, :]), extent_target)
+                    # translation, sample an object nearby
+                    object_id = 0
+                    extent = np.maximum(np.mean(self._extents_all[cls+1, :]), extent_target)
 
-                flag = np.random.randint(0, 2)
-                if flag == 0:
-                    flag = -1
-                qt[0] = poses_all[object_id][0] + flag * extent * np.random.uniform(0.25, 0.5)
+                    flag = np.random.randint(0, 2)
+                    if flag == 0:
+                        flag = -1
+                    qt[0] = poses_all[object_id][0] + flag * extent * np.random.uniform(0.25, 0.5)
 
-                flag = np.random.randint(0, 2)
-                if flag == 0:
-                    flag = -1
-                qt[1] = poses_all[object_id][1] + flag * extent * np.random.uniform(0.25, 0.5)
+                    flag = np.random.randint(0, 2)
+                    if flag == 0:
+                        flag = -1
+                    qt[1] = poses_all[object_id][1] + flag * extent * np.random.uniform(0.25, 0.5)
 
-                qt[2] = poses_all[object_id][2] - extent * np.random.uniform(1.0, 2.0)
-                poses_all[1] = qt
-                cfg.renderer.set_poses(poses_all)
+                    qt[2] = poses_all[object_id][2] - extent * np.random.uniform(1.0, 2.0)
+                    poses_all[1] = qt
+                    cfg.renderer.set_poses(poses_all)
 
-            # rendering
-            # light pose
-            theta = np.random.uniform(-np.pi/2, np.pi/2)
-            phi = np.random.uniform(0, np.pi/2)
-            r = np.random.uniform(0.25, 3.0)
-            light_pos = [r * np.sin(theta) * np.sin(phi), r * np.cos(phi) + np.random.uniform(-2, 2), r * np.cos(theta) * np.sin(phi)]
-            cfg.renderer.set_light_pos(light_pos)
+                # rendering
+                # light pose
+                theta = np.random.uniform(-np.pi/2, np.pi/2)
+                phi = np.random.uniform(0, np.pi/2)
+                r = np.random.uniform(0.25, 3.0)
+                light_pos = [r * np.sin(theta) * np.sin(phi), r * np.cos(phi) + np.random.uniform(-2, 2), r * np.cos(theta) * np.sin(phi)]
+                cfg.renderer.set_light_pos(light_pos)
 
-            # light color
-            intensity = np.random.uniform(0.3, 3.0)
-            light_color = intensity * np.random.uniform(0.2, 1.8, 3)
-            cfg.renderer.set_light_color(light_color)
-            cfg.renderer.render(cls_indexes, image_tensor, seg_tensor)
+                # light color
+                intensity = np.random.uniform(0.3, 3.0)
+                light_color = intensity * np.random.uniform(0.2, 1.8, 3)
+                cfg.renderer.set_light_color(light_color)
+                cfg.renderer.render(cls_indexes, image_tensor, seg_tensor)
 
-            seg_tensor = seg_tensor.flip(0)
-            seg = seg_tensor[:,:,2] + 256*seg_tensor[:,:,1] + 256*256*seg_tensor[:,:,0]
-            seg_input = seg.clone().cpu().numpy()
+                seg_tensor = seg_tensor.flip(0)
+                seg = seg_tensor[:,:,2] + 256*seg_tensor[:,:,1] + 256*256*seg_tensor[:,:,0]
+                seg_input = seg.clone().cpu().numpy()
             
-            non_occluded = np.sum(np.logical_and(seg_target > 0, seg_target == seg_input)).astype(np.float)
-            occluded_ratio = 1 - non_occluded / np.sum(seg_target>0).astype(np.float)
+                non_occluded = np.sum(np.logical_and(seg_target > 0, seg_target == seg_input)).astype(np.float)
+                occluded_ratio = 1 - non_occluded / np.sum(seg_target>0).astype(np.float)
 
-            if occluded_ratio > 0.8:
-                image_target_tensor[:] = 0.0
+                if occluded_ratio < 0.95:
+                    break
 
             # foreground mask
             mask = (seg != 0).unsqueeze(0).repeat((3, 1, 1)).float()

@@ -105,7 +105,7 @@ for i in range(len(classes)):
         f.write('    "command": "cd /nfs/Projects/posecnn-pytorch; ls; sh ./experiments/scripts/ycb_encoder_train_' + cls + '.sh",\n')
         f.write('    "resources": {\n')
         f.write('      "cpuCores": 8,\n')
-        f.write('      "gpus": 2,\n')
+        f.write('      "gpus": 1,\n')
         f.write('      "systemMemory": 64\n')
         f.write('    },\n')
         f.write('    "jobDataLocations": [\n')

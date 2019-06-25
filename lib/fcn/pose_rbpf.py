@@ -1,10 +1,12 @@
 import os, sys
 import torch
 import scipy.io
+import random
 import networks
 import numpy as np
 from layers.roi_align import ROIAlign
 from fcn.config import cfg
+from utils.blob import add_noise_cuda
 
 class PoseRBPF:
 
@@ -14,6 +16,7 @@ class PoseRBPF:
         autoencoders = [[] for i in range(len(cfg.TRAIN.CLASSES))]
         codebooks = [[] for i in range(len(cfg.TRAIN.CLASSES))]
         codes_gpu = [[] for i in range(len(cfg.TRAIN.CLASSES))]
+        codebook_names = [[] for i in range(len(cfg.TRAIN.CLASSES))]
         for i in range(len(cfg.TRAIN.CLASSES)):
             ind = cfg.TRAIN.CLASSES[i]
             cls = dataset._classes_all[ind]
@@ -27,12 +30,14 @@ class PoseRBPF:
 
                 # load codebook
                 filename = os.path.join('data', 'codebooks', 'codebook_ycb_encoder_test_' + cls + '.mat')
+                codebook_names[i] = filename
                 codebooks[i] = scipy.io.loadmat(filename)
                 codes_gpu[i] = torch.from_numpy(codebooks[i]['codes']).cuda()
                 print(filename)
 
         self.autoencoders = autoencoders
         self.codebooks = codebooks
+        self.codebook_names = codebook_names
         self.codes_gpu = codes_gpu
         self.dataset = dataset
 
@@ -47,6 +52,7 @@ class PoseRBPF:
         codebook = self.codebooks[cls]
         codes_gpu = self.codes_gpu[cls]
         pose = np.zeros((7,), dtype=np.float32)
+        print(self.codebook_names[cls])
         if not autoencoder or not codebook:
             return pose
 
@@ -69,7 +75,7 @@ class PoseRBPF:
         z = np.random.uniform(0.8 * z_init, 1.2 * z_init, (n_init_samples, 1))
 
         # evaluate translation
-        distribution, out_images = self.evaluate_particles(autoencoder, codebook, codes_gpu, image, intrinsics, uv_h, z, render_dist, 0.1)
+        distribution, out_images, in_images = self.evaluate_particles(autoencoder, codebook, codes_gpu, image, intrinsics, uv_h, z, render_dist, 0.1)
 
         # find the max pdf from the distribution matrix
         index_star = self.arg_max_func(distribution)
@@ -83,7 +89,7 @@ class PoseRBPF:
         pose[:4] = codebook['quaternions'][index_star[1], :]
 
         im_render = self.render_image(self.dataset, cls, pose)
-        self.visualize(image, im_render, out_images[index_star[0]], box_center, box_size)
+        self.visualize(image, im_render, out_images[index_star[0]], in_images[index_star[0]], box_center, box_size)
 
         return pose
 
@@ -163,13 +169,14 @@ class PoseRBPF:
 
         # compute distribution from similarity
         max_sim_all = torch.max(v_sims)
+
         # cosine_distance_matrix[cosine_distance_matrix > 0.95 * max_sim_all] = max_sim_all
         pdf_matrix = self.mat2pdf(cosine_distance_matrix/max_sim_all, 1, gaussian_std)
 
-        return pdf_matrix, out_images
+        return pdf_matrix, out_images, images_roi_cuda
 
 
-    def visualize(self, image, im_render, im_output, box_center, box_size):
+    def visualize(self, image, im_render, im_output, im_input, box_center, box_size):
 
         import matplotlib.pyplot as plt
         fig = plt.figure()
@@ -178,9 +185,9 @@ class PoseRBPF:
         im = im * 255.0
         im = im [:, :, (2, 1, 0)]
         im = im.astype(np.uint8)
-        ax = fig.add_subplot(1, 3, 1)
+        ax = fig.add_subplot(2, 2, 1)
         plt.imshow(im)
-        ax.set_title('input')
+        ax.set_title('input image')
 
         plt.plot(box_center[0], box_center[1], 'ro', markersize=5)
         x1 = box_center[0] - box_size / 2
@@ -190,17 +197,27 @@ class PoseRBPF:
         plt.gca().add_patch(plt.Rectangle((x1, y1), x2-x1, y2-y1, fill=False, edgecolor='g', linewidth=3, clip_on=False))
 
         # show output
+        im = im_input.cpu().detach().numpy()
+        im = np.clip(im, 0, 1)
+        im = im.transpose((1, 2, 0)) * 255.0
+        im = im [:, :, (2, 1, 0)]
+        im = im.astype(np.uint8)
+        ax = fig.add_subplot(2, 2, 3)
+        plt.imshow(im)
+        ax.set_title('input roi')
+
+        # show output
         im = im_output.cpu().detach().numpy()
         im = np.clip(im, 0, 1)
         im = im.transpose((1, 2, 0)) * 255.0
         im = im [:, :, (2, 1, 0)]
         im = im.astype(np.uint8)
-        ax = fig.add_subplot(1, 3, 2)
+        ax = fig.add_subplot(2, 2, 4)
         plt.imshow(im)
         ax.set_title('reconstruction')
 
         # show output
-        ax = fig.add_subplot(1, 3, 3)
+        ax = fig.add_subplot(2, 2, 2)
         plt.imshow(im_render)
         plt.plot(box_center[0], box_center[1], 'ro', markersize=5)
         ax.set_title('rendering')
@@ -244,6 +261,9 @@ class PoseRBPF:
         cfg.renderer.set_poses(poses_all)
         cfg.renderer.render(cls_indexes, image_tensor, seg_tensor)
         image_tensor = image_tensor.flip(0)
+        seg_tensor = seg_tensor.flip(0)
+        seg = seg_tensor[:,:,2] + 256*seg_tensor[:,:,1] + 256*256*seg_tensor[:,:,0]
+        image_tensor[seg == 0] = 0.5
 
         im_render = image_tensor.cpu().numpy()
         im_render = np.clip(im_render, 0, 1)

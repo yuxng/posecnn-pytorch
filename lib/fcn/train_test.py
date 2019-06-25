@@ -477,7 +477,7 @@ def test_autoencoder(test_loader, background_loader, network, output_dir):
         scipy.io.savemat(filename, codebook, do_compression=True)
 
 
-def test_pose_rbpf(pose_rbpf, inputs, rois, poses):
+def test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data):
 
     n_init_samples = 100
     num = rois.shape[0]
@@ -485,16 +485,16 @@ def test_pose_rbpf(pose_rbpf, inputs, rois, poses):
     pixel_mean = torch.tensor(cfg.PIXEL_MEANS / 255.0).cuda().float()
     poses_return = poses.copy()
 
-    intrinsic_matrix = pose_rbpf.dataset._intrinsic_matrix
-    fx = intrinsic_matrix[0, 0]
-    fy = intrinsic_matrix[1, 1]
-    px = intrinsic_matrix[0, 2]
-    py = intrinsic_matrix[1, 2]
-
     for i in range(num):
         ind = int(rois[i, 0])
         image = inputs[ind].permute(1, 2, 0) + pixel_mean
         cls = int(rois[i, 1])
+
+        intrinsic_matrix = meta_data[ind, :9].numpy().reshape((3, 3))
+        fx = intrinsic_matrix[0, 0]
+        fy = intrinsic_matrix[1, 1]
+        px = intrinsic_matrix[0, 2]
+        py = intrinsic_matrix[1, 2]
 
         # project the 3D translation to get the center
         uv_init[0] = fx * poses[i, 4] / poses[i, 6] + px
@@ -577,7 +577,7 @@ def test(test_loader, network, pose_rbpf, output_dir):
                     poses[j, 5] *= poses[j, 6]
 
                 # run poseRBPF for codebook matching
-                poses = test_pose_rbpf(pose_rbpf, inputs, rois, poses)
+                poses = test_pose_rbpf(pose_rbpf, inputs, rois, poses, sample['meta_data'])
         else:
             out_label = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
             out_vertex = []
