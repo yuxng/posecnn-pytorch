@@ -79,8 +79,6 @@ class YCBObject(data.Dataset, datasets.imdb):
 
         self._class_to_ind = dict(zip(self._classes, xrange(self._num_classes)))
         self._size = cfg.TRAIN.SYNNUM
-        if cfg.MODE == 'TRAIN' or (cfg.MODE == 'TEST' and cfg.TEST.SYNTHESIZE == True):
-            self._build_background_images()
         self._build_uniform_poses()
 
         # sample indexes real for ycb object
@@ -264,12 +262,21 @@ class YCBObject(data.Dataset, datasets.imdb):
         im_cuda = im_cuda.permute(2, 0, 1)
 
         if cfg.INPUT == 'DEPTH' or cfg.INPUT == 'RGBD':
+
+            # depth mask
+            z_im = im_depth[:, :, 2]
+            mask_depth = z_im > 0.0
+            mask_depth = mask_depth.astype('float')
+            mask_depth_cuda = torch.from_numpy(mask_depth).cuda().float()
+            mask_depth_cuda.unsqueeze_(0)
+
             im_cuda_depth = torch.from_numpy(im_depth).cuda().float()
             if cfg.TRAIN.ADD_NOISE and cfg.MODE == 'TRAIN' and np.random.rand(1) > 0.1:
                 im_cuda_depth = add_noise_depth_cuda(im_cuda_depth)
             im_cuda_depth = im_cuda_depth.permute(2, 0, 1)
         else:
             im_cuda_depth = im_cuda.clone()
+            mask_depth_cuda = torch.cuda.FloatTensor(1, height, width).fill_(0)
 
         # label blob
         classes = np.array(range(self.num_classes))
@@ -333,6 +340,9 @@ class YCBObject(data.Dataset, datasets.imdb):
         # vertex regression target
         if cfg.TRAIN.VERTEX_REG:
             vertex_targets, vertex_weights = self._generate_vertex_targets(im_label, indexes_target, centers, poses_all, classes, self.num_classes)
+        elif cfg.TRAIN.VERTEX_REG_DELTA and cfg.INPUT == 'DEPTH' or cfg.INPUT == 'RGBD':
+            vertex_targets, vertex_weights = self._generate_vertex_deltas(im_label, indexes_target, centers, poses_all,
+                                                                           classes, self.num_classes, im_depth)
         else:
             vertex_targets = []
             vertex_weights = []
@@ -343,6 +353,7 @@ class YCBObject(data.Dataset, datasets.imdb):
                   'image_depth': im_cuda_depth,
                   'label': label_blob,
                   'mask': mask,
+                  'mask_depth': mask_depth_cuda,
                   'meta_data': meta_data_blob,
                   'poses': pose_blob,
                   'extents': self._extents,
@@ -351,7 +362,7 @@ class YCBObject(data.Dataset, datasets.imdb):
                   'gt_boxes': gt_boxes,
                   'im_info': im_info}
 
-        if cfg.TRAIN.VERTEX_REG:
+        if cfg.TRAIN.VERTEX_REG or cfg.TRAIN.VERTEX_REG_DELTA:
             sample['vertex_targets'] = vertex_targets
             sample['vertex_weights'] = vertex_weights
 
@@ -596,6 +607,120 @@ class YCBObject(data.Dataset, datasets.imdb):
                 vertex_weights[3*i+1, y, x] = cfg.TRAIN.VERTEX_W_INSIDE
                 vertex_weights[3*i+2, y, x] = cfg.TRAIN.VERTEX_W_INSIDE
 
+        return vertex_targets, vertex_weights
+
+
+    def _generate_vertex_deltas(self, im_label, cls_indexes, center, poses, classes, num_classes, im_depth):
+
+        x_image = im_depth[:, :, 0]
+        y_image = im_depth[:, :, 1]
+        z_image = im_depth[:, :, 2]
+
+        width = im_label.shape[1]
+        height = im_label.shape[0]
+        vertex_targets = np.zeros((3 * num_classes, height, width), dtype=np.float32)
+        vertex_weights = np.zeros((3 * num_classes, height, width), dtype=np.float32)
+
+        c = np.zeros((2, 1), dtype=np.float32)
+        for i in xrange(1, num_classes):
+
+            valid_mask = z_image != 0.0
+            label_mask = im_label == classes[i]
+
+            fin_mask = valid_mask * label_mask
+
+            y, x = np.where(fin_mask)
+            ind = np.where(cls_indexes == classes[i])[0]
+
+            if len(x) > 0 and len(ind) > 0:
+
+                extents_here = self._extents[i, :]
+
+                largest_dim = np.sqrt(np.sum(extents_here * extents_here))
+
+                half_diameter = largest_dim / 2.0
+
+                c[0] = center[ind, 0]
+                c[1] = center[ind, 1]
+
+                if isinstance(poses, list):
+                    x_center_coord = poses[int(ind)][0]
+                    y_center_coord = poses[int(ind)][1]
+                    z_center_coord = poses[int(ind)][2]
+                else:
+                    if len(poses.shape) == 3:
+                        x_center_coord = poses[0, 3, ind]
+                        y_center_coord = poses[1, 3, ind]
+                        z_center_coord = poses[2, 3, ind]
+
+                    else:
+                        x_center_coord = poses[ind, -3]
+                        y_center_coord = poses[ind, -2]
+                        z_center_coord = poses[ind, -1]
+
+                targets_x = (x_image[y, x] - x_center_coord) / half_diameter
+                targets_y = (y_image[y, x] - y_center_coord) / half_diameter
+                targets_z = (z_image[y, x] - z_center_coord) / half_diameter
+
+                vertex_targets[3 * i + 0, y, x] = targets_x
+                vertex_targets[3 * i + 1, y, x] = targets_y
+                vertex_targets[3 * i + 2, y, x] = targets_z
+
+                vertex_weights[3 * i + 0, y, x] = cfg.TRAIN.VERTEX_W_INSIDE
+                vertex_weights[3 * i + 1, y, x] = cfg.TRAIN.VERTEX_W_INSIDE
+                vertex_weights[3 * i + 2, y, x] = cfg.TRAIN.VERTEX_W_INSIDE
+
+        '''
+        for i in range(num_classes):
+            print i, 'out of', num_classes
+            import matplotlib.pyplot as plt
+            x_target = vertex_targets[i * 3 + 0, :, :]
+            y_target = vertex_targets[i * 3 + 1, :, :]
+            z_target = vertex_targets[i * 3 + 2, :, :]
+
+            x_weights = vertex_weights[i * 3 + 0, :, :]
+            y_weights = vertex_weights[i * 3 + 1, :, :]
+            z_weights = vertex_weights[i * 3 + 2, :, :]
+
+            fig = plt.figure()
+
+            fig.add_subplot(2, 3, 1)
+            plt.imshow(x_target)
+
+            fig.add_subplot(2, 3, 2)
+            plt.imshow(y_target)
+
+            fig.add_subplot(2, 3, 3)
+            plt.imshow(z_target)
+
+            fig.add_subplot(2, 3, 4)
+            plt.imshow(x_weights)
+
+            fig.add_subplot(2, 3, 5)
+            plt.imshow(y_weights)
+
+            fig.add_subplot(2, 3, 6)
+            plt.imshow(z_weights)
+
+            plt.show()
+
+        xyz = np.zeros((width * height, 3))
+        import pptk
+        for row in range(height):
+            for col in range(width):
+                xyz[row * width + col, 0] = x_image[row, col]
+                xyz[row * width + col, 1] = y_image[row, col]
+                xyz[row * width + col, 2] = z_image[row, col]
+
+                for k in range(num_classes):
+                    xyz[row * width + col, 0] -= vertex_targets[k * 3 + 0, row, col]
+                    xyz[row * width + col, 1] -= vertex_targets[k * 3 + 1, row, col]
+                    xyz[row * width + col, 2] -= vertex_targets[k * 3 + 2, row, col]
+
+        v = pptk.viewer(xyz)
+        v.attributes(xyz[:, 2])
+        '''
+        
         return vertex_targets, vertex_weights
 
 

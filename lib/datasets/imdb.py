@@ -100,6 +100,7 @@ class imdb(object):
         backgrounds_depth = []
         if cfg.TRAIN.SYN_BACKGROUND_SPECIFIC:
             # NVIDIA
+            '''
             allencenter = os.path.join(self.cache_path, '../AllenCenter/data')
             subdirs = os.listdir(allencenter)
             for i in xrange(len(subdirs)):
@@ -108,6 +109,22 @@ class imdb(object):
                 for j in range(len(files)):
                     filename = os.path.join(allencenter, subdir, files[j])
                     backgrounds_color.append(filename)
+            '''
+
+            comotion = os.path.join(self.cache_path, '../D435-data-with-depth/data')
+            subdirs = os.listdir(comotion)
+            for i in xrange(len(subdirs)):
+                subdir = subdirs[i]
+                files = os.listdir(os.path.join(comotion, subdir))
+                for j in range(len(files)):
+                    filename = os.path.join(comotion, subdir, files[j])
+                    if 'depth.png' in filename:
+                        backgrounds_depth.append(filename)
+                    else:
+                        backgrounds_color.append(filename)
+
+            backgrounds_color.sort()
+            backgrounds_depth.sort()
         else:
             '''
             # SUN 2012
@@ -168,13 +185,6 @@ class imdb(object):
             for j in range(len(files)):
                 filename = os.path.join(self.cache_path, '../Kinect', subdir, files[j])
                 backgrounds_depth.append(filename)
-
-        if cfg.INPUT == 'RGBD':
-            backgrounds_color = []
-            for i in xrange(len(backgrounds_depth)):
-                filename = backgrounds_depth[i]
-                filename = filename.replace('depth', 'color')
-                backgrounds_color.append(filename)
 
         for i in xrange(len(backgrounds_color)):
             if not os.path.isfile(backgrounds_color[i]):

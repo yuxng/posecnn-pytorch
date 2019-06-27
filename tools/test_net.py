@@ -100,10 +100,12 @@ if __name__ == '__main__':
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=cfg.TEST.IMS_PER_BATCH, shuffle=shuffle, num_workers=0)
     print('Use dataset `{:s}` for training'.format(dataset.name))
 
-    if args.network_name == 'autoencoder':
+    if cfg.INPUT == 'COLOR':
         background_dataset = get_dataset('background_pascal')
-        background_loader = torch.utils.data.DataLoader(background_dataset, batch_size=cfg.TEST.IMS_PER_BATCH,
-                                                     shuffle=True, num_workers=8)
+    else:
+        background_dataset = get_dataset('background_rgbd')
+    background_loader = torch.utils.data.DataLoader(background_dataset, batch_size=cfg.TEST.IMS_PER_BATCH,
+                                                    shuffle=True, num_workers=8)
 
     output_dir = get_output_dir(dataset, None)
     output_dir = osp.join(output_dir, cfg.TRAIN.SNAPSHOT_INFIX)
@@ -135,9 +137,12 @@ if __name__ == '__main__':
         test_autoencoder(dataloader, background_loader, network, output_dir)
     else:
         # prepare autoencoder and codebook
-        pose_rbpf = PoseRBPF(dataset)
+        if cfg.TRAIN.VERTEX_REG:
+            pose_rbpf = PoseRBPF(dataset)
+        else:
+            pose_rbpf = None
 
-        test(dataloader, network, pose_rbpf, output_dir)
+        test(dataloader, background_loader, network, pose_rbpf, output_dir)
 
         # evaluation
         dataset.evaluation(output_dir)

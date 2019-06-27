@@ -14,9 +14,9 @@ time ./tools/train_net.py \
   --network posecnn_rgbd \
   --pretrained data/checkpoints/vgg16-397923af.pth \
   --dataset ycb_object_train \
-  --cfg experiments/cfgs/ycb_object_subset_D435.yml \
+  --cfg experiments/cfgs/ycb_object_subset_D435_more_objs.yml \
   --solver sgd \
-  --epochs 16
+  --epochs 48
 
 
 

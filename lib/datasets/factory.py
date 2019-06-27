@@ -60,7 +60,7 @@ for split in ['train', 'test']:
             datasets.panda(split))
 
 # background dataset
-for split in ['pascal']:
+for split in ['pascal', 'rgbd']:
     name = 'background_{}'.format(split)
     print(name)
     __sets[name] = (lambda split=split:

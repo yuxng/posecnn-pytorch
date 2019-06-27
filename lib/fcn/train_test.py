@@ -95,12 +95,10 @@ def train(train_loader, background_loader, network, optimizer, epoch):
 
         end = time.time()
 
-        if cfg.INPUT == 'DEPTH':
-            inputs = sample['image_depth']
-        elif cfg.INPUT == 'COLOR':
+        if cfg.INPUT == 'COLOR':
             inputs = sample['image_color']
         elif cfg.INPUT == 'RGBD':
-            inputs = torch.cat((sample['image_color'], sample['image_depth']), dim=1)
+            inputs = torch.cat((sample['image_color'], sample['image_depth'], sample['mask_depth']), dim=1)
         im_info = sample['im_info']
 
         # add background
@@ -111,16 +109,30 @@ def train(train_loader, background_loader, network, optimizer, epoch):
             enum_background = enumerate(background_loader)
             _, background = next(enum_background)
 
-        if inputs.size(0) != background.size(0):
+        if inputs.size(0) != background['background_color'].size(0):
             enum_background = enumerate(background_loader)
             _, background = next(enum_background)
 
-        background = background.cuda()
+        if cfg.INPUT == 'COLOR':
+            background_color = background['background_color'].cuda()
+            for j in range(inputs.size(0)):
+                is_syn = im_info[j, -1]
+                if is_syn or np.random.rand(1) > 0.5:
+                    inputs[j] = mask[j] * inputs[j] + (1 - mask[j]) * background_color[j]
 
-        for j in range(inputs.size(0)):
-            is_syn = im_info[j, -1]
-            if is_syn or np.random.rand(1) > 0.5:
-                inputs[j] = mask[j] * inputs[j] + (1 - mask[j]) * background[j]
+        elif cfg.INPUT == 'RGBD':
+            background_color = background['background_color'].cuda()
+            background_depth = background['background_depth'].cuda()
+            background_mask = background['mask_depth'].cuda()
+            for j in range(inputs.size(0)):
+                is_syn = im_info[j, -1]
+                if is_syn or np.random.rand(1) > 0.5:
+                    # color image
+                    inputs[j,:3] = mask[j] * inputs[j,:3] + (1 - mask[j]) * background_color[j]
+                    # depth image
+                    inputs[j,3:6] = mask[j] * inputs[j,3:6] + (1 - mask[j]) * background_depth[j]
+                    # depth mask
+                    inputs[j,6] = mask[j,0] * inputs[j,6] + (1 - mask[j,0]) * background_mask[j]
 
         labels = sample['label'].cuda()
         meta_data = sample['meta_data'].cuda()
@@ -130,7 +142,7 @@ def train(train_loader, background_loader, network, optimizer, epoch):
         points = sample['points'][0, :, :, :].repeat(cfg.TRAIN.GPUNUM, 1, 1, 1).cuda()
         symmetry = sample['symmetry'][0, :].repeat(cfg.TRAIN.GPUNUM, 1).cuda()
 
-        if cfg.TRAIN.VERTEX_REG:
+        if cfg.TRAIN.VERTEX_REG or cfg.TRAIN.VERTEX_REG_DELTA:
             vertex_targets = sample['vertex_targets'].cuda()
             vertex_weights = sample['vertex_weights'].cuda()
         else:
@@ -138,7 +150,7 @@ def train(train_loader, background_loader, network, optimizer, epoch):
             vertex_weights = []
 
         if cfg.TRAIN.VISUALIZE:
-            _vis_minibatch(inputs, labels, vertex_targets, sample, train_loader.dataset.class_colors)
+            _vis_minibatch(inputs, background, labels, vertex_targets, sample, train_loader.dataset.class_colors)
 
         # compute output
         if cfg.TRAIN.VERTEX_REG:
@@ -163,6 +175,15 @@ def train(train_loader, background_loader, network, optimizer, epoch):
                 loss_box = loss_cross_entropy(out_logsoftmax_box, bbox_labels)
                 loss_location = smooth_l1_loss(bbox_pred, bbox_targets, bbox_inside_weights)
                 loss = loss_label + loss_vertex + loss_box + loss_location
+
+        elif cfg.TRAIN.VERTEX_REG_DELTA:
+            out_logsoftmax, out_weight, out_vertex = network(inputs, labels, meta_data, extents, \
+                                                             gt_boxes, poses, points, symmetry)
+
+            loss_label = cfg.TRAIN.LABEL_W * loss_cross_entropy(out_logsoftmax, out_weight)
+            loss_vertex = cfg.TRAIN.VERTEX_W * smooth_l1_loss(out_vertex, vertex_targets, vertex_weights)
+            loss = loss_label + loss_vertex
+
         else:
             out_logsoftmax, out_weight = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
             loss = loss_cross_entropy(out_logsoftmax, out_weight)
@@ -192,6 +213,9 @@ def train(train_loader, background_loader, network, optimizer, epoch):
                 print('[%d/%d][%d/%d], %.4f, label %.4f, center %.4f, box %.4f (%03d, %03d), loc %.4f, lr %.6f, time %.2f' \
                    % (epoch, cfg.epochs, i, epoch_size, loss.data, loss_label.data, loss_vertex.data, loss_box.data, num_fg.data, num_bg.data, \
                       loss_location.data, optimizer.param_groups[0]['lr'], batch_time.val))
+        elif cfg.TRAIN.VERTEX_REG_DELTA:
+            print('[%d/%d][%d/%d], %.4f, label %.4f, vertex %.4f,  lr %.6f, time %.2f' \
+                  % (epoch, cfg.epochs, i, epoch_size, loss.data, loss_label.data, loss_vertex.data, optimizer.param_groups[0]['lr'], batch_time.val))
         else:
             print('[%d/%d][%d/%d], loss %.4f, lr %.6f, time %.2f' \
                % (epoch, cfg.epochs, i, epoch_size, loss, optimizer.param_groups[0]['lr'], batch_time.val))
@@ -510,10 +534,11 @@ def test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data):
     return poses_return
 
 
-def test(test_loader, network, pose_rbpf, output_dir):
+def test(test_loader, background_loader, network, pose_rbpf, output_dir):
 
     batch_time = AverageMeter()
     epoch_size = len(test_loader)
+    enum_background = enumerate(background_loader)
 
     # switch to test mode
     network.eval()
@@ -527,7 +552,41 @@ def test(test_loader, network, pose_rbpf, output_dir):
         elif cfg.INPUT == 'COLOR':
             inputs = sample['image_color']
         elif cfg.INPUT == 'RGBD':
-            inputs = torch.cat((sample['image_color'], sample['image_depth']), dim=1)
+            inputs = torch.cat((sample['image_color'], sample['image_depth'], sample['mask_depth']), dim=1)
+        im_info = sample['im_info']
+
+        # add background
+        mask = sample['mask']
+        try:
+            _, background = next(enum_background)
+        except:
+            enum_background = enumerate(background_loader)
+            _, background = next(enum_background)
+
+        if inputs.size(0) != background['background_color'].size(0):
+            enum_background = enumerate(background_loader)
+            _, background = next(enum_background)
+
+        if cfg.INPUT == 'COLOR':
+            background_color = background['background_color'].cuda()
+            for j in range(inputs.size(0)):
+                is_syn = im_info[j, -1]
+                if is_syn or np.random.rand(1) > 0.5:
+                    inputs[j] = mask[j] * inputs[j] + (1 - mask[j]) * background_color[j]
+
+        elif cfg.INPUT == 'RGBD':
+            background_color = background['background_color'].cuda()
+            background_depth = background['background_depth'].cuda()
+            background_mask = background['mask_depth'].cuda()
+            for j in range(inputs.size(0)):
+                is_syn = im_info[j, -1]
+                if is_syn or np.random.rand(1) > 0.5:
+                    # color image
+                    inputs[j,:3] = mask[j] * inputs[j,:3] + (1 - mask[j]) * background_color[j]
+                    # depth image
+                    inputs[j,3:6] = mask[j] * inputs[j,3:6] + (1 - mask[j]) * background_depth[j]
+                    # depth mask
+                    inputs[j,6] = mask[j,0] * inputs[j,6] + (1 - mask[j,0]) * background_mask[j]
 
         labels = sample['label'].cuda()
         meta_data = sample['meta_data'].cuda()
@@ -578,6 +637,59 @@ def test(test_loader, network, pose_rbpf, output_dir):
 
                 # run poseRBPF for codebook matching
                 poses = test_pose_rbpf(pose_rbpf, inputs, rois, poses, sample['meta_data'])
+
+        elif cfg.TRAIN.VERTEX_REG_DELTA:
+            out_label, out_vertex, out_center, label_onehot, rois = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
+
+            rois = rois.detach().cpu().numpy()
+            nclasses = label_onehot.shape[1]
+            out_center_cpu = out_center.detach().cpu().numpy()
+            poses_vis = np.zeros((nclasses, 7))
+
+            for c in range(nclasses):
+                poses_vis[c, :4] = np.array([1.0, 0.0, 0.0, 0.0])
+                poses_vis[c, 4:] = np.array(
+                    [out_center_cpu[0, c * 3 + 0], out_center_cpu[0, c * 3 + 1], out_center_cpu[0, c * 3 + 2]])
+
+            poses = poses_vis
+            poses_refined = poses_vis
+
+            visualize = False
+            if visualize:
+                nclasses = labels.shape[1]
+                out_center_cpu = out_center.detach().cpu().numpy()
+                poses_vis = np.zeros((nclasses, 3))
+                for c in range(nclasses):
+                    poses_vis[c, :] = np.array([out_center_cpu[0, c * 3 + 0], out_center_cpu[0, c * 3 + 1], out_center_cpu[0, c * 3 + 2]])
+
+                input_ims = inputs[:,3:6].detach().cpu().numpy()
+                height = input_ims.shape[2]
+                width = input_ims.shape[3]
+                num = 3000
+                index = np.random.permutation(np.arange(width * height))[:num]
+                x_im = input_ims[0, 0, :, :].reshape(width*height)
+                y_im = input_ims[0, 1, :, :].reshape(width*height)
+                z_im = input_ims[0, 2, :, :].reshape(width*height)
+                xyz = np.zeros((num, 3))
+                xyz[:, 0] = x_im[index]
+                xyz[:, 1] = y_im[index]
+                xyz[:, 2] = z_im[index]
+
+                xyz = np.concatenate((xyz, poses_vis[1:, :]), axis=0)
+                colors = np.zeros((xyz.shape[0], 4))
+                colors[0:num, :] = [0.0, 0.0, 1.0, 0.4]
+                colors[num:, :] = [1.0, 0.0, 0.0, 1.0]
+
+                from mpl_toolkits.mplot3d import Axes3D
+                import matplotlib.pyplot as plt
+                fig = plt.figure()
+                ax = fig.add_subplot(111, projection='3d')
+                ax.scatter(xyz[:, 0], xyz[:, 1], xyz[:, 2], c=colors)
+                ax.set_xlabel('X Label')
+                ax.set_ylabel('Y Label')
+                ax.set_zlabel('Z Label')
+                plt.show()
+
         else:
             out_label = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
             out_vertex = []
@@ -715,6 +827,23 @@ def test_image(network, dataset, im_color, im_depth=None):
             for i in range(num):
                 poses[i, 4] *= poses[i, 6] 
                 poses[i, 5] *= poses[i, 6]
+
+    elif cfg.TRAIN.VERTEX_REG_DELTA:
+        out_label, out_vertex, out_center, label_onehot, rois = network(inputs, labels, meta_data,
+                                                                  extents, gt_boxes, poses, points, symmetry)
+
+        rois = rois.detach().cpu().numpy()
+        labels = out_label.detach().cpu().numpy()[0]
+        nclasses = label_onehot.shape[1]
+        out_center_cpu = out_center.detach().cpu().numpy()
+        poses_vis = np.zeros((nclasses, 7))
+
+        for c in range(nclasses):
+            poses_vis[c, :4] = np.array([1.0, 0.0, 0.0, 0.0])
+            poses_vis[c, 4:] = np.array(
+                [out_center_cpu[0, c * 3 + 0], out_center_cpu[0, c * 3 + 1], out_center_cpu[0, c * 3 + 2]])
+
+        poses = poses_vis
 
     else:
         out_label = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
@@ -1026,7 +1155,7 @@ def convert_to_image(im_blob):
     return np.clip(255 * im_blob, 0, 255).astype(np.uint8)
 
 
-def _vis_minibatch(inputs, labels, vertex_targets, sample, class_colors):
+def _vis_minibatch(inputs, background, labels, vertex_targets, sample, class_colors):
 
     """Visualize a mini-batch for debugging."""
     import matplotlib.pyplot as plt
@@ -1037,6 +1166,7 @@ def _vis_minibatch(inputs, labels, vertex_targets, sample, class_colors):
     meta_data_blob = sample['meta_data'].numpy()
     gt_boxes = sample['gt_boxes'].numpy()
     extents = sample['extents'][0, :, :].numpy()
+    background_color = background['background_color'].numpy()
 
     if cfg.TRAIN.VERTEX_REG:
         vertex_target_blob = vertex_targets.cpu().numpy()
@@ -1046,7 +1176,7 @@ def _vis_minibatch(inputs, labels, vertex_targets, sample, class_colors):
         n = 3
     else:
         m = 3
-        n = 3
+        n = 4
     
     for i in range(im_blob.shape[0]):
         fig = plt.figure()
@@ -1071,11 +1201,22 @@ def _vis_minibatch(inputs, labels, vertex_targets, sample, class_colors):
             ax.set_title('color')
             start += 1
 
+            im_background = background_color[i]
+            im_background = im_background.transpose((1, 2, 0)) * 255.0
+            im_background += cfg.PIXEL_MEANS
+            im_background = im_background[:, :, (2, 1, 0)]
+            im_background = np.clip(im_background, 0, 255)
+            im_background = im_background.astype(np.uint8)
+            ax = fig.add_subplot(m, n, start)
+            plt.imshow(im_background)
+            ax.set_title('background')
+            start += 1
+
         if cfg.INPUT == 'DEPTH' or cfg.INPUT == 'RGBD':
             if cfg.INPUT == 'DEPTH':
                 im_depth = im_blob[i, :, :, :].copy()
             else:
-                im_depth = im_blob[i, 3:, :, :].copy()
+                im_depth = im_blob[i, 3:6, :, :].copy()
 
             ax = fig.add_subplot(m, n, start)
             plt.imshow(im_depth[0, :, :])
@@ -1091,6 +1232,13 @@ def _vis_minibatch(inputs, labels, vertex_targets, sample, class_colors):
             plt.imshow(im_depth[2, :, :])
             ax.set_title('depth z')
             start += 1
+
+            if cfg.INPUT == 'RGBD':
+                ax = fig.add_subplot(m, n, start)
+                mask = im_blob[i, 6, :, :].copy()
+                plt.imshow(mask)
+                ax.set_title('depth mask')
+                start += 1
 
         # project the 3D box to image
         pose_blob = gt_poses[i]
@@ -1204,7 +1352,7 @@ def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, sample, points
     gt_boxes = sample['gt_boxes'].numpy()
     extents = sample['extents'][0, :, :].numpy()
 
-    if cfg.TRAIN.VERTEX_REG:
+    if cfg.TRAIN.VERTEX_REG or cfg.TRAIN.VERTEX_REG_DELTA:
         vertex_targets = sample['vertex_targets'].numpy()
         vertex_pred = out_vertex.detach().cpu().numpy()
 
@@ -1299,7 +1447,7 @@ def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, sample, points
             plt.gca().add_patch(
                 plt.Rectangle((x1, y1), x2-x1, y2-y1, fill=False, edgecolor='g', linewidth=3))
 
-        if cfg.TRAIN.VERTEX_REG:
+        if cfg.TRAIN.VERTEX_REG or cfg.TRAIN.VERTEX_REG_DELTA:
 
             # show predicted boxes
             ax = fig.add_subplot(m, n, start)
@@ -1474,7 +1622,7 @@ def vis_test(dataset, im, label, out_vertex, rois, poses, im_pose):
     plt.imshow(im_pose)
     ax.set_title('rendered image')
 
-    if cfg.TRAIN.VERTEX_REG:
+    if cfg.TRAIN.VERTEX_REG or cfg.TRAIN.VERTEX_REG_DELTA:
 
         # show predicted boxes
         ax = fig.add_subplot(2, 4, 3)

@@ -244,6 +244,7 @@ class PoseCNN_RGBD(nn.Module):
         features = list(vgg16.features)[:30]
         self.features_color = nn.ModuleList(features)
         self.features_depth = copy.deepcopy(self.features_color)
+        self.features_depth[0] = nn.Conv2d(4, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
         self.classifier = vgg16.classifier[:-1]
         print(self.features_color)
         print(self.features_depth)
@@ -283,6 +284,20 @@ class PoseCNN_RGBD(nn.Module):
             self.fc10 = fc(4096, 4 * num_classes, relu=False)
             self.pml = PMLoss(hard_angle=cfg.TRAIN.HARD_ANGLE)
 
+        elif cfg.TRAIN.VERTEX_REG_DELTA:
+            # 3D center regression
+            self.conv4_vertex_embed = conv(512, 2*num_units, kernel_size=1, relu=False)
+            self.conv5_vertex_embed = conv(512, 2*num_units, kernel_size=1, relu=False)
+            self.upsample_conv5_vertex_embed = upsample(2.0)
+            self.upsample_vertex_embed = upsample(8.0)
+            self.conv_vertex_score = conv(2 * num_units, 3 * num_classes, kernel_size=1, relu=False)
+
+            # we append features used during segmentation and pass everything through two 1x1 convolutions
+            self.regression_conv1 = conv(3 * num_units, 256, kernel_size=1, relu=True)
+            self.regression_conv2 = conv(256, 2 * num_units, kernel_size=1, relu=True)
+
+            self.conv_vertex_score = conv(2 * num_units, 3 * num_classes, kernel_size=1, relu=False)
+
         for m in self.modules():
             if isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
                 kaiming_normal_(m.weight.data)
@@ -306,6 +321,7 @@ class PoseCNN_RGBD(nn.Module):
 
         # conv features depth
         x = x_rgbd[:, 3:, :, :]
+        depth_mask = x_rgbd[:, 6, :, :]
         for i, model in enumerate(self.features_depth):
             x = model(x)
             if i == 22:
@@ -377,15 +393,121 @@ class PoseCNN_RGBD(nn.Module):
             if self.training:
                 loss_pose = self.pml(poses_pred, poses_target, poses_weight, points, symmetry)
 
+
+        elif cfg.TRAIN.VERTEX_REG_DELTA:
+            # center regression branch
+            out_conv4_vertex_embed = self.conv4_vertex_embed(out_conv4_3)
+            out_conv5_vertex_embed = self.conv5_vertex_embed(out_conv5_3)
+            out_conv5_vertex_embed_up = self.upsample_conv5_vertex_embed(out_conv5_vertex_embed)
+            out_vertex_embed = self.dropout(out_conv4_vertex_embed + out_conv5_vertex_embed_up)
+            out_vertex_embed_up = self.upsample_vertex_embed(out_vertex_embed)
+
+            out_vertex_embed_up = torch.cat((out_vertex_embed_up, out_embed_up.detach()), dim=1)
+            out_vertex_embed_up = self.regression_conv1(out_vertex_embed_up)
+            out_vertex_embed_up = self.regression_conv2(out_vertex_embed_up)
+
+            out_vertex = self.conv_vertex_score(out_vertex_embed_up)
+
+            if not self.training:
+                batch_size = out_vertex.shape[0]
+                stacked_size = out_vertex.shape[1]
+                height = out_vertex.shape[2]
+                width = out_vertex.shape[3]
+                nclasses = stacked_size / 3
+                out_label_indices = out_label.unsqueeze(1).long()
+                label_onehot = torch.zeros(out_score.shape).cuda()
+                label_onehot.scatter_(1, out_label_indices, 1)
+
+                extents_batch = extents.repeat(batch_size, 1, 1)
+                extents_largest_dim = torch.sqrt((extents_batch * extents_batch).sum(dim=2))
+                extents_largest_dim = extents_largest_dim.repeat(1, 3)
+                extents_largest_dim = extents_largest_dim.reshape(batch_size, 3, nclasses)
+                extents_largest_dim = extents_largest_dim.transpose(1, 2).reshape(batch_size, 3 * nclasses)
+
+                label_onehot_tiled = label_onehot.repeat(1, 1, 3, 1).view(batch_size, -1, height, width)
+                xyz_images = x_rgbd[:, 3:6, :, :]
+                xyz_images = xyz_images.repeat(1, stacked_size / 3, 1, 1)
+                mask_repeat = depth_mask.repeat(1, stacked_size, 1, 1)
+                label_onehot_tiled = label_onehot_tiled * mask_repeat
+
+                delta_centers = out_vertex * label_onehot_tiled * extents_largest_dim.unsqueeze(2).unsqueeze(2) * 0.5
+                xyz_centers = xyz_images * label_onehot_tiled
+
+                center_predictions = xyz_centers - delta_centers
+
+                object_centers = torch.zeros(batch_size, nclasses * 3).cuda().float()
+                for b in range(batch_size):
+                    for k in range(object_centers.shape[1]):
+                        valid_points = torch.masked_select(center_predictions[b, k, :, :], label_onehot_tiled[b, k, :, :].byte())
+                        if valid_points.shape[0]:
+                            med_value = torch.median(valid_points)
+                            object_centers[b, k] = med_value
+                        else:
+                            object_centers[b, k] = 0.0
+
+                min_coords = object_centers - extents_largest_dim/2.0
+                max_coords = object_centers + extents_largest_dim/2.0
+
+                min_coords = min_coords.reshape(batch_size, nclasses, 3)
+                max_coords = max_coords.reshape(batch_size, nclasses, 3)
+
+                object_centers_reshape = object_centers.reshape(batch_size, nclasses, 3)
+
+                zs = torch.clamp(object_centers_reshape[:, :, 2], min=0.001)
+
+                x_mins = min_coords[:, :, 0]
+                x_maxs = max_coords[:, :, 0]
+
+                y_mins = min_coords[:, :, 1]
+                y_maxs = max_coords[:, :, 1]
+
+                fx = cfg.INTRINSICS[0]
+                px = cfg.INTRINSICS[2]
+                fy = cfg.INTRINSICS[4]
+                py = cfg.INTRINSICS[5]
+
+                col_mins = x_mins / zs * fx + px
+                col_maxs = x_maxs / zs * fx + px
+
+                row_mins = y_mins / zs * fy + py
+                row_maxs = y_maxs / zs * fy + py
+
+                col_mins = torch.clamp(col_mins, min=0.0, max=width)
+                row_mins = torch.clamp(row_mins, min=0.0, max=height)
+
+                col_maxs = torch.clamp(col_maxs, min=0.0, max=width)
+                row_maxs = torch.clamp(row_maxs, min=0.0, max=height)
+
+                col_mins = col_mins.reshape(nclasses * batch_size, 1)
+                row_mins = row_mins.reshape(nclasses * batch_size, 1)
+                col_maxs = col_maxs.reshape(nclasses * batch_size, 1)
+                row_maxs = row_maxs.reshape(nclasses * batch_size, 1)
+
+                class_range = torch.arange(nclasses).float()
+                class_range = class_range.repeat(batch_size)
+                class_range = class_range.unsqueeze_(1).reshape(nclasses * batch_size, 1)
+
+                batch_ids = torch.arange(batch_size)
+                batch_ids = batch_ids.repeat(nclasses).unsqueeze(1)
+                batch_ids = batch_ids.reshape(nclasses, batch_size)
+                batch_ids = batch_ids.transpose(0, 1).reshape(nclasses * batch_size, 1).float()
+
+                bounding_boxes = torch.cat((batch_ids.cuda(), class_range.cuda(), col_mins, row_mins, col_maxs, row_maxs), dim=1)
+
+
         if self.training:
             if cfg.TRAIN.VERTEX_REG:
                 return out_logsoftmax, out_weight, out_vertex, out_logsoftmax_box, bbox_label_weights, \
                        bbox_pred, bbox_targets, bbox_inside_weights, loss_pose, poses_weight
+            elif cfg.TRAIN.VERTEX_REG_DELTA:
+                return out_logsoftmax, out_weight, out_vertex
             else:
                 return out_logsoftmax, out_weight
         else:
             if cfg.TRAIN.VERTEX_REG:
                 return out_label, out_vertex, rois, out_pose, out_quaternion
+            elif cfg.TRAIN.VERTEX_REG_DELTA:
+                return out_label, out_vertex, object_centers, label_onehot, bounding_boxes
             else:
                 return out_label
 
@@ -458,7 +580,7 @@ def posecnn_rgbd(num_classes, num_units, data=None):
                     key = mk[:pos] + mk[pos+6:]
 
                 pos = mk.find('_depth')
-                if pos > 0:
+                if pos > 0 and not ('features_depth.0' in key):
                     key = mk[:pos] + mk[pos+6:]
 
                 if key in data:
