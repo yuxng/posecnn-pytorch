@@ -15,7 +15,7 @@ class BackgroundDataset(data.Dataset, datasets.imdb):
 
     def __init__(self, name):
 
-        self._name = 'rgbd'
+        self._name = name
         self.files_color = []
         self.files_depth = []
 

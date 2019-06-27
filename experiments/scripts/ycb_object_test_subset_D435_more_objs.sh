@@ -10,7 +10,7 @@ LOG="experiments/logs/ycb_object_flow_test.txt.`date +'%Y-%m-%d_%H-%M-%S'`"
 exec &> >(tee -a "$LOG")
 echo Logging output to "$LOG"
 
-time ./tools/test_net.py --gpu 0 \
+time ./tools/test_net.py --gpu $1 \
   --network posecnn_rgbd \
   --pretrained output/ycb_object/ycb_object_train/vgg16_ycb_object_pose_epoch_28.checkpoint.pth \
   --dataset ycb_object_test \

@@ -21,6 +21,7 @@ from utils.se3 import *
 from utils.nms import *
 from utils.pose_error import re, te
 from scipy.optimize import minimize
+from utils.loose_bounding_boxes import compute_centroids_and_loose_bounding_boxes, mean_shift_and_loose_bounding_boxes
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -255,12 +256,12 @@ def train_autoencoder(train_loader, background_loader, network, optimizer, epoch
             enum_background = enumerate(background_loader)
             _, background = next(enum_background)
 
-        if image.size(0) != background.size(0):
+        if image.size(0) != background['background_color'].size(0):
             enum_background = enumerate(background_loader)
             _, background = next(enum_background)
 
-        background = background.cuda()
-        inputs = mask * image + (1 - mask) * background
+        background_color = background['background_color'].cuda()
+        inputs = mask * image + (1 - mask) * background_color
         inputs = torch.clamp(inputs, min=0.0, max=1.0)
 
         # compute output
@@ -275,7 +276,7 @@ def train_autoencoder(train_loader, background_loader, network, optimizer, epoch
         train_loader.dataset._losses_pose[torch.flatten(index_euler)] = losses_euler
 
         if cfg.TRAIN.VISUALIZE:
-            _vis_minibatch_autoencoder(inputs, background, mask, sample, out_images)
+            _vis_minibatch_autoencoder(inputs, background_color, mask, sample, out_images)
 
         # record loss
         losses.update(loss.data, inputs.size(0))
@@ -452,12 +453,12 @@ def test_autoencoder(test_loader, background_loader, network, output_dir):
             enum_background = enumerate(background_loader)
             _, background = next(enum_background)
 
-        if image.size(0) != background.size(0):
+        if image.size(0) != background['background_color'].size(0):
             enum_background = enumerate(background_loader)
             _, background = next(enum_background)
 
-        background = background.cuda()
-        inputs = mask * image + (1 - mask) * background
+        background_color = background['background_color'].cuda()
+        inputs = mask * image + (1 - mask) * background_color
         inputs = torch.clamp(inputs, min=0.0, max=1.0)
 
         # compute output
@@ -484,7 +485,7 @@ def test_autoencoder(test_loader, background_loader, network, output_dir):
                 im_render = render_images(test_loader.dataset, poses)
 
         if cfg.TEST.VISUALIZE:
-            _vis_minibatch_autoencoder(inputs, background, mask, sample, out_images, im_render)
+            _vis_minibatch_autoencoder(inputs, background_color, mask, sample, out_images, im_render)
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -639,20 +640,26 @@ def test(test_loader, background_loader, network, pose_rbpf, output_dir):
                 poses = test_pose_rbpf(pose_rbpf, inputs, rois, poses, sample['meta_data'])
 
         elif cfg.TRAIN.VERTEX_REG_DELTA:
-            out_label, out_vertex, out_center, label_onehot, rois = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
+
+            out_label, out_vertex = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
+            if not cfg.TEST.MEAN_SHIFT:
+                out_center, rois = compute_centroids_and_loose_bounding_boxes(out_vertex, out_label, extents, \
+                    inputs[:, 3:6, :, :], inputs[:, 6, :, :], test_loader.dataset._intrinsic_matrix)
+            else:
+                out_center, rois = mean_shift_and_loose_bounding_boxes(out_vertex, out_label, extents, \
+                    inputs[:, 3:6, :, :], inputs[:, 6, :, :], test_loader.dataset._intrinsic_matrix)
 
             rois = rois.detach().cpu().numpy()
-            nclasses = label_onehot.shape[1]
             out_center_cpu = out_center.detach().cpu().numpy()
-            poses_vis = np.zeros((nclasses, 7))
+            poses_vis = np.zeros((rois.shape[0], 7))
 
-            for c in range(nclasses):
+            for c in range(rois.shape[0]):
                 poses_vis[c, :4] = np.array([1.0, 0.0, 0.0, 0.0])
-                poses_vis[c, 4:] = np.array(
-                    [out_center_cpu[0, c * 3 + 0], out_center_cpu[0, c * 3 + 1], out_center_cpu[0, c * 3 + 2]])
-
+                poses_vis[c, 4:] = np.array([out_center_cpu[c, 0], out_center_cpu[c, 1], out_center_cpu[c, 2]])
             poses = poses_vis
             poses_refined = poses_vis
+            print(rois)
+            print(poses)
 
             visualize = False
             if visualize:

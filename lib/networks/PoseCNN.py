@@ -408,93 +408,6 @@ class PoseCNN_RGBD(nn.Module):
 
             out_vertex = self.conv_vertex_score(out_vertex_embed_up)
 
-            if not self.training:
-                batch_size = out_vertex.shape[0]
-                stacked_size = out_vertex.shape[1]
-                height = out_vertex.shape[2]
-                width = out_vertex.shape[3]
-                nclasses = stacked_size / 3
-                out_label_indices = out_label.unsqueeze(1).long()
-                label_onehot = torch.zeros(out_score.shape).cuda()
-                label_onehot.scatter_(1, out_label_indices, 1)
-
-                extents_batch = extents.repeat(batch_size, 1, 1)
-                extents_largest_dim = torch.sqrt((extents_batch * extents_batch).sum(dim=2))
-                extents_largest_dim = extents_largest_dim.repeat(1, 3)
-                extents_largest_dim = extents_largest_dim.reshape(batch_size, 3, nclasses)
-                extents_largest_dim = extents_largest_dim.transpose(1, 2).reshape(batch_size, 3 * nclasses)
-
-                label_onehot_tiled = label_onehot.repeat(1, 1, 3, 1).view(batch_size, -1, height, width)
-                xyz_images = x_rgbd[:, 3:6, :, :]
-                xyz_images = xyz_images.repeat(1, stacked_size / 3, 1, 1)
-                mask_repeat = depth_mask.repeat(1, stacked_size, 1, 1)
-                label_onehot_tiled = label_onehot_tiled * mask_repeat
-
-                delta_centers = out_vertex * label_onehot_tiled * extents_largest_dim.unsqueeze(2).unsqueeze(2) * 0.5
-                xyz_centers = xyz_images * label_onehot_tiled
-
-                center_predictions = xyz_centers - delta_centers
-
-                object_centers = torch.zeros(batch_size, nclasses * 3).cuda().float()
-                for b in range(batch_size):
-                    for k in range(object_centers.shape[1]):
-                        valid_points = torch.masked_select(center_predictions[b, k, :, :], label_onehot_tiled[b, k, :, :].byte())
-                        if valid_points.shape[0]:
-                            med_value = torch.median(valid_points)
-                            object_centers[b, k] = med_value
-                        else:
-                            object_centers[b, k] = 0.0
-
-                min_coords = object_centers - extents_largest_dim/2.0
-                max_coords = object_centers + extents_largest_dim/2.0
-
-                min_coords = min_coords.reshape(batch_size, nclasses, 3)
-                max_coords = max_coords.reshape(batch_size, nclasses, 3)
-
-                object_centers_reshape = object_centers.reshape(batch_size, nclasses, 3)
-
-                zs = torch.clamp(object_centers_reshape[:, :, 2], min=0.001)
-
-                x_mins = min_coords[:, :, 0]
-                x_maxs = max_coords[:, :, 0]
-
-                y_mins = min_coords[:, :, 1]
-                y_maxs = max_coords[:, :, 1]
-
-                fx = cfg.INTRINSICS[0]
-                px = cfg.INTRINSICS[2]
-                fy = cfg.INTRINSICS[4]
-                py = cfg.INTRINSICS[5]
-
-                col_mins = x_mins / zs * fx + px
-                col_maxs = x_maxs / zs * fx + px
-
-                row_mins = y_mins / zs * fy + py
-                row_maxs = y_maxs / zs * fy + py
-
-                col_mins = torch.clamp(col_mins, min=0.0, max=width)
-                row_mins = torch.clamp(row_mins, min=0.0, max=height)
-
-                col_maxs = torch.clamp(col_maxs, min=0.0, max=width)
-                row_maxs = torch.clamp(row_maxs, min=0.0, max=height)
-
-                col_mins = col_mins.reshape(nclasses * batch_size, 1)
-                row_mins = row_mins.reshape(nclasses * batch_size, 1)
-                col_maxs = col_maxs.reshape(nclasses * batch_size, 1)
-                row_maxs = row_maxs.reshape(nclasses * batch_size, 1)
-
-                class_range = torch.arange(nclasses).float()
-                class_range = class_range.repeat(batch_size)
-                class_range = class_range.unsqueeze_(1).reshape(nclasses * batch_size, 1)
-
-                batch_ids = torch.arange(batch_size)
-                batch_ids = batch_ids.repeat(nclasses).unsqueeze(1)
-                batch_ids = batch_ids.reshape(nclasses, batch_size)
-                batch_ids = batch_ids.transpose(0, 1).reshape(nclasses * batch_size, 1).float()
-
-                bounding_boxes = torch.cat((batch_ids.cuda(), class_range.cuda(), col_mins, row_mins, col_maxs, row_maxs), dim=1)
-
-
         if self.training:
             if cfg.TRAIN.VERTEX_REG:
                 return out_logsoftmax, out_weight, out_vertex, out_logsoftmax_box, bbox_label_weights, \
@@ -507,9 +420,10 @@ class PoseCNN_RGBD(nn.Module):
             if cfg.TRAIN.VERTEX_REG:
                 return out_label, out_vertex, rois, out_pose, out_quaternion
             elif cfg.TRAIN.VERTEX_REG_DELTA:
-                return out_label, out_vertex, object_centers, label_onehot, bounding_boxes
+                return out_label, out_vertex
             else:
-                return out_label
+                return out_label     
+
 
     def weight_parameters(self):
         return [param for name, param in self.named_parameters() if 'weight' in name]
