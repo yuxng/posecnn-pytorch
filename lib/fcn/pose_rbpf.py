@@ -21,7 +21,7 @@ class PoseRBPF:
             ind = cfg.TRAIN.CLASSES[i]
             cls = dataset._classes_all[ind]
 
-            filename = os.path.join('data', 'checkpoints', 'encoder_ycb_object_' + cls + '_epoch_200.checkpoint.pth')
+            filename = os.path.join('data', 'checkpoints', 'encoder_ycb_object_' + cls + '_epoch_100.checkpoint.pth')
             if os.path.exists(filename):
                 autoencoder_data = torch.load(filename)
                 autoencoders[i] = networks.__dict__['autoencoder'](1, 128, autoencoder_data).cuda(device=cfg.device)
@@ -63,7 +63,7 @@ class PoseRBPF:
         intrinsics = self.dataset._intrinsic_matrix
 
         # sample around the center of bounding box
-        bound = roi_size * 0.1
+        bound = roi_size * 0.05
         uv_h = np.array([uv_init[0], uv_init[1], 1])
         uv_h = np.repeat(np.expand_dims(uv_h, axis=0), n_init_samples, axis=0)
         uv_h[:, :2] += np.random.uniform(-bound, bound, (n_init_samples, 2))
@@ -72,7 +72,7 @@ class PoseRBPF:
 
         # sample around z
         z_init = (128 - 40) * render_dist / roi_size * intrinsics[0, 0] / cfg.TRAIN.FU
-        z = np.random.uniform(0.8 * z_init, 1.2 * z_init, (n_init_samples, 1))
+        z = np.random.uniform(0.9 * z_init, 1.1 * z_init, (n_init_samples, 1))
 
         # evaluate translation
         distribution, out_images, in_images = self.evaluate_particles(autoencoder, codebook, codes_gpu, image, intrinsics, uv_h, z, render_dist, 0.1)

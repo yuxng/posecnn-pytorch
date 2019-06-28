@@ -624,20 +624,16 @@ class YCBObject(data.Dataset, datasets.imdb):
         c = np.zeros((2, 1), dtype=np.float32)
         for i in xrange(1, num_classes):
 
-            valid_mask = z_image != 0.0
-            label_mask = im_label == classes[i]
-
+            valid_mask = (z_image != 0.0)
+            label_mask = (im_label == classes[i])
             fin_mask = valid_mask * label_mask
 
             y, x = np.where(fin_mask)
             ind = np.where(cls_indexes == classes[i])[0]
-
             if len(x) > 0 and len(ind) > 0:
 
                 extents_here = self._extents[i, :]
-
                 largest_dim = np.sqrt(np.sum(extents_here * extents_here))
-
                 half_diameter = largest_dim / 2.0
 
                 c[0] = center[ind, 0]
@@ -652,7 +648,6 @@ class YCBObject(data.Dataset, datasets.imdb):
                         x_center_coord = poses[0, 3, ind]
                         y_center_coord = poses[1, 3, ind]
                         z_center_coord = poses[2, 3, ind]
-
                     else:
                         x_center_coord = poses[ind, -3]
                         y_center_coord = poses[ind, -2]
@@ -669,57 +664,6 @@ class YCBObject(data.Dataset, datasets.imdb):
                 vertex_weights[3 * i + 0, y, x] = cfg.TRAIN.VERTEX_W_INSIDE
                 vertex_weights[3 * i + 1, y, x] = cfg.TRAIN.VERTEX_W_INSIDE
                 vertex_weights[3 * i + 2, y, x] = cfg.TRAIN.VERTEX_W_INSIDE
-
-        '''
-        for i in range(num_classes):
-            print i, 'out of', num_classes
-            import matplotlib.pyplot as plt
-            x_target = vertex_targets[i * 3 + 0, :, :]
-            y_target = vertex_targets[i * 3 + 1, :, :]
-            z_target = vertex_targets[i * 3 + 2, :, :]
-
-            x_weights = vertex_weights[i * 3 + 0, :, :]
-            y_weights = vertex_weights[i * 3 + 1, :, :]
-            z_weights = vertex_weights[i * 3 + 2, :, :]
-
-            fig = plt.figure()
-
-            fig.add_subplot(2, 3, 1)
-            plt.imshow(x_target)
-
-            fig.add_subplot(2, 3, 2)
-            plt.imshow(y_target)
-
-            fig.add_subplot(2, 3, 3)
-            plt.imshow(z_target)
-
-            fig.add_subplot(2, 3, 4)
-            plt.imshow(x_weights)
-
-            fig.add_subplot(2, 3, 5)
-            plt.imshow(y_weights)
-
-            fig.add_subplot(2, 3, 6)
-            plt.imshow(z_weights)
-
-            plt.show()
-
-        xyz = np.zeros((width * height, 3))
-        import pptk
-        for row in range(height):
-            for col in range(width):
-                xyz[row * width + col, 0] = x_image[row, col]
-                xyz[row * width + col, 1] = y_image[row, col]
-                xyz[row * width + col, 2] = z_image[row, col]
-
-                for k in range(num_classes):
-                    xyz[row * width + col, 0] -= vertex_targets[k * 3 + 0, row, col]
-                    xyz[row * width + col, 1] -= vertex_targets[k * 3 + 1, row, col]
-                    xyz[row * width + col, 2] -= vertex_targets[k * 3 + 2, row, col]
-
-        v = pptk.viewer(xyz)
-        v.attributes(xyz[:, 2])
-        '''
         
         return vertex_targets, vertex_weights
 

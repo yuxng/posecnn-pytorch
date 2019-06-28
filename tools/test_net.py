@@ -107,6 +107,13 @@ if __name__ == '__main__':
     background_loader = torch.utils.data.DataLoader(background_dataset, batch_size=cfg.TEST.IMS_PER_BATCH,
                                                     shuffle=True, num_workers=8)
 
+    # overwrite intrinsics
+    if len(cfg.INTRINSICS) > 0:
+        K = np.array(cfg.INTRINSICS).reshape(3, 3)
+        dataset._intrinsic_matrix = K
+        background_dataset._intrinsic_matrix = K
+        print(dataset._intrinsic_matrix)
+
     output_dir = get_output_dir(dataset, None)
     output_dir = osp.join(output_dir, cfg.TRAIN.SNAPSHOT_INFIX)
     print('Output will be saved to `{:s}`'.format(output_dir))

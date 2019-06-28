@@ -224,6 +224,379 @@ def train(train_loader, background_loader, network, optimizer, epoch):
         cfg.TRAIN.ITERS += 1
 
 
+def test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data):
+
+    n_init_samples = 100
+    num = rois.shape[0]
+    uv_init = np.zeros((2, ), dtype=np.float32)
+    pixel_mean = torch.tensor(cfg.PIXEL_MEANS / 255.0).cuda().float()
+    poses_return = poses.copy()
+
+    for i in range(num):
+        ind = int(rois[i, 0])
+        image = inputs[ind].permute(1, 2, 0) + pixel_mean
+        cls = int(rois[i, 1])
+
+        intrinsic_matrix = meta_data[ind, :9].numpy().reshape((3, 3))
+        fx = intrinsic_matrix[0, 0]
+        fy = intrinsic_matrix[1, 1]
+        px = intrinsic_matrix[0, 2]
+        py = intrinsic_matrix[1, 2]
+
+        # project the 3D translation to get the center
+        uv_init[0] = fx * poses[i, 4] / poses[i, 6] + px
+        uv_init[1] = fy * poses[i, 5] / poses[i, 6] + py
+
+        roi_w = rois[i, 4] - rois[i, 2]
+        roi_h = rois[i, 5] - rois[i, 3]
+        roi_s = max(roi_w, roi_h)
+
+        pose = pose_rbpf.initialize(image, uv_init, n_init_samples, cls, roi_s)
+        if pose[-1] > 0:
+            poses_return[i, :] = pose
+    return poses_return
+
+
+def test(test_loader, background_loader, network, pose_rbpf, output_dir):
+
+    batch_time = AverageMeter()
+    epoch_size = len(test_loader)
+    enum_background = enumerate(background_loader)
+
+    # switch to test mode
+    network.eval()
+
+    for i, sample in enumerate(test_loader):
+
+        end = time.time()
+
+        if cfg.INPUT == 'DEPTH':
+            inputs = sample['image_depth']
+        elif cfg.INPUT == 'COLOR':
+            inputs = sample['image_color']
+        elif cfg.INPUT == 'RGBD':
+            inputs = torch.cat((sample['image_color'], sample['image_depth'], sample['mask_depth']), dim=1)
+        im_info = sample['im_info']
+
+        # add background
+        mask = sample['mask']
+        try:
+            _, background = next(enum_background)
+        except:
+            enum_background = enumerate(background_loader)
+            _, background = next(enum_background)
+
+        if inputs.size(0) != background['background_color'].size(0):
+            enum_background = enumerate(background_loader)
+            _, background = next(enum_background)
+
+        if cfg.INPUT == 'COLOR':
+            background_color = background['background_color'].cuda()
+            for j in range(inputs.size(0)):
+                is_syn = im_info[j, -1]
+                if is_syn:
+                    inputs[j] = mask[j] * inputs[j] + (1 - mask[j]) * background_color[j]
+
+        elif cfg.INPUT == 'RGBD':
+            background_color = background['background_color'].cuda()
+            background_depth = background['background_depth'].cuda()
+            background_mask = background['mask_depth'].cuda()
+            for j in range(inputs.size(0)):
+                is_syn = im_info[j, -1]
+                if is_syn or np.random.rand(1) > 0.5:
+                    # color image
+                    inputs[j,:3] = mask[j] * inputs[j,:3] + (1 - mask[j]) * background_color[j]
+                    # depth image
+                    inputs[j,3:6] = mask[j] * inputs[j,3:6] + (1 - mask[j]) * background_depth[j]
+                    # depth mask
+                    inputs[j,6] = mask[j,0] * inputs[j,6] + (1 - mask[j,0]) * background_mask[j]
+
+        labels = sample['label'].cuda()
+        meta_data = sample['meta_data'].cuda()
+        extents = sample['extents'][0, :, :].repeat(cfg.TRAIN.GPUNUM, 1, 1).cuda()
+        gt_boxes = sample['gt_boxes'].cuda()
+        poses = sample['poses'].cuda()
+        points = sample['points'][0, :, :, :].repeat(cfg.TRAIN.GPUNUM, 1, 1, 1).cuda()
+        symmetry = sample['symmetry'][0, :].repeat(cfg.TRAIN.GPUNUM, 1).cuda()
+        
+        # compute output
+        if cfg.TRAIN.VERTEX_REG:
+            if cfg.TRAIN.POSE_REG:
+                out_label, out_vertex, rois, out_pose, out_quaternion = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
+                
+                # combine poses
+                rois = rois.detach().cpu().numpy()
+                out_pose = out_pose.detach().cpu().numpy()
+                out_quaternion = out_quaternion.detach().cpu().numpy()
+                num = rois.shape[0]
+                poses = out_pose.copy()
+                for j in xrange(num):
+                    cls = int(rois[j, 1])
+                    if cls >= 0:
+                        qt = out_quaternion[j, 4*cls:4*cls+4]
+                        qt = qt / np.linalg.norm(qt)
+                        # allocentric to egocentric
+                        T = poses[j, 4:]
+                        poses[j, :4] = allocentric2egocentric(qt, T)
+
+                # optimize depths
+                poses, poses_refined = optimize_depths(rois, poses, test_loader.dataset._points_all, test_loader.dataset._intrinsic_matrix)
+            else:
+                out_label, out_vertex, rois, out_pose = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
+                rois = rois.detach().cpu().numpy()
+                out_pose = out_pose.detach().cpu().numpy()
+                poses = out_pose.copy()
+                poses_refined = []
+
+                # non-maximum suppression within class
+                index = nms(rois, 0.5)
+                rois = rois[index, :]
+                poses = poses[index, :]
+
+                num = rois.shape[0]
+                for j in range(num):
+                    poses[j, 4] *= poses[j, 6] 
+                    poses[j, 5] *= poses[j, 6]
+
+                # run poseRBPF for codebook matching
+                poses = test_pose_rbpf(pose_rbpf, inputs, rois, poses, sample['meta_data'])
+
+        elif cfg.TRAIN.VERTEX_REG_DELTA:
+
+            out_label, out_vertex = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
+            if not cfg.TEST.MEAN_SHIFT:
+                out_center, rois = compute_centroids_and_loose_bounding_boxes(out_vertex, out_label, extents, \
+                    inputs[:, 3:6, :, :], inputs[:, 6, :, :], test_loader.dataset._intrinsic_matrix)
+            else:
+                out_center, rois = mean_shift_and_loose_bounding_boxes(out_vertex, out_label, extents, \
+                    inputs[:, 3:6, :, :], inputs[:, 6, :, :], test_loader.dataset._intrinsic_matrix)
+
+            rois = rois.detach().cpu().numpy()
+            out_center_cpu = out_center.detach().cpu().numpy()
+            poses_vis = np.zeros((rois.shape[0], 7))
+
+            for c in range(rois.shape[0]):
+                poses_vis[c, :4] = np.array([1.0, 0.0, 0.0, 0.0])
+                poses_vis[c, 4:] = np.array([out_center_cpu[c, 0], out_center_cpu[c, 1], out_center_cpu[c, 2]])
+            poses = poses_vis
+            poses_refined = poses_vis
+
+            visualize = False
+            if visualize:
+                nclasses = labels.shape[1]
+                out_center_cpu = out_center.detach().cpu().numpy()
+                poses_vis = np.zeros((nclasses, 3))
+                for c in range(nclasses):
+                    poses_vis[c, :] = np.array([out_center_cpu[0, c * 3 + 0], out_center_cpu[0, c * 3 + 1], out_center_cpu[0, c * 3 + 2]])
+
+                input_ims = inputs[:,3:6].detach().cpu().numpy()
+                height = input_ims.shape[2]
+                width = input_ims.shape[3]
+                num = 3000
+                index = np.random.permutation(np.arange(width * height))[:num]
+                x_im = input_ims[0, 0, :, :].reshape(width*height)
+                y_im = input_ims[0, 1, :, :].reshape(width*height)
+                z_im = input_ims[0, 2, :, :].reshape(width*height)
+                xyz = np.zeros((num, 3))
+                xyz[:, 0] = x_im[index]
+                xyz[:, 1] = y_im[index]
+                xyz[:, 2] = z_im[index]
+
+                xyz = np.concatenate((xyz, poses_vis[1:, :]), axis=0)
+                colors = np.zeros((xyz.shape[0], 4))
+                colors[0:num, :] = [0.0, 0.0, 1.0, 0.4]
+                colors[num:, :] = [1.0, 0.0, 0.0, 1.0]
+
+                from mpl_toolkits.mplot3d import Axes3D
+                import matplotlib.pyplot as plt
+                fig = plt.figure()
+                ax = fig.add_subplot(111, projection='3d')
+                ax.scatter(xyz[:, 0], xyz[:, 1], xyz[:, 2], c=colors)
+                ax.set_xlabel('X Label')
+                ax.set_ylabel('Y Label')
+                ax.set_zlabel('Z Label')
+                plt.show()
+
+        else:
+            out_label = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
+            out_vertex = []
+            rois = []
+            poses = []
+            poses_refined = []
+
+        if cfg.TEST.VISUALIZE:
+            _vis_test(inputs, labels, out_label, out_vertex, rois, poses, sample, \
+                test_loader.dataset._points_all, test_loader.dataset.classes, test_loader.dataset.class_colors)
+
+        # measure elapsed time
+        batch_time.update(time.time() - end)
+
+        result = {'labels': out_label, 'rois': rois, 'poses': poses, 'poses_refined': poses_refined}
+        if 'video_id' in sample and 'image_id' in sample:
+            filename = os.path.join(output_dir, sample['video_id'][0] + '_' + sample['image_id'][0] + '.mat')
+        else:
+            filename = os.path.join(output_dir, '%06d.mat' % i)
+        print filename
+        scipy.io.savemat(filename, result, do_compression=True)
+
+        print('[%d/%d], batch time %.2f' % (i, epoch_size, batch_time.val))
+
+    filename = os.path.join(output_dir, 'results_posecnn.mat')
+    if os.path.exists(filename):
+        os.remove(filename)
+
+
+def test_image(network, dataset, im_color, im_depth=None):
+    """test on a single image"""
+
+    num_classes = dataset.num_classes
+
+    # compute image blob
+    im = im_color.astype(np.float32, copy=True)
+    im -= cfg.PIXEL_MEANS
+    height = im.shape[0]
+    width = im.shape[1]
+    im = np.transpose(im / 255.0, (2, 0, 1))
+    im = im[np.newaxis, :, :, :]
+
+    if cfg.INPUT == 'DEPTH' or cfg.INPUT == 'RGBD':
+        im_xyz = dataset.backproject(im_depth, dataset._intrinsic_matrix, 1.0)
+        im_xyz = np.transpose(im_xyz, (2, 0, 1))
+        im_xyz = im_xyz[np.newaxis, :, :, :]
+        depth_mask = im_depth > 0.0
+        depth_mask = depth_mask.astype('float')
+
+    # construct the meta data
+    K = dataset._intrinsic_matrix
+    Kinv = np.linalg.pinv(K)
+    meta_data_blob = np.zeros((1, 18), dtype=np.float32)
+    meta_data_blob[0, 0:9] = K.flatten()
+    meta_data_blob[0, 9:18] = Kinv.flatten()
+
+    # use fake label blob
+    label_blob = np.zeros((1, num_classes, height, width), dtype=np.float32)
+    pose_blob = np.zeros((1, num_classes, 9), dtype=np.float32)
+    gt_boxes = np.zeros((1, num_classes, 5), dtype=np.float32)
+
+    # transfer to GPU
+    if cfg.INPUT == 'DEPTH':
+        inputs = torch.from_numpy(im_xyz).cuda().float()
+    elif cfg.INPUT == 'COLOR':
+        inputs = torch.from_numpy(im).cuda()
+    elif cfg.INPUT == 'RGBD':
+        im_1 = torch.from_numpy(im).cuda()
+        im_2 = torch.from_numpy(im_xyz).cuda().float()
+        im_3 = torch.from_numpy(depth_mask).cuda().float()
+        im_3.unsqueeze_(0).unsqueeze_(0)
+        inputs = torch.cat((im_1, im_2, im_3), dim=1)
+
+    labels = torch.from_numpy(label_blob).cuda()
+    meta_data = torch.from_numpy(meta_data_blob).cuda()
+    extents = torch.from_numpy(dataset._extents).cuda()
+    gt_boxes = torch.from_numpy(gt_boxes).cuda()
+    poses = torch.from_numpy(pose_blob).cuda()
+    points = torch.from_numpy(dataset._point_blob).cuda()
+    symmetry = torch.from_numpy(dataset._symmetry).cuda()
+
+    if cfg.TRAIN.VERTEX_REG:
+
+        if cfg.TRAIN.POSE_REG:
+            out_label, out_vertex, rois, out_pose, out_quaternion = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
+            labels = out_label.detach().cpu().numpy()[0]
+
+            # combine poses
+            rois = rois.detach().cpu().numpy()
+            out_pose = out_pose.detach().cpu().numpy()
+            out_quaternion = out_quaternion.detach().cpu().numpy()
+            num = rois.shape[0]
+            poses = out_pose.copy()
+            for j in xrange(num):
+                cls = int(rois[j, 1])
+                if cls >= 0:
+                    qt = out_quaternion[j, 4*cls:4*cls+4]
+                    qt = qt / np.linalg.norm(qt)
+                    # allocentric to egocentric
+                    T = poses[j, 4:]
+                    poses[j, :4] = allocentric2egocentric(qt, T)
+
+            # filter out detections
+            index = np.where(rois[:, -1] > cfg.TEST.DET_THRESHOLD)[0]
+            rois = rois[index, :]
+            poses = poses[index, :]
+
+            # non-maximum suppression within class
+            index = nms(rois, 0.5)
+            rois = rois[index, :]
+            poses = poses[index, :]
+           
+            # optimize depths
+            if cfg.TEST.POSE_REFINE and im_depth is not None:
+                poses = refine_pose(labels, im_depth, rois, poses, dataset._intrinsic_matrix)
+            else:
+                poses_tmp, poses = optimize_depths(rois, poses, dataset._points_all, dataset._intrinsic_matrix)
+
+        else:
+
+            out_label, out_vertex, rois, out_pose = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
+            labels = out_label.detach().cpu().numpy()[0]
+
+            rois = rois.detach().cpu().numpy()
+            out_pose = out_pose.detach().cpu().numpy()
+            poses = out_pose.copy()
+
+            # filter out detections
+            index = np.where(rois[:, -1] > cfg.TEST.DET_THRESHOLD)[0]
+            rois = rois[index, :]
+            poses = poses[index, :]
+
+            # non-maximum suppression within class
+            index = nms(rois, 0.5)
+            rois = rois[index, :]
+            poses = poses[index, :]
+
+            num = rois.shape[0]
+            for i in range(num):
+                poses[i, 4] *= poses[i, 6] 
+                poses[i, 5] *= poses[i, 6]
+
+    elif cfg.TRAIN.VERTEX_REG_DELTA:
+        out_label, out_vertex = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
+        if not cfg.TEST.MEAN_SHIFT:
+            out_center, rois = compute_centroids_and_loose_bounding_boxes(out_vertex, out_label, extents,
+                                                                          inputs[:, 3:6, :, :], inputs[:, 6, :, :],
+                                                                          dataset._intrinsic_matrix)
+
+        elif cfg.TEST.MEAN_SHIFT:
+            out_center, rois = mean_shift_and_loose_bounding_boxes(out_vertex, out_label, extents, inputs[:, 3:6, :, :],
+                                                                   inputs[:, 6, :, :], dataset._intrinsic_matrix)
+
+        labels = out_label.detach().cpu().numpy()[0]
+        rois = rois.detach().cpu().numpy()
+        out_center_cpu = out_center.detach().cpu().numpy()
+        poses_vis = np.zeros((rois.shape[0], 7))
+
+        for c in range(rois.shape[0]):
+            poses_vis[c, :4] = np.array([1.0, 0.0, 0.0, 0.0])
+            poses_vis[c, 4:] = np.array([out_center_cpu[c, 0], out_center_cpu[c, 1], out_center_cpu[c, 2]])
+        poses = poses_vis
+
+    else:
+        out_label = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
+        labels = out_label.detach().cpu().numpy()[0]
+        rois = np.zeros((0, 7), dtype=np.float32)
+        poses = np.zeros((0, 7), dtype=np.float32)
+
+    im_pose, im_label = render_image(dataset, im_color, rois, poses, labels)
+
+    if cfg.TEST.VISUALIZE:
+        vis_test(dataset, im, labels, out_vertex, rois, poses, im_pose)
+
+    return im_pose, im_label, rois, poses
+
+
+#************************************#
+#    train and test autoencoders     #
+#************************************#
 def train_autoencoder(train_loader, background_loader, network, optimizer, epoch):
 
     batch_time = AverageMeter()
@@ -500,370 +873,6 @@ def test_autoencoder(test_loader, background_loader, network, output_dir):
         filename = os.path.join(output_dir, 'codebook_%s.mat' % (test_loader.dataset.name + '_' + cls))
         print('save codebook to %s' % (filename))
         scipy.io.savemat(filename, codebook, do_compression=True)
-
-
-def test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data):
-
-    n_init_samples = 100
-    num = rois.shape[0]
-    uv_init = np.zeros((2, ), dtype=np.float32)
-    pixel_mean = torch.tensor(cfg.PIXEL_MEANS / 255.0).cuda().float()
-    poses_return = poses.copy()
-
-    for i in range(num):
-        ind = int(rois[i, 0])
-        image = inputs[ind].permute(1, 2, 0) + pixel_mean
-        cls = int(rois[i, 1])
-
-        intrinsic_matrix = meta_data[ind, :9].numpy().reshape((3, 3))
-        fx = intrinsic_matrix[0, 0]
-        fy = intrinsic_matrix[1, 1]
-        px = intrinsic_matrix[0, 2]
-        py = intrinsic_matrix[1, 2]
-
-        # project the 3D translation to get the center
-        uv_init[0] = fx * poses[i, 4] / poses[i, 6] + px
-        uv_init[1] = fy * poses[i, 5] / poses[i, 6] + py
-
-        roi_w = rois[i, 4] - rois[i, 2]
-        roi_h = rois[i, 5] - rois[i, 3]
-        roi_s = max(roi_w, roi_h)
-
-        pose = pose_rbpf.initialize(image, uv_init, n_init_samples, cls, roi_s)
-        if pose[-1] > 0:
-            poses_return[i, :] = pose
-    return poses_return
-
-
-def test(test_loader, background_loader, network, pose_rbpf, output_dir):
-
-    batch_time = AverageMeter()
-    epoch_size = len(test_loader)
-    enum_background = enumerate(background_loader)
-
-    # switch to test mode
-    network.eval()
-
-    for i, sample in enumerate(test_loader):
-
-        end = time.time()
-
-        if cfg.INPUT == 'DEPTH':
-            inputs = sample['image_depth']
-        elif cfg.INPUT == 'COLOR':
-            inputs = sample['image_color']
-        elif cfg.INPUT == 'RGBD':
-            inputs = torch.cat((sample['image_color'], sample['image_depth'], sample['mask_depth']), dim=1)
-        im_info = sample['im_info']
-
-        # add background
-        mask = sample['mask']
-        try:
-            _, background = next(enum_background)
-        except:
-            enum_background = enumerate(background_loader)
-            _, background = next(enum_background)
-
-        if inputs.size(0) != background['background_color'].size(0):
-            enum_background = enumerate(background_loader)
-            _, background = next(enum_background)
-
-        if cfg.INPUT == 'COLOR':
-            background_color = background['background_color'].cuda()
-            for j in range(inputs.size(0)):
-                is_syn = im_info[j, -1]
-                if is_syn or np.random.rand(1) > 0.5:
-                    inputs[j] = mask[j] * inputs[j] + (1 - mask[j]) * background_color[j]
-
-        elif cfg.INPUT == 'RGBD':
-            background_color = background['background_color'].cuda()
-            background_depth = background['background_depth'].cuda()
-            background_mask = background['mask_depth'].cuda()
-            for j in range(inputs.size(0)):
-                is_syn = im_info[j, -1]
-                if is_syn or np.random.rand(1) > 0.5:
-                    # color image
-                    inputs[j,:3] = mask[j] * inputs[j,:3] + (1 - mask[j]) * background_color[j]
-                    # depth image
-                    inputs[j,3:6] = mask[j] * inputs[j,3:6] + (1 - mask[j]) * background_depth[j]
-                    # depth mask
-                    inputs[j,6] = mask[j,0] * inputs[j,6] + (1 - mask[j,0]) * background_mask[j]
-
-        labels = sample['label'].cuda()
-        meta_data = sample['meta_data'].cuda()
-        extents = sample['extents'][0, :, :].repeat(cfg.TRAIN.GPUNUM, 1, 1).cuda()
-        gt_boxes = sample['gt_boxes'].cuda()
-        poses = sample['poses'].cuda()
-        points = sample['points'][0, :, :, :].repeat(cfg.TRAIN.GPUNUM, 1, 1, 1).cuda()
-        symmetry = sample['symmetry'][0, :].repeat(cfg.TRAIN.GPUNUM, 1).cuda()
-        
-        # compute output
-        if cfg.TRAIN.VERTEX_REG:
-            if cfg.TRAIN.POSE_REG:
-                out_label, out_vertex, rois, out_pose, out_quaternion = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
-                
-                # combine poses
-                rois = rois.detach().cpu().numpy()
-                out_pose = out_pose.detach().cpu().numpy()
-                out_quaternion = out_quaternion.detach().cpu().numpy()
-                num = rois.shape[0]
-                poses = out_pose.copy()
-                for j in xrange(num):
-                    cls = int(rois[j, 1])
-                    if cls >= 0:
-                        qt = out_quaternion[j, 4*cls:4*cls+4]
-                        qt = qt / np.linalg.norm(qt)
-                        # allocentric to egocentric
-                        T = poses[j, 4:]
-                        poses[j, :4] = allocentric2egocentric(qt, T)
-
-                # optimize depths
-                poses, poses_refined = optimize_depths(rois, poses, test_loader.dataset._points_all, test_loader.dataset._intrinsic_matrix)
-            else:
-                out_label, out_vertex, rois, out_pose = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
-                rois = rois.detach().cpu().numpy()
-                out_pose = out_pose.detach().cpu().numpy()
-                poses = out_pose.copy()
-                poses_refined = []
-
-                # non-maximum suppression within class
-                index = nms(rois, 0.5)
-                rois = rois[index, :]
-                poses = poses[index, :]
-
-                num = rois.shape[0]
-                for j in range(num):
-                    poses[j, 4] *= poses[j, 6] 
-                    poses[j, 5] *= poses[j, 6]
-
-                # run poseRBPF for codebook matching
-                poses = test_pose_rbpf(pose_rbpf, inputs, rois, poses, sample['meta_data'])
-
-        elif cfg.TRAIN.VERTEX_REG_DELTA:
-
-            out_label, out_vertex = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
-            if not cfg.TEST.MEAN_SHIFT:
-                out_center, rois = compute_centroids_and_loose_bounding_boxes(out_vertex, out_label, extents, \
-                    inputs[:, 3:6, :, :], inputs[:, 6, :, :], test_loader.dataset._intrinsic_matrix)
-            else:
-                out_center, rois = mean_shift_and_loose_bounding_boxes(out_vertex, out_label, extents, \
-                    inputs[:, 3:6, :, :], inputs[:, 6, :, :], test_loader.dataset._intrinsic_matrix)
-
-            rois = rois.detach().cpu().numpy()
-            out_center_cpu = out_center.detach().cpu().numpy()
-            poses_vis = np.zeros((rois.shape[0], 7))
-
-            for c in range(rois.shape[0]):
-                poses_vis[c, :4] = np.array([1.0, 0.0, 0.0, 0.0])
-                poses_vis[c, 4:] = np.array([out_center_cpu[c, 0], out_center_cpu[c, 1], out_center_cpu[c, 2]])
-            poses = poses_vis
-            poses_refined = poses_vis
-            print(rois)
-            print(poses)
-
-            visualize = False
-            if visualize:
-                nclasses = labels.shape[1]
-                out_center_cpu = out_center.detach().cpu().numpy()
-                poses_vis = np.zeros((nclasses, 3))
-                for c in range(nclasses):
-                    poses_vis[c, :] = np.array([out_center_cpu[0, c * 3 + 0], out_center_cpu[0, c * 3 + 1], out_center_cpu[0, c * 3 + 2]])
-
-                input_ims = inputs[:,3:6].detach().cpu().numpy()
-                height = input_ims.shape[2]
-                width = input_ims.shape[3]
-                num = 3000
-                index = np.random.permutation(np.arange(width * height))[:num]
-                x_im = input_ims[0, 0, :, :].reshape(width*height)
-                y_im = input_ims[0, 1, :, :].reshape(width*height)
-                z_im = input_ims[0, 2, :, :].reshape(width*height)
-                xyz = np.zeros((num, 3))
-                xyz[:, 0] = x_im[index]
-                xyz[:, 1] = y_im[index]
-                xyz[:, 2] = z_im[index]
-
-                xyz = np.concatenate((xyz, poses_vis[1:, :]), axis=0)
-                colors = np.zeros((xyz.shape[0], 4))
-                colors[0:num, :] = [0.0, 0.0, 1.0, 0.4]
-                colors[num:, :] = [1.0, 0.0, 0.0, 1.0]
-
-                from mpl_toolkits.mplot3d import Axes3D
-                import matplotlib.pyplot as plt
-                fig = plt.figure()
-                ax = fig.add_subplot(111, projection='3d')
-                ax.scatter(xyz[:, 0], xyz[:, 1], xyz[:, 2], c=colors)
-                ax.set_xlabel('X Label')
-                ax.set_ylabel('Y Label')
-                ax.set_zlabel('Z Label')
-                plt.show()
-
-        else:
-            out_label = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
-            out_vertex = []
-            rois = []
-            poses = []
-            poses_refined = []
-
-        if cfg.TEST.VISUALIZE:
-            _vis_test(inputs, labels, out_label, out_vertex, rois, poses, sample, \
-                test_loader.dataset._points_all, test_loader.dataset.classes, test_loader.dataset.class_colors)
-
-        # measure elapsed time
-        batch_time.update(time.time() - end)
-
-        result = {'labels': out_label, 'rois': rois, 'poses': poses, 'poses_refined': poses_refined}
-        if 'video_id' in sample and 'image_id' in sample:
-            filename = os.path.join(output_dir, sample['video_id'][0] + '_' + sample['image_id'][0] + '.mat')
-        else:
-            filename = os.path.join(output_dir, '%06d.mat' % i)
-        print filename
-        scipy.io.savemat(filename, result, do_compression=True)
-
-        print('[%d/%d], batch time %.2f' % (i, epoch_size, batch_time.val))
-
-    filename = os.path.join(output_dir, 'results_posecnn.mat')
-    if os.path.exists(filename):
-        os.remove(filename)
-
-
-def test_image(network, dataset, im_color, im_depth=None):
-    """test on a single image"""
-
-    num_classes = dataset.num_classes
-
-    # compute image blob
-    im = im_color.astype(np.float32, copy=True)
-    im -= cfg.PIXEL_MEANS
-    height = im.shape[0]
-    width = im.shape[1]
-    im = np.transpose(im / 255.0, (2, 0, 1))
-    im = im[np.newaxis, :, :, :]
-
-    if cfg.INPUT == 'DEPTH' or cfg.INPUT == 'RGBD':
-        im_xyz = dataset.backproject(im_depth, dataset._intrinsic_matrix, 1.0)
-        im_xyz = np.transpose(im_xyz, (2, 0, 1))
-        im_xyz = im_xyz[np.newaxis, :, :, :]
-
-    # construct the meta data
-    K = dataset._intrinsic_matrix
-    Kinv = np.linalg.pinv(K)
-    meta_data_blob = np.zeros((1, 18), dtype=np.float32)
-    meta_data_blob[0, 0:9] = K.flatten()
-    meta_data_blob[0, 9:18] = Kinv.flatten()
-
-    # use fake label blob
-    label_blob = np.zeros((1, num_classes, height, width), dtype=np.float32)
-    pose_blob = np.zeros((1, num_classes, 9), dtype=np.float32)
-    gt_boxes = np.zeros((1, num_classes, 5), dtype=np.float32)
-
-    # transfer to GPU
-    if cfg.INPUT == 'DEPTH':
-        inputs = torch.from_numpy(im_xyz).cuda().float()
-    elif cfg.INPUT == 'COLOR':
-        inputs = torch.from_numpy(im).cuda()
-    elif cfg.INPUT == 'RGBD':
-        im_1 = torch.from_numpy(im).cuda()
-        im_2 = torch.from_numpy(im_xyz).cuda().float()
-        inputs = torch.cat((im_1, im_2), dim=1)
-
-    labels = torch.from_numpy(label_blob).cuda()
-    meta_data = torch.from_numpy(meta_data_blob).cuda()
-    extents = torch.from_numpy(dataset._extents).cuda()
-    gt_boxes = torch.from_numpy(gt_boxes).cuda()
-    poses = torch.from_numpy(pose_blob).cuda()
-    points = torch.from_numpy(dataset._point_blob).cuda()
-    symmetry = torch.from_numpy(dataset._symmetry).cuda()
-
-    if cfg.TRAIN.VERTEX_REG:
-
-        if cfg.TRAIN.POSE_REG:
-            out_label, out_vertex, rois, out_pose, out_quaternion = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
-            labels = out_label.detach().cpu().numpy()[0]
-
-            # combine poses
-            rois = rois.detach().cpu().numpy()
-            out_pose = out_pose.detach().cpu().numpy()
-            out_quaternion = out_quaternion.detach().cpu().numpy()
-            num = rois.shape[0]
-            poses = out_pose.copy()
-            for j in xrange(num):
-                cls = int(rois[j, 1])
-                if cls >= 0:
-                    qt = out_quaternion[j, 4*cls:4*cls+4]
-                    qt = qt / np.linalg.norm(qt)
-                    # allocentric to egocentric
-                    T = poses[j, 4:]
-                    poses[j, :4] = allocentric2egocentric(qt, T)
-
-            # filter out detections
-            index = np.where(rois[:, -1] > cfg.TEST.DET_THRESHOLD)[0]
-            rois = rois[index, :]
-            poses = poses[index, :]
-
-            # non-maximum suppression within class
-            index = nms(rois, 0.5)
-            rois = rois[index, :]
-            poses = poses[index, :]
-           
-            # optimize depths
-            if cfg.TEST.POSE_REFINE and im_depth is not None:
-                poses = refine_pose(labels, im_depth, rois, poses, dataset._intrinsic_matrix)
-            else:
-                poses_tmp, poses = optimize_depths(rois, poses, dataset._points_all, dataset._intrinsic_matrix)
-
-        else:
-
-            out_label, out_vertex, rois, out_pose = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
-            labels = out_label.detach().cpu().numpy()[0]
-
-            rois = rois.detach().cpu().numpy()
-            out_pose = out_pose.detach().cpu().numpy()
-            poses = out_pose.copy()
-
-            # filter out detections
-            index = np.where(rois[:, -1] > cfg.TEST.DET_THRESHOLD)[0]
-            rois = rois[index, :]
-            poses = poses[index, :]
-
-            # non-maximum suppression within class
-            index = nms(rois, 0.5)
-            rois = rois[index, :]
-            poses = poses[index, :]
-
-            num = rois.shape[0]
-            for i in range(num):
-                poses[i, 4] *= poses[i, 6] 
-                poses[i, 5] *= poses[i, 6]
-
-    elif cfg.TRAIN.VERTEX_REG_DELTA:
-        out_label, out_vertex, out_center, label_onehot, rois = network(inputs, labels, meta_data,
-                                                                  extents, gt_boxes, poses, points, symmetry)
-
-        rois = rois.detach().cpu().numpy()
-        labels = out_label.detach().cpu().numpy()[0]
-        nclasses = label_onehot.shape[1]
-        out_center_cpu = out_center.detach().cpu().numpy()
-        poses_vis = np.zeros((nclasses, 7))
-
-        for c in range(nclasses):
-            poses_vis[c, :4] = np.array([1.0, 0.0, 0.0, 0.0])
-            poses_vis[c, 4:] = np.array(
-                [out_center_cpu[0, c * 3 + 0], out_center_cpu[0, c * 3 + 1], out_center_cpu[0, c * 3 + 2]])
-
-        poses = poses_vis
-
-    else:
-        out_label = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
-        labels = out_label.detach().cpu().numpy()[0]
-        rois = np.zeros((0, 7), dtype=np.float32)
-        poses = np.zeros((0, 7), dtype=np.float32)
-
-    im_pose, im_label = render_image(dataset, im_color, rois, poses, labels)
-
-    if cfg.TEST.VISUALIZE:
-        vis_test(dataset, im, labels, out_vertex, rois, poses, im_pose)
-
-    return im_pose, im_label, rois, poses
 
 
 def optimize_depths(rois, poses, points, intrinsic_matrix):
