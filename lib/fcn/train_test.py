@@ -359,7 +359,8 @@ def test(test_loader, background_loader, network, pose_rbpf, output_dir):
                     poses[j, 5] *= poses[j, 6]
 
                 # run poseRBPF for codebook matching
-                poses = test_pose_rbpf(pose_rbpf, inputs, rois, poses, sample['meta_data'])
+                if pose_rbpf is not None:
+                    poses = test_pose_rbpf(pose_rbpf, inputs, rois, poses, sample['meta_data'])
 
         elif cfg.TRAIN.VERTEX_REG_DELTA:
 

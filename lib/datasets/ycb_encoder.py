@@ -234,7 +234,7 @@ class YCBEncoder(data.Dataset, datasets.imdb):
 
             while 1:
                 # sample an occluder
-                if np.random.rand(1) < 0.3:
+                if np.random.rand(1) < 0.8:
 
                     if len(cls_indexes) == 1:
                         cls_indexes.append(0)
