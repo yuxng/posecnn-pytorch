@@ -52,7 +52,6 @@ class PoseRBPF:
         codebook = self.codebooks[cls]
         codes_gpu = self.codes_gpu[cls]
         pose = np.zeros((7,), dtype=np.float32)
-        print(self.codebook_names[cls])
         if not autoencoder or not codebook:
             return pose
 

@@ -1532,11 +1532,11 @@ def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, sample, points
             else:
                 plt.imshow(im_depth[2, :, :])
             for j in xrange(rois.shape[0]):
-                if rois[j, 0] != i or rois[j, -1] < cfg.TEST.DET_THRESHOLD:
+                if rois[j, 0] != i:
                     continue
                 cls = int(rois[j, 1])
-                print classes[cls], rois[j, -1]
-                if cls > 0:
+                print(i, classes[cls], rois[j, -1])
+                if cls > 0 and rois[j, -1] > cfg.TEST.DET_THRESHOLD:
                     # extract 3D points
                     x3d = np.ones((4, points.shape[1]), dtype=np.float32)
                     x3d[0, :] = points[cls,:,0]
