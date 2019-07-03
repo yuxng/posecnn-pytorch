@@ -21,7 +21,7 @@ __device__ T bilinear_interpolate(const T* bottom_data,
   // deal with cases that inverse elements are out of feature map boundary
   if (y < -1.0 || y > height || x < -1.0 || x > width) {
     //empty
-
+    /*
     if (x < -1.0 && y < -1.0)
       return bottom_data[0];
 
@@ -57,7 +57,7 @@ __device__ T bilinear_interpolate(const T* bottom_data,
       int xx = (int)x;
       return bottom_data[xx];
     }
-
+    */
     return 0;
   }
 

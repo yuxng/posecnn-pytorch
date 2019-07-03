@@ -35,17 +35,34 @@ class PoseRBPF:
                 codes_gpu[i] = torch.from_numpy(codebooks[i]['codes']).cuda()
                 print(filename)
 
+        # append the codebook of 051_large_clamp
+        cls = '051_large_clamp'
+        filename = os.path.join('data', 'checkpoints', 'encoder_ycb_object_' + cls + '_epoch_200.checkpoint.pth')
+        if os.path.exists(filename):
+            autoencoder_data = torch.load(filename)
+            autoencoders.append(networks.__dict__['autoencoder'](1, 128, autoencoder_data).cuda(device=cfg.device))
+            autoencoders[-1] = torch.nn.DataParallel(autoencoders[-1], device_ids=[cfg.gpu_id]).cuda(device=cfg.device)
+            print(filename)
+
+            # load codebook
+            filename = os.path.join('data', 'codebooks', 'codebook_ycb_encoder_test_' + cls + '.mat')
+            codebook_names.append(filename)
+            codebooks.append(scipy.io.loadmat(filename))
+            codes_gpu.append(torch.from_numpy(codebooks[-1]['codes']).cuda())
+            print(filename)
+
         self.autoencoders = autoencoders
         self.codebooks = codebooks
         self.codebook_names = codebook_names
         self.codes_gpu = codes_gpu
         self.dataset = dataset
 
+
     # initialize PoseRBPF
     '''
     image (height, width, 3) with values (0, 1)
     '''
-    def initialize(self, image, uv_init, n_init_samples, cls, roi_size):
+    def initialize(self, image, uv_init, n_init_samples, cls, roi_w, roi_h):
 
         # network and codebook of the class
         autoencoder = self.autoencoders[cls]
@@ -62,14 +79,20 @@ class PoseRBPF:
         intrinsics = self.dataset._intrinsic_matrix
 
         # sample around the center of bounding box
-        bound = roi_size * 0.05
         uv_h = np.array([uv_init[0], uv_init[1], 1])
         uv_h = np.repeat(np.expand_dims(uv_h, axis=0), n_init_samples, axis=0)
-        uv_h[:, :2] += np.random.uniform(-bound, bound, (n_init_samples, 2))
+
+        bound = roi_w * 0.1
+        uv_h[:, 0] += np.random.uniform(-bound, bound, (n_init_samples, ))
+
+        bound = roi_h * 0.1
+        uv_h[:, 1] += np.random.uniform(-bound, bound, (n_init_samples, ))
+
         uv_h[:, 0] = np.clip(uv_h[:, 0], 0, image.shape[1])
         uv_h[:, 1] = np.clip(uv_h[:, 1], 0, image.shape[0])
 
         # sample around z
+        roi_size = max(roi_w, roi_h)
         z_init = (128 - 40) * render_dist / roi_size * intrinsics[0, 0] / cfg.TRAIN.FU
         z = np.random.uniform(0.9 * z_init, 1.1 * z_init, (n_init_samples, 1))
 
@@ -87,8 +110,9 @@ class PoseRBPF:
         pose[4:] = self.back_project(uv_star, intrinsics, z_star)
         pose[:4] = codebook['quaternions'][index_star[1], :]
 
-        im_render = self.render_image(self.dataset, cls, pose)
-        self.visualize(image, im_render, out_images[index_star[0]], in_images[index_star[0]], box_center, box_size)
+        if cfg.TEST.VISUALIZE:
+            im_render = self.render_image(self.dataset, cls, pose)
+            self.visualize(image, im_render, out_images[index_star[0]], in_images[index_star[0]], box_center, box_size)
 
         return pose
 
@@ -249,7 +273,10 @@ class PoseRBPF:
         cls_indexes = []
         poses_all = []
 
-        cls_index = cfg.TRAIN.CLASSES[cls] - 1
+        if cls == -1:
+            cls_index = 18
+        else:
+            cls_index = cfg.TRAIN.CLASSES[cls] - 1
         cls_indexes.append(cls_index)
         pose_render = pose.copy()
         pose_render[:3] = pose[4:]

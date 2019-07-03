@@ -224,18 +224,20 @@ def train(train_loader, background_loader, network, optimizer, epoch):
         cfg.TRAIN.ITERS += 1
 
 
-def test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data):
+def test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset):
 
     n_init_samples = 100
     num = rois.shape[0]
     uv_init = np.zeros((2, ), dtype=np.float32)
     pixel_mean = torch.tensor(cfg.PIXEL_MEANS / 255.0).cuda().float()
+    rois_return = rois.copy()
     poses_return = poses.copy()
 
     for i in range(num):
         ind = int(rois[i, 0])
         image = inputs[ind].permute(1, 2, 0) + pixel_mean
         cls = int(rois[i, 1])
+        points = dataset._points_all[cls]
 
         intrinsic_matrix = meta_data[ind, :9].numpy().reshape((3, 3))
         fx = intrinsic_matrix[0, 0]
@@ -244,17 +246,101 @@ def test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data):
         py = intrinsic_matrix[1, 2]
 
         # project the 3D translation to get the center
-        uv_init[0] = fx * poses[i, 4] / poses[i, 6] + px
-        uv_init[1] = fy * poses[i, 5] / poses[i, 6] + py
+        uv_init[0] = fx * poses[i, 4] + px
+        uv_init[1] = fy * poses[i, 5] + py
 
         roi_w = rois[i, 4] - rois[i, 2]
         roi_h = rois[i, 5] - rois[i, 3]
         roi_s = max(roi_w, roi_h)
 
-        pose = pose_rbpf.initialize(image, uv_init, n_init_samples, cls, roi_s)
+        pose = pose_rbpf.initialize(image, uv_init, n_init_samples, cls, roi_w, roi_h)
+        if dataset.classes[cls] == '052_extra_large_clamp':
+            pose_extra = pose
+            pose_render = poses_return[i,:].copy()
+            pose_render[0] = poses_return[i, 4] * poses_return[i, 6]
+            pose_render[1] = poses_return[i, 5] * poses_return[i, 6]
+            pose_render[2] = poses_return[i, 6]
+            pose_render[3:] = pose_extra[:4]
+            im_extra, size_extra = render_one(dataset, cls, pose_render)
+
+            print('test RBPF for 051_large_clamp')
+            pose_large = pose_rbpf.initialize(image, uv_init, n_init_samples, -1, roi_w, roi_h)
+            pose_render = poses_return[i,:].copy()
+            pose_render[0] = poses_return[i, 4] * poses_return[i, 6]
+            pose_render[1] = poses_return[i, 5] * poses_return[i, 6]
+            pose_render[2] = poses_return[i, 6]
+            pose_render[3:] = pose_large[:4]
+            im_large, size_large = render_one(dataset, -1, pose_render)
+
+            if abs(size_extra - roi_s) < abs(size_large - roi_s):
+                print('it is extra large clamp')
+            else:
+                pose = pose_large
+                rois_return[i, 1] = -1  # mask as large clamp
+                print('it is large clamp')
+
         if pose[-1] > 0:
-            poses_return[i, :] = pose
-    return poses_return
+            # only update rotation from codebook matching
+            poses_return[i, :4] = pose[:4]
+
+    return rois_return, poses_return
+
+
+def render_one(dataset, cls, pose):
+
+    intrinsic_matrix = dataset._intrinsic_matrix
+    height = dataset._height
+    width = dataset._width
+
+    fx = intrinsic_matrix[0, 0]
+    fy = intrinsic_matrix[1, 1]
+    px = intrinsic_matrix[0, 2]
+    py = intrinsic_matrix[1, 2]
+    zfar = 6.0
+    znear = 0.25
+
+    image_tensor = torch.cuda.FloatTensor(height, width, 4)
+    seg_tensor = torch.cuda.FloatTensor(height, width, 4)
+
+    # set renderer
+    cfg.renderer.set_light_pos([0, 0, 0])
+    cfg.renderer.set_light_color([1, 1, 1])
+    cfg.renderer.set_projection_matrix(width, height, fx, fy, px, py, znear, zfar)
+
+    # render images
+    cls_indexes = []
+    poses_all = []
+
+    if cls == -1:
+        cls_index = 18
+    else:
+        cls_index = cfg.TRAIN.CLASSES[cls] - 1
+
+    cls_indexes.append(cls_index)
+    poses_all.append(pose)
+
+    # rendering
+    cfg.renderer.set_poses(poses_all)
+    cfg.renderer.render(cls_indexes, image_tensor, seg_tensor)
+    image_tensor = image_tensor.flip(0)
+    seg_tensor = seg_tensor.flip(0)
+    seg = seg_tensor[:,:,2] + 256*seg_tensor[:,:,1] + 256*256*seg_tensor[:,:,0]
+    image_tensor[seg == 0] = 0.5
+
+    im_render = image_tensor.cpu().numpy()
+    im_render = np.clip(im_render, 0, 1)
+    im_render = im_render[:, :, :3] * 255
+    im_render = im_render.astype(np.uint8)
+
+    mask = seg.cpu().numpy()
+    y, x = np.where(mask > 0)
+    x1 = np.min(x)
+    x2 = np.max(x)
+    y1 = np.min(y)
+    y2 = np.max(y)
+    s = max((y2 - y1), (x2 - x1))
+
+    return im_render, s
 
 
 def test(test_loader, background_loader, network, pose_rbpf, output_dir):
@@ -277,6 +363,7 @@ def test(test_loader, background_loader, network, pose_rbpf, output_dir):
         elif cfg.INPUT == 'RGBD':
             inputs = torch.cat((sample['image_color'], sample['image_depth'], sample['mask_depth']), dim=1)
         im_info = sample['im_info']
+        print(sample['video_id'], sample['image_id'])
 
         # add background
         mask = sample['mask']
@@ -353,14 +440,14 @@ def test(test_loader, background_loader, network, pose_rbpf, output_dir):
                 rois = rois[index, :]
                 poses = poses[index, :]
 
-                num = rois.shape[0]
-                for j in range(num):
-                    poses[j, 4] *= poses[j, 6] 
-                    poses[j, 5] *= poses[j, 6]
-
-                # run poseRBPF for codebook matching
+                # run poseRBPF for codebook matching to compute the rotations
                 if pose_rbpf is not None:
-                    poses = test_pose_rbpf(pose_rbpf, inputs, rois, poses, sample['meta_data'])
+                    rois, poses = test_pose_rbpf(pose_rbpf, inputs, rois, poses, sample['meta_data'], test_loader.dataset)
+
+                # optimize depths
+                labels_out = out_label.detach().cpu().numpy()[0]
+                im_depth = sample['image_depth'].numpy()[0]
+                poses, poses_refined = refine_pose(labels_out, im_depth, rois, poses, test_loader.dataset._intrinsic_matrix)
 
         elif cfg.TRAIN.VERTEX_REG_DELTA:
 
@@ -426,8 +513,8 @@ def test(test_loader, background_loader, network, pose_rbpf, output_dir):
             poses_refined = []
 
         if cfg.TEST.VISUALIZE:
-            _vis_test(inputs, labels, out_label, out_vertex, rois, poses, sample, \
-                test_loader.dataset._points_all, test_loader.dataset.classes, test_loader.dataset.class_colors)
+            _vis_test(inputs, labels, out_label, out_vertex, rois, poses, poses_refined, sample, \
+                test_loader.dataset._points_all, test_loader.dataset._points_clamp, test_loader.dataset.classes, test_loader.dataset.class_colors)
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -876,7 +963,7 @@ def test_autoencoder(test_loader, background_loader, network, output_dir):
         scipy.io.savemat(filename, codebook, do_compression=True)
 
 
-def optimize_depths(rois, poses, points, intrinsic_matrix):
+def optimize_depths(rois, poses, points, points_clamp, intrinsic_matrix):
 
     num = rois.shape[0]
     poses_refined = poses.copy()
@@ -888,19 +975,24 @@ def optimize_depths(rois, poses, points, intrinsic_matrix):
 
         RT = np.zeros((3, 4), dtype=np.float32)
         RT[:3, :3] = quat2mat(poses[i, :4])
-        RT[0, 3] = poses[i, 4] * poses[i, 6]
-        RT[1, 3] = poses[i, 5] * poses[i, 6]
+        RT[0, 3] = poses[i, 4]
+        RT[1, 3] = poses[i, 5]
         RT[2, 3] = poses[i, 6]
 
         # extract 3D points
         x3d = np.ones((4, points.shape[1]), dtype=np.float32)
-        x3d[0, :] = points[cls,:,0]
-        x3d[1, :] = points[cls,:,1]
-        x3d[2, :] = points[cls,:,2]
+        if cls == -1:
+            x3d[0, :] = points_clamp[:,0]
+            x3d[1, :] = points_clamp[:,1]
+            x3d[2, :] = points_clamp[:,2]
+        else:
+            x3d[0, :] = points[cls,:,0]
+            x3d[1, :] = points[cls,:,1]
+            x3d[2, :] = points[cls,:,2]
 
         # optimization
         x0 = poses[i, 6]
-        res = minimize(objective_depth, x0, args=(width, height, RT, x3d, intrinsic_matrix), method='nelder-mead', options={'xtol': 1e-8, 'disp': False})
+        res = minimize(objective_depth, x0, args=(width, height, RT, x3d, intrinsic_matrix), method='nelder-mead', options={'xtol': 1e-3, 'disp': False})
         poses_refined[i, 4] *= res.x 
         poses_refined[i, 5] *= res.x
         poses_refined[i, 6] = res.x
@@ -914,6 +1006,8 @@ def optimize_depths(rois, poses, points, intrinsic_matrix):
 def objective_depth(x, width, height, RT, x3d, intrinsic_matrix):
 
     # project points
+    RT[0, 3] = RT[0, 3] * x
+    RT[1, 3] = RT[1, 3] * x
     RT[2, 3] = x
     x2d = np.matmul(intrinsic_matrix, np.matmul(RT, x3d))
     x2d[0, :] = np.divide(x2d[0, :], x2d[2, :])
@@ -958,6 +1052,7 @@ def backproject(depth_cv, intrinsic_matrix):
 def refine_pose(im_label, im_depth, rois, poses, intrinsic_matrix):
 
     # backprojection
+    poses_refined = poses.copy()
     dpoints = backproject(im_depth, intrinsic_matrix)
 
     # renderer
@@ -970,31 +1065,36 @@ def refine_pose(im_label, im_depth, rois, poses, intrinsic_matrix):
     py = intrinsic_matrix[1, 2]
     zfar = 6.0
     znear = 0.01
-    cls_indexes = rois[:, 1].astype(np.int32) - 1
-
-    # poses
-    poses_all = []
-    for i in range(num):
-        qt = np.zeros((7, ), dtype=np.float32)
-        qt[3:] = poses[i, :4]
-        qt[0] = poses[i, 4] * poses[i, 6]
-        qt[1] = poses[i, 5] * poses[i, 6]
-        qt[2] = poses[i, 6]
-        poses_all.append(qt)
-    cfg.renderer.set_poses(poses_all)
             
     # rendering
     cfg.renderer.set_projection_matrix(width, height, fx, fy, px, py, znear, zfar)
     image_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
     seg_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
     pcloud_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
-    cfg.renderer.render(cls_indexes, image_tensor, seg_tensor, pc2_tensor=pcloud_tensor)
-    pcloud_tensor = pcloud_tensor.flip(0)
-    pcloud = pcloud_tensor[:,:,:3].cpu().numpy().reshape((-1, 3))
 
     # refine pose
     for i in range(num):
+        cls_indexes = []
         cls = int(rois[i, 1])
+        if cls == -1:
+            cls = 19
+            cls_indexes.append(18)
+        else:
+            cls_indexes.append(cfg.TRAIN.CLASSES[cls] - 1)
+
+        poses_all = []
+        qt = np.zeros((7, ), dtype=np.float32)
+        qt[3:] = poses[i, :4]
+        qt[0] = poses[i, 4] * poses[i, 6]
+        qt[1] = poses[i, 5] * poses[i, 6]
+        qt[2] = poses[i, 6]
+        poses_all.append(qt)
+        cfg.renderer.set_poses(poses_all)
+
+        cfg.renderer.render(cls_indexes, image_tensor, seg_tensor, pc2_tensor=pcloud_tensor)
+        pcloud_tensor = pcloud_tensor.flip(0)
+        pcloud = pcloud_tensor[:,:,:3].cpu().numpy().reshape((-1, 3))
+
         x1 = max(int(rois[i, 2]), 0)
         y1 = max(int(rois[i, 3]), 0)
         x2 = min(int(rois[i, 4]), width-1)
@@ -1002,18 +1102,22 @@ def refine_pose(im_label, im_depth, rois, poses, intrinsic_matrix):
         labels = np.zeros((height, width), dtype=np.float32)
         labels[y1:y2, x1:x2] = im_label[y1:y2, x1:x2]
         labels = labels.reshape((width * height, ))
-        index = np.where((labels == cls) & np.isfinite(dpoints[:, 0]) & (pcloud[:, 0] != 0))[0]
+        index = np.where((labels == cls) & np.isfinite(dpoints[:, 0]) & (dpoints[:, 0] != 0) & (pcloud[:, 0] != 0))[0]
+
         if len(index) > 10:
             T = np.mean(dpoints[index, :] - pcloud[index, :], axis=0)
-            poses[i, 6] += T[2]
-            poses[i, 4] *= poses[i, 6]
-            poses[i, 5] *= poses[i, 6]
+            poses_refined[i, 6] += T[2]
+            poses_refined[i, 4] *= poses[i, 6]
+            poses_refined[i, 5] *= poses[i, 6]
         else:
-            poses[i, 4] *= poses[i, 6]
-            poses[i, 5] *= poses[i, 6]
+            poses_refined[i, 4] *= poses_refined[i, 6]
+            poses_refined[i, 5] *= poses_refined[i, 6]
             print 'no pose refinement'
 
-    return poses
+        poses[i, 4] *= poses[i, 6]
+        poses[i, 5] *= poses[i, 6]
+
+    return poses, poses_refined
 
 
 def render_image(dataset, im, rois, poses, labels):
@@ -1354,7 +1458,7 @@ def _vis_minibatch(inputs, background, labels, vertex_targets, sample, class_col
         plt.show()
 
 
-def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, sample, points, classes, class_colors):
+def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, poses_refined, sample, points, points_clamp, classes, class_colors):
 
     """Visualize a mini-batch for debugging."""
     import matplotlib.pyplot as plt
@@ -1535,18 +1639,59 @@ def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, sample, points
                 if rois[j, 0] != i:
                     continue
                 cls = int(rois[j, 1])
-                print(i, classes[cls], rois[j, -1])
-                if cls > 0 and rois[j, -1] > cfg.TEST.DET_THRESHOLD:
+                if cls > 0:
+                    print(i, classes[cls], rois[j, -1])
+                elif cls == -1:
+                    print(i, '051_large_clamp', rois[j, -1])
+                if rois[j, -1] > cfg.TEST.DET_THRESHOLD:
                     # extract 3D points
                     x3d = np.ones((4, points.shape[1]), dtype=np.float32)
-                    x3d[0, :] = points[cls,:,0]
-                    x3d[1, :] = points[cls,:,1]
-                    x3d[2, :] = points[cls,:,2]
+                    if cls == -1:
+                        x3d[0, :] = points_clamp[:,0]
+                        x3d[1, :] = points_clamp[:,1]
+                        x3d[2, :] = points_clamp[:,2]
+                    else:
+                        x3d[0, :] = points[cls,:,0]
+                        x3d[1, :] = points[cls,:,1]
+                        x3d[2, :] = points[cls,:,2]
 
                     # projection
                     RT = np.zeros((3, 4), dtype=np.float32)
                     RT[:3, :3] = quat2mat(poses[j, :4])
                     RT[:, 3] = poses[j, 4:7]
+                    x2d = np.matmul(intrinsic_matrix, np.matmul(RT, x3d))
+                    x2d[0, :] = np.divide(x2d[0, :], x2d[2, :])
+                    x2d[1, :] = np.divide(x2d[1, :], x2d[2, :])
+                    plt.plot(x2d[0, :], x2d[1, :], '.', color=np.divide(class_colors[cls], 255.0), alpha=0.5)
+
+            # show predicted refined poses
+            ax = fig.add_subplot(m, n, start)
+            start += 1
+            ax.set_title('predicted refined poses')
+            if cfg.INPUT == 'COLOR' or cfg.INPUT == 'RGBD':
+                plt.imshow(im)
+            else:
+                plt.imshow(im_depth[2, :, :])
+            for j in xrange(rois.shape[0]):
+                if rois[j, 0] != i:
+                    continue
+                cls = int(rois[j, 1])
+                if rois[j, -1] > cfg.TEST.DET_THRESHOLD:
+                    # extract 3D points
+                    x3d = np.ones((4, points.shape[1]), dtype=np.float32)
+                    if cls == -1:
+                        x3d[0, :] = points_clamp[:,0]
+                        x3d[1, :] = points_clamp[:,1]
+                        x3d[2, :] = points_clamp[:,2]
+                    else:
+                        x3d[0, :] = points[cls,:,0]
+                        x3d[1, :] = points[cls,:,1]
+                        x3d[2, :] = points[cls,:,2]
+
+                    # projection
+                    RT = np.zeros((3, 4), dtype=np.float32)
+                    RT[:3, :3] = quat2mat(poses_refined[j, :4])
+                    RT[:, 3] = poses_refined[j, 4:7]
                     x2d = np.matmul(intrinsic_matrix, np.matmul(RT, x3d))
                     x2d[0, :] = np.divide(x2d[0, :], x2d[2, :])
                     x2d[1, :] = np.divide(x2d[1, :], x2d[2, :])

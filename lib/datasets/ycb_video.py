@@ -18,6 +18,7 @@ from utils.blob import pad_im, chromatic_transform, add_noise, add_noise_cuda
 from transforms3d.quaternions import mat2quat, quat2mat
 from utils.se3 import *
 from utils.pose_error import *
+from utils.cython_bbox import bbox_overlaps
 
 def VOCap(rec, prec):
     index = np.where(np.isfinite(rec))[0]
@@ -391,7 +392,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
 
         # Get the input image blob
         random_scale_ind = npr.randint(0, high=len(cfg.TRAIN.SCALES_BASE))
-        im_blob, im_scale, height, width = self._get_image_blob(roidb, random_scale_ind)
+        im_blob, im_depth, im_scale, height, width = self._get_image_blob(roidb, random_scale_ind)
 
         # build the label blob
         label_blob, mask, meta_data_blob, pose_blob, gt_boxes, vertex_targets, vertex_weights \
@@ -400,6 +401,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
         im_info = np.array([im_blob.shape[1], im_blob.shape[2], im_scale, is_syn], dtype=np.float32)
 
         sample = {'image_color': im_blob,
+                  'image_depth': im_depth,
                   'label': label_blob,
                   'mask': mask,
                   'meta_data': meta_data_blob,
@@ -450,7 +452,13 @@ class YCBVideo(data.Dataset, datasets.imdb):
         im_cuda -= self._pixel_mean
         im_cuda = im_cuda.permute(2, 0, 1)
 
-        return im_cuda, im_scale, height, width
+        # depth image
+        im_depth = pad_im(cv2.imread(roidb['depth'], cv2.IMREAD_UNCHANGED), 16)
+        if im_scale != 1.0:
+            im_depth = cv2.resize(im_depth, None, None, fx=im_scale, fy=im_scale, interpolation=cv2.INTER_NEAREST)
+        im_depth = im_depth.astype('float') / 10000.0
+
+        return im_cuda, im_depth, im_scale, height, width
 
 
     def _get_label_blob(self, roidb, num_classes, im_scale, height, width):
@@ -1016,19 +1024,43 @@ class YCBVideo(data.Dataset, datasets.imdb):
 
                     # network result
                     result = result_posecnn
-                    if len(result['rois']) > 0:
-                        roi_index = np.where(result['rois'][:, 1] == cls_index)[0]
-                    else:
-                        roi_index = []
+                    roi_index = []
+                    if len(result['rois']) > 0:     
+                        for k in range(result['rois'].shape[0]):
+                            ind = int(result['rois'][k, 1])
+                            if ind == -1:
+                                cls = 19
+                            else:
+                                cls = cfg.TRAIN.CLASSES[ind]
+                            if cls == cls_index:
+                                roi_index.append(k)                   
+
+                    # select the roi
+                    if len(roi_index) > 1:
+                        # overlaps: (rois x gt_boxes)
+                        roi_blob = result['rois'][roi_index, :]
+                        roi_blob = roi_blob[:, (0, 2, 3, 4, 5, 1)]
+                        gt_box_blob = np.zeros((1, 5), dtype=np.float32)
+                        gt_box_blob[0, 1:] = gt['box'][j, :]
+                        overlaps = bbox_overlaps(
+                            np.ascontiguousarray(roi_blob[:, :5], dtype=np.float),
+                            np.ascontiguousarray(gt_box_blob, dtype=np.float)).flatten()
+                        assignment = overlaps.argmax()
+                        roi_index = [roi_index[assignment]]
 
                     if len(roi_index) > 0:
                         RT = np.zeros((3, 4), dtype=np.float32)
+                        ind = int(result['rois'][roi_index, 1])
+                        if ind == -1:
+                            points = self._points_clamp
+                        else:
+                            points = self._points[ind]
 
                         # pose from network
                         RT[:3, :3] = quat2mat(result['poses'][roi_index, :4].flatten())
                         RT[:, 3] = result['poses'][roi_index, 4:]
-                        distances_sys[count, 0] = adi(RT[:3, :3], RT[:, 3],  RT_gt[:3, :3], RT_gt[:, 3], self._points[cls_index])
-                        distances_non[count, 0] = add(RT[:3, :3], RT[:, 3],  RT_gt[:3, :3], RT_gt[:, 3], self._points[cls_index])
+                        distances_sys[count, 0] = adi(RT[:3, :3], RT[:, 3],  RT_gt[:3, :3], RT_gt[:, 3], points)
+                        distances_non[count, 0] = add(RT[:3, :3], RT[:, 3],  RT_gt[:3, :3], RT_gt[:, 3], points)
                         errors_rotation[count, 0] = re(RT[:3, :3], RT_gt[:3, :3])
                         errors_translation[count, 0] = te(RT[:, 3], RT_gt[:, 3])
 
@@ -1036,8 +1068,8 @@ class YCBVideo(data.Dataset, datasets.imdb):
                         if cfg.TEST.POSE_REFINE:
                             RT[:3, :3] = quat2mat(result['poses_refined'][roi_index, :4].flatten())
                             RT[:, 3] = result['poses_refined'][roi_index, 4:]
-                            distances_sys[count, 1] = adi(RT[:3, :3], RT[:, 3],  RT_gt[:3, :3], RT_gt[:, 3], self._points[cls_index])
-                            distances_non[count, 1] = add(RT[:3, :3], RT[:, 3],  RT_gt[:3, :3], RT_gt[:, 3], self._points[cls_index])
+                            distances_sys[count, 1] = adi(RT[:3, :3], RT[:, 3],  RT_gt[:3, :3], RT_gt[:, 3], points)
+                            distances_non[count, 1] = add(RT[:3, :3], RT[:, 3],  RT_gt[:3, :3], RT_gt[:, 3], points)
                             errors_rotation[count, 1] = re(RT[:3, :3], RT_gt[:3, :3])
                             errors_translation[count, 1] = te(RT[:, 3], RT_gt[:, 3])
                         else:
@@ -1080,12 +1112,12 @@ class YCBVideo(data.Dataset, datasets.imdb):
         color = ['r', 'b']
         leng = ['PoseCNN', 'PoseCNN refined']
         num = len(leng)
-        ADD = np.zeros((self.num_classes, num), dtype=np.float32)
-        ADDS = np.zeros((self.num_classes, num), dtype=np.float32)
-        TS = np.zeros((self.num_classes, num), dtype=np.float32)
-        classes = copy.copy(self._classes)
+        ADD = np.zeros((self._num_classes_all, num), dtype=np.float32)
+        ADDS = np.zeros((self._num_classes_all, num), dtype=np.float32)
+        TS = np.zeros((self._num_classes_all, num), dtype=np.float32)
+        classes = list(copy.copy(self._classes_all))
         classes[0] = 'all'
-        for k in cfg.TRAIN.CLASSES:
+        for k in range(self._num_classes_all):
             fig = plt.figure()
             if k == 0:
                 index = range(len(results_cls_id))
@@ -1177,20 +1209,40 @@ class YCBVideo(data.Dataset, datasets.imdb):
 
         # print ADD
         print('==================ADD======================')
-        for k in cfg.TRAIN.CLASSES:
+        for k in range(len(classes)):
             print('%s: %f' % (classes[k], ADD[k, 0]))
-        for k in cfg.TRAIN.CLASSES[1:]:
-            print('%f' % (ADD[k, 0]))
+        for k in range(len(classes)-1):
+            print('%f' % (ADD[k+1, 0]))
         print('%f' % (ADD[0, 0]))
         print(cfg.TRAIN.SNAPSHOT_INFIX)
         print('===========================================')
 
         # print ADD-S
         print('==================ADD-S====================')
-        for k in cfg.TRAIN.CLASSES:
+        for k in range(len(classes)):
             print('%s: %f' % (classes[k], ADDS[k, 0]))
-        for k in cfg.TRAIN.CLASSES[1:]:
+        for k in range(len(classes)-1):
             print('%f' % (ADDS[k, 0]))
         print('%f' % (ADDS[0, 0]))
+        print(cfg.TRAIN.SNAPSHOT_INFIX)
+        print('===========================================')
+
+        # print ADD
+        print('==================ADD refined======================')
+        for k in range(len(classes)):
+            print('%s: %f' % (classes[k], ADD[k, 1]))
+        for k in range(len(classes)-1):
+            print('%f' % (ADD[k+1, 1]))
+        print('%f' % (ADD[0, 1]))
+        print(cfg.TRAIN.SNAPSHOT_INFIX)
+        print('===========================================')
+
+        # print ADD-S
+        print('==================ADD-S refined====================')
+        for k in range(len(classes)):
+            print('%s: %f' % (classes[k], ADDS[k, 1]))
+        for k in range(len(classes)-1):
+            print('%f' % (ADDS[k, 1]))
+        print('%f' % (ADDS[0, 1]))
         print(cfg.TRAIN.SNAPSHOT_INFIX)
         print('===========================================')

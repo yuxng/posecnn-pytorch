@@ -133,16 +133,19 @@ if __name__ == '__main__':
     network = torch.nn.DataParallel(network, device_ids=[cfg.gpu_id]).cuda(device=cfg.device)
     cudnn.benchmark = True
 
+    #'''
     print('loading 3D models')
     cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, gpu_id=args.gpu_id, render_marker=False)
     cfg.renderer.load_objects(dataset.model_mesh_paths, dataset.model_texture_paths, dataset.model_colors)
     cfg.renderer.set_camera_default()
     print(dataset.model_mesh_paths)
+    #'''
 
     # test network
     if args.network_name == 'autoencoder':
         test_autoencoder(dataloader, background_loader, network, output_dir)
     else:
+        #'''
         # prepare autoencoder and codebook
         if cfg.TRAIN.VERTEX_REG:
             pose_rbpf = PoseRBPF(dataset)
@@ -150,6 +153,7 @@ if __name__ == '__main__':
             pose_rbpf = None
 
         test(dataloader, background_loader, network, pose_rbpf, output_dir)
+        #'''
 
         # evaluation
         dataset.evaluation(output_dir)
