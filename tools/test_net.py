@@ -29,6 +29,7 @@ from datasets.factory import get_dataset
 import networks
 from ycb_renderer import YCBRenderer
 from fcn.pose_rbpf import PoseRBPF
+from sdf.sdf_optimizer import sdf_optimizer
 
 def parse_args():
     """
@@ -140,6 +141,15 @@ if __name__ == '__main__':
     cfg.renderer.set_camera_default()
     print(dataset.model_mesh_paths)
     #'''
+
+    # load sdfs
+    if cfg.TEST.POSE_REFINE:
+        print('loading SDFs')
+        cfg.sdf_optimizers = []
+        for i in range(len(dataset.model_sdf_paths)):
+            cfg.sdf_optimizers.append(sdf_optimizer(dataset.model_sdf_paths[i]))
+        cfg.sdf_optimizers.append(sdf_optimizer(dataset.model_sdf_clamp_path))
+        print(dataset.model_sdf_paths)
 
     # test network
     if args.network_name == 'autoencoder':

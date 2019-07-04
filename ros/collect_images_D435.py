@@ -58,6 +58,11 @@ class ImageListener:
         filename = self.outdir + '/%06d-color.png' % self.count
         cv2.imwrite(filename, im)
         print filename
+
+        filename = self.outdir + '/%06d-depth.png' % self.count
+        cv2.imwrite(filename, depth_cv)
+        print(filename)
+
         self.count += 1
 
 

@@ -447,7 +447,7 @@ def test(test_loader, background_loader, network, pose_rbpf, output_dir):
                 # optimize depths
                 labels_out = out_label.detach().cpu().numpy()[0]
                 im_depth = sample['image_depth'].numpy()[0]
-                poses, poses_refined = refine_pose(labels_out, im_depth, rois, poses, test_loader.dataset._intrinsic_matrix)
+                poses, poses_refined = refine_pose(labels_out, im_depth, rois, poses, test_loader.dataset)
 
         elif cfg.TRAIN.VERTEX_REG_DELTA:
 
@@ -619,7 +619,7 @@ def test_image(network, dataset, im_color, im_depth=None):
            
             # optimize depths
             if cfg.TEST.POSE_REFINE and im_depth is not None:
-                poses = refine_pose(labels, im_depth, rois, poses, dataset._intrinsic_matrix)
+                poses = refine_pose(labels, im_depth, rois, poses, dataset)
             else:
                 poses_tmp, poses = optimize_depths(rois, poses, dataset._points_all, dataset._intrinsic_matrix)
 
@@ -1049,11 +1049,15 @@ def backproject(depth_cv, intrinsic_matrix):
     return np.array(X).transpose()
 
 
-def refine_pose(im_label, im_depth, rois, poses, intrinsic_matrix):
+def refine_pose(im_label, im_depth, rois, poses, dataset):
 
     # backprojection
+    intrinsic_matrix = dataset._intrinsic_matrix
     poses_refined = poses.copy()
     dpoints = backproject(im_depth, intrinsic_matrix)
+    width = im_depth.shape[1]
+    height = im_depth.shape[0]
+    im_pcloud = dpoints.reshape((height, width, 3))
 
     # renderer
     num = rois.shape[0]
@@ -1101,6 +1105,7 @@ def refine_pose(im_label, im_depth, rois, poses, intrinsic_matrix):
         y2 = min(int(rois[i, 5]), height-1)
         labels = np.zeros((height, width), dtype=np.float32)
         labels[y1:y2, x1:x2] = im_label[y1:y2, x1:x2]
+        mask_label = np.ma.getmaskarray(np.ma.masked_equal(labels, cls))
         labels = labels.reshape((width * height, ))
         index = np.where((labels == cls) & np.isfinite(dpoints[:, 0]) & (dpoints[:, 0] != 0) & (pcloud[:, 0] != 0))[0]
 
@@ -1116,6 +1121,97 @@ def refine_pose(im_label, im_depth, rois, poses, intrinsic_matrix):
 
         poses[i, 4] *= poses[i, 6]
         poses[i, 5] *= poses[i, 6]
+
+        # run SDF optimization
+        if len(index) > 10:
+            cls = int(rois[i, 1])
+            if cls == -1:
+                sdf_optim = cfg.sdf_optimizers[-1]
+            else:
+                sdf_optim = cfg.sdf_optimizers[cls-1]
+            print(sdf_optim.sdf_file)
+
+            # re-render
+            qt[3:] = poses_refined[i, :4]
+            qt[:3] = poses_refined[i, 4:]
+            poses_all[0] = qt
+            cfg.renderer.set_poses(poses_all)
+            cfg.renderer.render(cls_indexes, image_tensor, seg_tensor, pc2_tensor=pcloud_tensor)
+            pcloud_tensor = pcloud_tensor.flip(0)
+
+            # compare the depth
+            delta = 0.05
+            depth_meas_roi = im_pcloud[:, :, 2]
+            depth_render_roi = pcloud_tensor[:, :, 2].cpu().numpy()
+            mask_depth_meas = np.ma.getmaskarray(np.ma.masked_not_equal(depth_meas_roi, 0))
+            mask_depth_render = np.ma.getmaskarray(np.ma.masked_greater(depth_render_roi, 0))
+            mask_depth_vis = np.ma.getmaskarray(np.ma.masked_less(np.abs(depth_render_roi - depth_meas_roi), delta))
+            mask = mask_label * mask_depth_meas * mask_depth_render * mask_depth_vis
+            index = mask.flatten().nonzero()[0]
+
+            points = torch.from_numpy(dpoints[index, :]).float()
+            points = torch.cat((points, torch.ones((points.size(0), 1), dtype=torch.float32)), dim=1)
+            print(points, points.shape)
+            RT = np.zeros((4, 4), dtype=np.float32)
+            qt = poses_refined[i, :4]
+            T = poses_refined[i, 4:]
+            RT[:3, :3] = quat2mat(qt)
+            RT[:3, 3] = T
+            RT[3, 3] = 1.0
+            T_co_init = RT
+            T_co_opt, r = sdf_optim.refine_pose(T_co_init, points, steps=100)
+            RT_opt = T_co_opt
+            poses_refined[i, :4] = mat2quat(RT_opt[:3, :3])
+            poses_refined[i, 4:] = RT_opt[:3, 3]
+
+            if cfg.TEST.VISUALIZE:
+                import matplotlib.pyplot as plt
+                fig = plt.figure()
+                ax = fig.add_subplot(2, 3, 1, projection='3d')
+                if cls == -1:
+                    points_obj = dataset._points_clamp
+                else:
+                    points_obj = dataset._points_all[cls, :, :]
+
+                points_init = np.matmul(np.linalg.inv(T_co_init), points.numpy().transpose()).transpose()
+                points_opt = np.matmul(np.linalg.inv(T_co_opt), points.numpy().transpose()).transpose()
+
+                ax.scatter(points_obj[::5, 0], points_obj[::5, 1], points_obj[::5, 2], color='green')
+                ax.scatter(points_init[::10, 0], points_init[::10, 1], points_init[::10, 2], color='red')
+                ax.scatter(points_opt[::10, 0], points_opt[::10, 1], points_opt[::10, 2], color='blue')
+
+                ax.set_xlabel('X Label')
+                ax.set_ylabel('Y Label')
+                ax.set_zlabel('Z Label')
+
+                min_coor = np.min(np.array([sdf_optim.xmin, sdf_optim.ymin, sdf_optim.zmin]))
+                max_coor = np.max(np.array([sdf_optim.xmax, sdf_optim.ymax, sdf_optim.zmax]))
+
+                ax.set_xlim(min_coor, max_coor)
+                ax.set_ylim(min_coor, max_coor)
+                ax.set_zlim(min_coor, max_coor)
+
+                ax = fig.add_subplot(2, 3, 2)
+                plt.imshow(mask_label)
+                ax.set_title('mask label')
+
+                ax = fig.add_subplot(2, 3, 3)
+                plt.imshow(mask_depth_meas)
+                ax.set_title('mask_depth_meas')
+
+                ax = fig.add_subplot(2, 3, 4)
+                plt.imshow(mask_depth_render)
+                ax.set_title('mask_depth_render')
+
+                ax = fig.add_subplot(2, 3, 5)
+                plt.imshow(mask_depth_vis)
+                ax.set_title('mask_depth_vis')
+
+                ax = fig.add_subplot(2, 3, 6)
+                plt.imshow(mask)
+                ax.set_title('mask')
+
+                plt.show()
 
     return poses, poses_refined
 
