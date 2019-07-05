@@ -25,6 +25,17 @@ class BackgroundDataset(data.Dataset, datasets.imdb):
                 self.files_color.append(os.path.join(background_dir, filename))
             self.files_color.sort()
 
+        elif name == 'nvidia':
+            allencenter = os.path.join(self.cache_path, '../AllenCenter/data')
+            subdirs = os.listdir(allencenter)
+            for i in xrange(len(subdirs)):
+                subdir = subdirs[i]
+                files = os.listdir(os.path.join(allencenter, subdir))
+                for j in range(len(files)):
+                    filename = os.path.join(allencenter, subdir, files[j])
+                    self.files_color.append(filename)
+            self.files_color.sort()
+
         elif name == 'rgbd':
             comotion = os.path.join(self.cache_path, '../D435-data-with-depth/data')
             subdirs = os.listdir(comotion)
@@ -74,6 +85,7 @@ class BackgroundDataset(data.Dataset, datasets.imdb):
             # constant background image
             background_color = np.ones((self._height, self._width, 3), dtype=np.uint8)
             color = np.random.randint(256, size=3)
+            print('constant color', color)
             background_color[:, :, 0] = color[0]
             background_color[:, :, 1] = color[1]
             background_color[:, :, 2] = color[2]

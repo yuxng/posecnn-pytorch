@@ -375,6 +375,7 @@ class YCBObject(data.Dataset, datasets.imdb):
         height = cfg.TRAIN.SYN_HEIGHT
         width = cfg.TRAIN.SYN_WIDTH
         classes_all = np.array(range(len(self._classes_all)))
+        mask_depth_cuda = torch.cuda.FloatTensor(1, height, width).fill_(0)
 
         # sample target objects
         if cfg.TRAIN.SYN_SAMPLE_OBJECT:
@@ -543,6 +544,7 @@ class YCBObject(data.Dataset, datasets.imdb):
                   'image_depth': im_cuda,
                   'label': label_blob,
                   'mask': mask,
+                  'mask_depth': mask_depth_cuda,
                   'meta_data': meta_data_blob,
                   'poses': pose_blob,
                   'extents': self._extents,
@@ -565,6 +567,8 @@ class YCBObject(data.Dataset, datasets.imdb):
         if ((cfg.MODE == 'TRAIN' and cfg.TRAIN.SYNTHESIZE) or (cfg.MODE == 'TEST' and cfg.TEST.SYNTHESIZE)) and \
            (cfg.INPUT == 'DEPTH' or cfg.INPUT == 'RGBD' or (index % cfg.TRAIN.SYN_RATIO != 0)):
             is_syn = 1
+
+        is_syn = 1
 
         if is_syn:
             return self._render_item()

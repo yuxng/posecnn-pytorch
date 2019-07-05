@@ -58,3 +58,4 @@ TEST:
   VISUALIZE: True
   SYNTHESIZE: False
   POSE_REFINE: True
+  ROS_CAMERA: camera

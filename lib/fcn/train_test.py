@@ -1158,9 +1158,9 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
                 RT[:3, :3] = quat2mat(qt)
                 RT[:3, 3] = T
                 RT[3, 3] = 1.0
-                RT[2, 3] += 0.03
+                #RT[2, 3] += 0.03
                 T_co_init = RT
-                T_co_opt, r = sdf_optim.refine_pose(T_co_init, points.cuda(), steps=100)
+                T_co_opt, r = sdf_optim.refine_pose(T_co_init, points.cuda(), steps=1000)
                 RT_opt = T_co_opt
                 poses_refined[i, :4] = mat2quat(RT_opt[:3, :3])
                 poses_refined[i, 4:] = RT_opt[:3, 3]
@@ -1387,7 +1387,7 @@ def _vis_minibatch(inputs, background, labels, vertex_targets, sample, class_col
         vertex_target_blob = vertex_targets.cpu().numpy()
 
     if cfg.INPUT == 'COLOR':
-        m = 2
+        m = 3
         n = 3
     else:
         m = 3
@@ -1414,17 +1414,6 @@ def _vis_minibatch(inputs, background, labels, vertex_targets, sample, class_col
             ax = fig.add_subplot(m, n, 1)
             plt.imshow(im)
             ax.set_title('color')
-            start += 1
-
-            im_background = background_color[i]
-            im_background = im_background.transpose((1, 2, 0)) * 255.0
-            im_background += cfg.PIXEL_MEANS
-            im_background = im_background[:, :, (2, 1, 0)]
-            im_background = np.clip(im_background, 0, 255)
-            im_background = im_background.astype(np.uint8)
-            ax = fig.add_subplot(m, n, start)
-            plt.imshow(im_background)
-            ax.set_title('background')
             start += 1
 
         if cfg.INPUT == 'DEPTH' or cfg.INPUT == 'RGBD':
@@ -1485,6 +1474,18 @@ def _vis_minibatch(inputs, background, labels, vertex_targets, sample, class_col
             y1 = np.min(x2d[1, :])
             y2 = np.max(x2d[1, :])
             plt.gca().add_patch(plt.Rectangle((x1, y1), x2-x1, y2-y1, fill=False, edgecolor='g', linewidth=3, clip_on=False))
+
+        if cfg.INPUT == 'COLOR' or cfg.INPUT == 'RGBD':
+            im_background = background_color[i]
+            im_background = im_background.transpose((1, 2, 0)) * 255.0
+            im_background += cfg.PIXEL_MEANS
+            im_background = im_background[:, :, (2, 1, 0)]
+            im_background = np.clip(im_background, 0, 255)
+            im_background = im_background.astype(np.uint8)
+            ax = fig.add_subplot(m, n, start)
+            plt.imshow(im_background)
+            ax.set_title('background')
+            start += 1
 
         # show gt boxes
         ax = fig.add_subplot(m, n, start)
