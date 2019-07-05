@@ -1158,7 +1158,6 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
                 RT[:3, :3] = quat2mat(qt)
                 RT[:3, 3] = T
                 RT[3, 3] = 1.0
-                #RT[2, 3] += 0.03
                 T_co_init = RT
                 T_co_opt, r = sdf_optim.refine_pose(T_co_init, points.cuda(), steps=1000)
                 RT_opt = T_co_opt

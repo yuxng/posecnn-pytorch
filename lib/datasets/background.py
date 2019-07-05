@@ -81,11 +81,10 @@ class BackgroundDataset(data.Dataset, datasets.imdb):
             background_depth = np.zeros((3, self._height, self._width), dtype=np.float32)
             mask_depth = np.zeros((self._height, self._width), dtype=np.float32)
 
-        if filename_depth is None and np.random.rand(1) < 0.1:  # only for rgb cases
+        if filename_depth is None and np.random.rand(1) < 0.2:  # only for rgb cases
             # constant background image
             background_color = np.ones((self._height, self._width, 3), dtype=np.uint8)
             color = np.random.randint(256, size=3)
-            print('constant color', color)
             background_color[:, :, 0] = color[0]
             background_color[:, :, 1] = color[1]
             background_color[:, :, 2] = color[2]

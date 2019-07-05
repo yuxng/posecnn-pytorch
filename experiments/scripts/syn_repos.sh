@@ -9,7 +9,7 @@ cp lib/layers/*.py $DST/lib/layers
 cp lib/layers/*.cu $DST/lib/layers
 cp lib/layers/*.cpp $DST/lib/layers
 cp lib/networks/*.py $DST/lib/networks
-cp lib/sdf/*.py $DST/lib/networks
+cp lib/sdf/*.py $DST/lib/sdf
 cp lib/utils/*.py  $DST/lib/utils
 cp lib/utils/*.pyx  $DST/lib/utils
 cp lib/utils/*.c  $DST/lib/utils

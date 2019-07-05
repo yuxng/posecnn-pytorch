@@ -27,7 +27,7 @@ TRAIN:
   USE_FLIPPED: False
   CHROMATIC: True
   ADD_NOISE: True
-  VISUALIZE: True
+  VISUALIZE: False
   VERTEX_REG: True
   POSE_REG: False       # no rotation regression
   # synthetic data
