@@ -90,7 +90,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
 
         # 3D model paths
         self.model_mesh_paths = ['{}/models/{}/textured_simple.obj'.format(self._ycb_video_path, cls) for cls in self._classes_all[1:]]
-        self.model_sdf_paths = ['{}/models/{}/textured_simple.sdf'.format(self._ycb_video_path, cls) for cls in self._classes_all[1:]]
+        self.model_sdf_paths = ['{}/models/{}/textured_simple_low_res.pth'.format(self._ycb_video_path, cls) for cls in self._classes_all[1:]]
         self.model_texture_paths = ['{}/models/{}/texture_map.png'.format(self._ycb_video_path, cls) for cls in self._classes_all[1:]]
         self.model_colors = [np.array(self._class_colors_all[i]) / 255.0 for i in range(1, len(self._classes_all))]
 

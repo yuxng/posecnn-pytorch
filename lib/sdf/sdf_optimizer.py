@@ -6,14 +6,24 @@ class sdf_optimizer():
         self.sdf_file = sdf_file
         self.use_gpu = use_gpu
         print(' start loading sdf ... ')
-        sdf_info = read_sdf(sdf_file)
-        sdf = sdf_info[0]
-        min_coords = sdf_info[1]
-        delta = sdf_info[2]
-        max_coords = min_coords + delta * np.array(sdf.shape)
-        self.xmin, self.ymin, self.zmin = min_coords
-        self.xmax, self.ymax, self.zmax = max_coords
-        self.sdf_torch = torch.from_numpy(sdf).float().permute(1, 0, 2).unsqueeze(0).unsqueeze(1)
+
+        if sdf_file[-3:] == 'sdf':
+            sdf_info = read_sdf(sdf_file)
+            sdf = sdf_info[0]
+            min_coords = sdf_info[1]
+            delta = sdf_info[2]
+            max_coords = min_coords + delta * np.array(sdf.shape)
+            self.xmin, self.ymin, self.zmin = min_coords
+            self.xmax, self.ymax, self.zmax = max_coords
+            self.sdf_torch = torch.from_numpy(sdf).float().permute(1, 0, 2).unsqueeze(0).unsqueeze(1)
+        elif sdf_file[-3:] == 'pth':
+            sdf_info = torch.load(sdf_file)
+            min_coords = sdf_info['min_coords']
+            max_coords = sdf_info['max_coords']
+            self.xmin, self.ymin, self.zmin = min_coords
+            self.xmax, self.ymax, self.zmax = max_coords
+            self.sdf_torch = sdf_info['sdf_torch']
+
         if self.use_gpu:
             self.sdf_torch = self.sdf_torch.cuda()
         print('     sdf size = {}x{}x{}'.format(self.sdf_torch.size(2), self.sdf_torch.size(3), self.sdf_torch.size(4)))
