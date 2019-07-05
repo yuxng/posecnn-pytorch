@@ -1130,7 +1130,6 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
             else:
                 ind = cfg.TRAIN.CLASSES[cls]
                 sdf_optim = cfg.sdf_optimizers[ind-1]
-            print(sdf_optim.sdf_file)
 
             # re-render
             qt[3:] = poses_refined[i, :4]
@@ -1161,7 +1160,7 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
                 RT[3, 3] = 1.0
                 RT[2, 3] += 0.03
                 T_co_init = RT
-                T_co_opt, r = sdf_optim.refine_pose(T_co_init, points, steps=100)
+                T_co_opt, r = sdf_optim.refine_pose(T_co_init, points.cuda(), steps=100)
                 RT_opt = T_co_opt
                 poses_refined[i, :4] = mat2quat(RT_opt[:3, :3])
                 poses_refined[i, 4:] = RT_opt[:3, 3]

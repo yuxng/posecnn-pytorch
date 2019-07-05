@@ -1,7 +1,7 @@
 from sdf_utils import *
 
 class sdf_optimizer():
-    def __init__(self, sdf_file, lr=0.001, use_gpu=False):
+    def __init__(self, sdf_file, lr=0.001, use_gpu=True):
 
         self.sdf_file = sdf_file
         self.use_gpu = use_gpu

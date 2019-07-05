@@ -1224,7 +1224,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
         for k in range(len(classes)):
             print('%s: %f' % (classes[k], ADDS[k, 0]))
         for k in range(len(classes)-1):
-            print('%f' % (ADDS[k, 0]))
+            print('%f' % (ADDS[k+1, 0]))
         print('%f' % (ADDS[0, 0]))
         print(cfg.TRAIN.SNAPSHOT_INFIX)
         print('===========================================')
@@ -1244,7 +1244,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
         for k in range(len(classes)):
             print('%s: %f' % (classes[k], ADDS[k, 1]))
         for k in range(len(classes)-1):
-            print('%f' % (ADDS[k, 1]))
+            print('%f' % (ADDS[k+1, 1]))
         print('%f' % (ADDS[0, 1]))
         print(cfg.TRAIN.SNAPSHOT_INFIX)
         print('===========================================')

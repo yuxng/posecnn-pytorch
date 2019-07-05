@@ -144,7 +144,7 @@ if __name__ == '__main__':
     R_perturb = axangle2mat(np.random.rand(3,), 20 * np.random.rand() / 57.3, is_normalized=False)
     T_co_init[:3, :3] = np.matmul(T_co_init[:3, :3], R_perturb)
     T_co_init[:3, 3] += 0.05
-    T_co_opt, r = sdf_optim.refine_pose(T_co_init, points_c.clone(), steps=100)
+    T_co_opt, r = sdf_optim.refine_pose(T_co_init, points_c.clone().cuda(), steps=100)
 
     print(r)
     print(T_co_opt)
