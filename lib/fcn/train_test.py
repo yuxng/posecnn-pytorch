@@ -1126,9 +1126,10 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
         if len(index) > 10:
             cls = int(rois[i, 1])
             if cls == -1:
-                sdf_optim = cfg.sdf_optimizers[-1]
+                sdf_optim = cfg.sdf_optimizers[18]
             else:
-                sdf_optim = cfg.sdf_optimizers[cls-1]
+                ind = cfg.TRAIN.CLASSES[cls]
+                sdf_optim = cfg.sdf_optimizers[ind-1]
             print(sdf_optim.sdf_file)
 
             # re-render
@@ -1147,71 +1148,69 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
             mask_depth_render = np.ma.getmaskarray(np.ma.masked_greater(depth_render_roi, 0))
             mask_depth_vis = np.ma.getmaskarray(np.ma.masked_less(np.abs(depth_render_roi - depth_meas_roi), delta))
             mask = mask_label * mask_depth_meas * mask_depth_render * mask_depth_vis
-            index = mask.flatten().nonzero()[0]
+            index_p = mask.flatten().nonzero()[0]
 
-            points = torch.from_numpy(dpoints[index, :]).float()
-            points = torch.cat((points, torch.ones((points.size(0), 1), dtype=torch.float32)), dim=1)
-            print(points, points.shape)
-            RT = np.zeros((4, 4), dtype=np.float32)
-            qt = poses_refined[i, :4]
-            T = poses_refined[i, 4:]
-            RT[:3, :3] = quat2mat(qt)
-            RT[:3, 3] = T
-            RT[3, 3] = 1.0
-            T_co_init = RT
-            T_co_opt, r = sdf_optim.refine_pose(T_co_init, points, steps=100)
-            RT_opt = T_co_opt
-            poses_refined[i, :4] = mat2quat(RT_opt[:3, :3])
-            poses_refined[i, 4:] = RT_opt[:3, 3]
+            if len(index_p) > 10:
+                points = torch.from_numpy(dpoints[index_p, :]).float()
+                points = torch.cat((points, torch.ones((points.size(0), 1), dtype=torch.float32)), dim=1)
+                RT = np.zeros((4, 4), dtype=np.float32)
+                qt = poses_refined[i, :4]
+                T = poses_refined[i, 4:]
+                RT[:3, :3] = quat2mat(qt)
+                RT[:3, 3] = T
+                RT[3, 3] = 1.0
+                RT[2, 3] += 0.03
+                T_co_init = RT
+                T_co_opt, r = sdf_optim.refine_pose(T_co_init, points, steps=100)
+                RT_opt = T_co_opt
+                poses_refined[i, :4] = mat2quat(RT_opt[:3, :3])
+                poses_refined[i, 4:] = RT_opt[:3, 3]
 
-            if cfg.TEST.VISUALIZE:
-                import matplotlib.pyplot as plt
-                fig = plt.figure()
-                ax = fig.add_subplot(2, 3, 1, projection='3d')
-                if cls == -1:
-                    points_obj = dataset._points_clamp
-                else:
-                    points_obj = dataset._points_all[cls, :, :]
+                if cfg.TEST.VISUALIZE:
+                    import matplotlib.pyplot as plt
+                    fig = plt.figure()
+                    ax = fig.add_subplot(2, 3, 1, projection='3d')
+                    if cls == -1:
+                        points_obj = dataset._points_clamp
+                    else:
+                        points_obj = dataset._points_all[cls, :, :]
 
-                points_init = np.matmul(np.linalg.inv(T_co_init), points.numpy().transpose()).transpose()
-                points_opt = np.matmul(np.linalg.inv(T_co_opt), points.numpy().transpose()).transpose()
+                    points_init = np.matmul(np.linalg.inv(T_co_init), points.numpy().transpose()).transpose()
+                    points_opt = np.matmul(np.linalg.inv(T_co_opt), points.numpy().transpose()).transpose()
 
-                ax.scatter(points_obj[::5, 0], points_obj[::5, 1], points_obj[::5, 2], color='green')
-                ax.scatter(points_init[::10, 0], points_init[::10, 1], points_init[::10, 2], color='red')
-                ax.scatter(points_opt[::10, 0], points_opt[::10, 1], points_opt[::10, 2], color='blue')
+                    ax.scatter(points_obj[::5, 0], points_obj[::5, 1], points_obj[::5, 2], color='green')
+                    ax.scatter(points_init[::10, 0], points_init[::10, 1], points_init[::10, 2], color='red')
+                    ax.scatter(points_opt[::10, 0], points_opt[::10, 1], points_opt[::10, 2], color='blue')
 
-                ax.set_xlabel('X Label')
-                ax.set_ylabel('Y Label')
-                ax.set_zlabel('Z Label')
+                    ax.set_xlabel('X Label')
+                    ax.set_ylabel('Y Label')
+                    ax.set_zlabel('Z Label')
 
-                min_coor = np.min(np.array([sdf_optim.xmin, sdf_optim.ymin, sdf_optim.zmin]))
-                max_coor = np.max(np.array([sdf_optim.xmax, sdf_optim.ymax, sdf_optim.zmax]))
+                    ax.set_xlim(sdf_optim.xmin, sdf_optim.xmax)
+                    ax.set_ylim(sdf_optim.ymin, sdf_optim.ymax)
+                    ax.set_zlim(sdf_optim.zmin, sdf_optim.zmax)
 
-                ax.set_xlim(min_coor, max_coor)
-                ax.set_ylim(min_coor, max_coor)
-                ax.set_zlim(min_coor, max_coor)
+                    ax = fig.add_subplot(2, 3, 2)
+                    plt.imshow(mask_label)
+                    ax.set_title('mask label')
 
-                ax = fig.add_subplot(2, 3, 2)
-                plt.imshow(mask_label)
-                ax.set_title('mask label')
+                    ax = fig.add_subplot(2, 3, 3)
+                    plt.imshow(mask_depth_meas)
+                    ax.set_title('mask_depth_meas')
 
-                ax = fig.add_subplot(2, 3, 3)
-                plt.imshow(mask_depth_meas)
-                ax.set_title('mask_depth_meas')
+                    ax = fig.add_subplot(2, 3, 4)
+                    plt.imshow(mask_depth_render)
+                    ax.set_title('mask_depth_render')
 
-                ax = fig.add_subplot(2, 3, 4)
-                plt.imshow(mask_depth_render)
-                ax.set_title('mask_depth_render')
+                    ax = fig.add_subplot(2, 3, 5)
+                    plt.imshow(mask_depth_vis)
+                    ax.set_title('mask_depth_vis')
 
-                ax = fig.add_subplot(2, 3, 5)
-                plt.imshow(mask_depth_vis)
-                ax.set_title('mask_depth_vis')
+                    ax = fig.add_subplot(2, 3, 6)
+                    plt.imshow(mask)
+                    ax.set_title('mask')
 
-                ax = fig.add_subplot(2, 3, 6)
-                plt.imshow(mask)
-                ax.set_title('mask')
-
-                plt.show()
+                    plt.show()
 
     return poses, poses_refined
 

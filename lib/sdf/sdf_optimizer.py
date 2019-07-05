@@ -1,7 +1,7 @@
 from sdf_utils import *
 
 class sdf_optimizer():
-    def __init__(self, sdf_file, lr=0.01, use_gpu=False):
+    def __init__(self, sdf_file, lr=0.001, use_gpu=False):
 
         self.sdf_file = sdf_file
         self.use_gpu = use_gpu
@@ -26,8 +26,7 @@ class sdf_optimizer():
         else:
             self.dpose = torch.tensor([0, 0, 0, 1e-12, 1e-12, 1e-12], dtype=torch.float32, requires_grad=True)
 
-        self.optimizer = optim.Adam([self.dpose],
-                                    lr=lr)
+        self.optimizer = optim.Adam([self.dpose], lr=lr)
 
         self.loss = nn.MSELoss(reduction='sum')
         if use_gpu:

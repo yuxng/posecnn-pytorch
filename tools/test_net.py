@@ -148,7 +148,6 @@ if __name__ == '__main__':
         cfg.sdf_optimizers = []
         for i in range(len(dataset.model_sdf_paths)):
             cfg.sdf_optimizers.append(sdf_optimizer(dataset.model_sdf_paths[i]))
-        cfg.sdf_optimizers.append(sdf_optimizer(dataset.model_sdf_clamp_path))
         print(dataset.model_sdf_paths)
 
     # test network
