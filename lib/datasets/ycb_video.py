@@ -403,7 +403,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
         im_info = np.array([im_blob.shape[1], im_blob.shape[2], im_scale, is_syn], dtype=np.float32)
 
         sample = {'image_color': im_blob,
-                  'image_depth': im_depth,
+                  'im_depth': im_depth,
                   'label': label_blob,
                   'mask': mask,
                   'meta_data': meta_data_blob,

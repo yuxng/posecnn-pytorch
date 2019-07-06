@@ -102,7 +102,10 @@ if __name__ == '__main__':
     print('Use dataset `{:s}` for training'.format(dataset.name))
 
     if cfg.INPUT == 'COLOR':
-        background_dataset = get_dataset('background_pascal')
+        if cfg.TRAIN.SYN_BACKGROUND_SPECIFIC:
+            background_dataset = get_dataset('background_nvidia')
+        else:
+            background_dataset = get_dataset('background_pascal')
     else:
         background_dataset = get_dataset('background_rgbd')
     background_loader = torch.utils.data.DataLoader(background_dataset, batch_size=cfg.TEST.IMS_PER_BATCH,

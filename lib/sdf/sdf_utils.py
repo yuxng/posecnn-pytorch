@@ -51,14 +51,17 @@ def Exp(dq, gpu):
 
     dphi = torch.norm(dq, p=2, dim=0)
 
-    u = 1/dphi * dq
+    if dphi > 0.05:
+        u = 1/dphi * dq
 
-    ux = skew(u, gpu)
+        ux = skew(u, gpu)
 
-    if gpu:
-        dR = I + torch.sin(dphi) * ux + (torch.tensor(1, dtype=torch.float32).cuda() - torch.cos(dphi)) * torch.mm(ux, ux)
+        if gpu:
+            dR = I + torch.sin(dphi) * ux + (torch.tensor(1, dtype=torch.float32).cuda() - torch.cos(dphi)) * torch.mm(ux, ux)
+        else:
+            dR = I + torch.sin(dphi) * ux + (torch.tensor(1, dtype=torch.float32) - torch.cos(dphi)) * torch.mm(ux, ux)
     else:
-        dR = I + torch.sin(dphi) * ux + (torch.tensor(1, dtype=torch.float32) - torch.cos(dphi)) * torch.mm(ux, ux)
+        dR = I + skew(dq, gpu)
 
     return dR
 

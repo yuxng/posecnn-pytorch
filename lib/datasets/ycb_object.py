@@ -54,7 +54,7 @@ class YCBObject(data.Dataset, datasets.imdb):
         self._class_colors = [self._class_colors_all[i] for i in cfg.TRAIN.CLASSES]
         self._symmetry = np.array(cfg.TRAIN.SYMMETRY).astype(np.float32)
         self._extents = self._extents_all[cfg.TRAIN.CLASSES]
-        self._points, self._points_all, self._point_blob = self._load_object_points()
+        self._points, self._points_all, self._point_blob, self._points_clamp = self._load_object_points()
         self._pixel_mean = torch.tensor(cfg.PIXEL_MEANS / 255.0).cuda().float()
 
         self._classes_other = []
@@ -70,6 +70,7 @@ class YCBObject(data.Dataset, datasets.imdb):
 
         # 3D model paths
         self.model_mesh_paths = ['{}/models/{}/textured_simple.obj'.format(self._ycb_object_path, cls) for cls in self._classes_all[1:]]
+        self.model_sdf_paths = ['{}/models/{}/textured_simple_low_res.pth'.format(self._ycb_object_path, cls) for cls in self._classes_all[1:22]]
         self.model_texture_paths = ['{}/models/{}/texture_map.png'.format(self._ycb_object_path, cls) for cls in self._classes_all[1:]]
         self.model_colors = [np.array(self._class_colors_all[i]) / 255.0 for i in range(1, len(self._classes_all))]
 
@@ -195,15 +196,11 @@ class YCBObject(data.Dataset, datasets.imdb):
         cfg.renderer.set_projection_matrix(width, height, fx, fy, px, py, znear, zfar)
         image_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
         seg_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
-        if cfg.INPUT == 'DEPTH' or cfg.INPUT == 'RGBD':
-            pc_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
-        else:
-            pc_tensor = None
+        pc_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
         cfg.renderer.render(cls_indexes, image_tensor, seg_tensor, pc2_tensor=pc_tensor)
         image_tensor = image_tensor.flip(0)
         seg_tensor = seg_tensor.flip(0)
-        if pc_tensor is not None:
-            pc_tensor = pc_tensor.flip(0)
+        pc_tensor = pc_tensor.flip(0)
 
         # foreground mask
         seg = seg_tensor[:,:,2] + 256*seg_tensor[:,:,1] + 256*256*seg_tensor[:,:,0]
@@ -215,10 +212,10 @@ class YCBObject(data.Dataset, datasets.imdb):
         im = im[:, :, (2, 1, 0)] * 255
         im = im.astype(np.uint8)
 
-        if cfg.INPUT == 'DEPTH' or cfg.INPUT == 'RGBD':
-            # XYZ coordinates in camera frame
-            im_depth = pc_tensor.cpu().numpy()
-            im_depth = im_depth[:, :, :3]
+        # XYZ coordinates in camera frame
+        im_depth = pc_tensor.cpu().numpy()
+        im_depth = im_depth[:, :, :3]
+        im_depth_return = im_depth[:, :, 2].copy()
 
         im_label = seg_tensor.cpu().numpy()
         im_label = im_label[:, :, (2, 1, 0)] * 255
@@ -351,6 +348,7 @@ class YCBObject(data.Dataset, datasets.imdb):
 
         sample = {'image_color': im_cuda,
                   'image_depth': im_cuda_depth,
+                  'im_depth': im_depth_return,
                   'label': label_blob,
                   'mask': mask,
                   'mask_depth': mask_depth_cuda,
@@ -708,7 +706,12 @@ class YCBObject(data.Dataset, datasets.imdb):
             else:
                 point_blob[i, :, :] = weight * point_blob[i, :, :]
 
-        return points, points_all, point_blob
+        # points of large clamp
+        point_file = os.path.join(self._ycb_object_path, 'models', '051_large_clamp', 'points.xyz')
+        points_clamp = np.loadtxt(point_file)
+        points_clamp = points_clamp[:num, :]
+
+        return points, points_all, point_blob, points_clamp
 
 
     def _load_object_extents(self):

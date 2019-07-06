@@ -254,7 +254,7 @@ def test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset):
         roi_s = max(roi_w, roi_h)
 
         pose = pose_rbpf.initialize(image, uv_init, n_init_samples, cls, roi_w, roi_h)
-        if dataset.classes[cls] == '052_extra_large_clamp':
+        if dataset.classes[cls] == '052_extra_large_clamp' and 'ycb_video' in dataset.name:
             pose_extra = pose
             pose_render = poses_return[i,:].copy()
             pose_render[0] = poses_return[i, 4] * poses_return[i, 6]
@@ -363,7 +363,6 @@ def test(test_loader, background_loader, network, pose_rbpf, output_dir):
         elif cfg.INPUT == 'RGBD':
             inputs = torch.cat((sample['image_color'], sample['image_depth'], sample['mask_depth']), dim=1)
         im_info = sample['im_info']
-        print(sample['video_id'], sample['image_id'])
 
         # add background
         mask = sample['mask']
@@ -445,9 +444,15 @@ def test(test_loader, background_loader, network, pose_rbpf, output_dir):
                     rois, poses = test_pose_rbpf(pose_rbpf, inputs, rois, poses, sample['meta_data'], test_loader.dataset)
 
                 # optimize depths
-                labels_out = out_label.detach().cpu().numpy()[0]
-                im_depth = sample['image_depth'].numpy()[0]
-                poses, poses_refined = refine_pose(labels_out, im_depth, rois, poses, test_loader.dataset)
+                if cfg.TEST.POSE_REFINE:
+                    labels_out = out_label.detach().cpu().numpy()[0]
+                    im_depth = sample['im_depth'].numpy()[0]
+                    poses, poses_refined = refine_pose(labels_out, im_depth, rois, poses, test_loader.dataset)
+                else:
+                    num = rois.shape[0]
+                    for j in range(num):
+                        poses[j, 4] *= poses[j, 6] 
+                        poses[j, 5] *= poses[j, 6]
 
         elif cfg.TRAIN.VERTEX_REG_DELTA:
 
@@ -519,13 +524,14 @@ def test(test_loader, background_loader, network, pose_rbpf, output_dir):
         # measure elapsed time
         batch_time.update(time.time() - end)
 
-        result = {'labels': out_label, 'rois': rois, 'poses': poses, 'poses_refined': poses_refined}
-        if 'video_id' in sample and 'image_id' in sample:
-            filename = os.path.join(output_dir, sample['video_id'][0] + '_' + sample['image_id'][0] + '.mat')
-        else:
-            filename = os.path.join(output_dir, '%06d.mat' % i)
-        print filename
-        scipy.io.savemat(filename, result, do_compression=True)
+        if not cfg.TEST.VISUALIZE:
+            result = {'labels': out_label, 'rois': rois, 'poses': poses, 'poses_refined': poses_refined}
+            if 'video_id' in sample and 'image_id' in sample:
+                filename = os.path.join(output_dir, sample['video_id'][0] + '_' + sample['image_id'][0] + '.mat')
+            else:
+                filename = os.path.join(output_dir, '%06d.mat' % i)
+            print(filename)
+            scipy.io.savemat(filename, result, do_compression=True)
 
         print('[%d/%d], batch time %.2f' % (i, epoch_size, batch_time.val))
 
@@ -1112,12 +1118,12 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
         if len(index) > 10:
             T = np.mean(dpoints[index, :] - pcloud[index, :], axis=0)
             poses_refined[i, 6] += T[2]
-            poses_refined[i, 4] *= poses[i, 6]
-            poses_refined[i, 5] *= poses[i, 6]
+            poses_refined[i, 4] *= poses_refined[i, 6]
+            poses_refined[i, 5] *= poses_refined[i, 6]
         else:
             poses_refined[i, 4] *= poses_refined[i, 6]
             poses_refined[i, 5] *= poses_refined[i, 6]
-            print 'no pose refinement'
+            print('no pose refinement')
 
         poses[i, 4] *= poses[i, 6]
         poses[i, 5] *= poses[i, 6]
@@ -1143,10 +1149,11 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
             delta = 0.05
             depth_meas_roi = im_pcloud[:, :, 2]
             depth_render_roi = pcloud_tensor[:, :, 2].cpu().numpy()
+            mask_depth_valid = np.ma.getmaskarray(np.ma.masked_where(np.isfinite(depth_meas_roi), depth_meas_roi))
             mask_depth_meas = np.ma.getmaskarray(np.ma.masked_not_equal(depth_meas_roi, 0))
             mask_depth_render = np.ma.getmaskarray(np.ma.masked_greater(depth_render_roi, 0))
             mask_depth_vis = np.ma.getmaskarray(np.ma.masked_less(np.abs(depth_render_roi - depth_meas_roi), delta))
-            mask = mask_label * mask_depth_meas * mask_depth_render * mask_depth_vis
+            mask = mask_label * mask_depth_valid * mask_depth_meas * mask_depth_render * mask_depth_vis
             index_p = mask.flatten().nonzero()[0]
 
             if len(index_p) > 10:
@@ -1159,7 +1166,7 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
                 RT[:3, 3] = T
                 RT[3, 3] = 1.0
                 T_co_init = RT
-                T_co_opt, r = sdf_optim.refine_pose(T_co_init, points.cuda(), steps=1000)
+                T_co_opt, r = sdf_optim.refine_pose(T_co_init, points.cuda(), steps=200)
                 RT_opt = T_co_opt
                 poses_refined[i, :4] = mat2quat(RT_opt[:3, :3])
                 poses_refined[i, 4:] = RT_opt[:3, 3]
@@ -1167,7 +1174,7 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
                 if cfg.TEST.VISUALIZE:
                     import matplotlib.pyplot as plt
                     fig = plt.figure()
-                    ax = fig.add_subplot(2, 3, 1, projection='3d')
+                    ax = fig.add_subplot(3, 3, 1, projection='3d')
                     if cls == -1:
                         points_obj = dataset._points_clamp
                     else:
@@ -1188,25 +1195,33 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
                     ax.set_ylim(sdf_optim.ymin, sdf_optim.ymax)
                     ax.set_zlim(sdf_optim.zmin, sdf_optim.zmax)
 
-                    ax = fig.add_subplot(2, 3, 2)
+                    ax = fig.add_subplot(3, 3, 2)
                     plt.imshow(mask_label)
                     ax.set_title('mask label')
 
-                    ax = fig.add_subplot(2, 3, 3)
+                    ax = fig.add_subplot(3, 3, 3)
                     plt.imshow(mask_depth_meas)
                     ax.set_title('mask_depth_meas')
 
-                    ax = fig.add_subplot(2, 3, 4)
+                    ax = fig.add_subplot(3, 3, 4)
                     plt.imshow(mask_depth_render)
                     ax.set_title('mask_depth_render')
 
-                    ax = fig.add_subplot(2, 3, 5)
+                    ax = fig.add_subplot(3, 3, 5)
                     plt.imshow(mask_depth_vis)
                     ax.set_title('mask_depth_vis')
 
-                    ax = fig.add_subplot(2, 3, 6)
+                    ax = fig.add_subplot(3, 3, 6)
                     plt.imshow(mask)
                     ax.set_title('mask')
+
+                    ax = fig.add_subplot(3, 3, 7)
+                    plt.imshow(depth_meas_roi)
+                    ax.set_title('depth input')
+
+                    ax = fig.add_subplot(3, 3, 8)
+                    plt.imshow(depth_render_roi)
+                    ax.set_title('depth render')
 
                     plt.show()
 
@@ -1759,37 +1774,38 @@ def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, poses_refined,
                     plt.plot(x2d[0, :], x2d[1, :], '.', color=np.divide(class_colors[cls], 255.0), alpha=0.5)
 
             # show predicted refined poses
-            ax = fig.add_subplot(m, n, start)
-            start += 1
-            ax.set_title('predicted refined poses')
-            if cfg.INPUT == 'COLOR' or cfg.INPUT == 'RGBD':
-                plt.imshow(im)
-            else:
-                plt.imshow(im_depth[2, :, :])
-            for j in xrange(rois.shape[0]):
-                if rois[j, 0] != i:
-                    continue
-                cls = int(rois[j, 1])
-                if rois[j, -1] > cfg.TEST.DET_THRESHOLD:
-                    # extract 3D points
-                    x3d = np.ones((4, points.shape[1]), dtype=np.float32)
-                    if cls == -1:
-                        x3d[0, :] = points_clamp[:,0]
-                        x3d[1, :] = points_clamp[:,1]
-                        x3d[2, :] = points_clamp[:,2]
-                    else:
-                        x3d[0, :] = points[cls,:,0]
-                        x3d[1, :] = points[cls,:,1]
-                        x3d[2, :] = points[cls,:,2]
+            if cfg.TEST.POSE_REFINE:
+                ax = fig.add_subplot(m, n, start)
+                start += 1
+                ax.set_title('predicted refined poses')
+                if cfg.INPUT == 'COLOR' or cfg.INPUT == 'RGBD':
+                    plt.imshow(im)
+                else:
+                    plt.imshow(im_depth[2, :, :])
+                for j in xrange(rois.shape[0]):
+                    if rois[j, 0] != i:
+                        continue
+                    cls = int(rois[j, 1])
+                    if rois[j, -1] > cfg.TEST.DET_THRESHOLD:
+                        # extract 3D points
+                        x3d = np.ones((4, points.shape[1]), dtype=np.float32)
+                        if cls == -1:
+                            x3d[0, :] = points_clamp[:,0]
+                            x3d[1, :] = points_clamp[:,1]
+                            x3d[2, :] = points_clamp[:,2]
+                        else:
+                            x3d[0, :] = points[cls,:,0]
+                            x3d[1, :] = points[cls,:,1]
+                            x3d[2, :] = points[cls,:,2]
 
-                    # projection
-                    RT = np.zeros((3, 4), dtype=np.float32)
-                    RT[:3, :3] = quat2mat(poses_refined[j, :4])
-                    RT[:, 3] = poses_refined[j, 4:7]
-                    x2d = np.matmul(intrinsic_matrix, np.matmul(RT, x3d))
-                    x2d[0, :] = np.divide(x2d[0, :], x2d[2, :])
-                    x2d[1, :] = np.divide(x2d[1, :], x2d[2, :])
-                    plt.plot(x2d[0, :], x2d[1, :], '.', color=np.divide(class_colors[cls], 255.0), alpha=0.5)
+                        # projection
+                        RT = np.zeros((3, 4), dtype=np.float32)
+                        RT[:3, :3] = quat2mat(poses_refined[j, :4])
+                        RT[:, 3] = poses_refined[j, 4:7]
+                        x2d = np.matmul(intrinsic_matrix, np.matmul(RT, x3d))
+                        x2d[0, :] = np.divide(x2d[0, :], x2d[2, :])
+                        x2d[1, :] = np.divide(x2d[1, :], x2d[2, :])
+                        plt.plot(x2d[0, :], x2d[1, :], '.', color=np.divide(class_colors[cls], 255.0), alpha=0.5)
 
             # show gt vertex targets
             vertex_target = vertex_targets[i, :, :, :]

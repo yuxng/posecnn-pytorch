@@ -107,7 +107,7 @@ if __name__ == '__main__':
 
     sdf_file = '../../data/YCB_Object/models/{}/textured_simple.sdf'.format(object_name)
 
-    sdf_optim = sdf_optimizer(sdf_file)
+    sdf_optim = sdf_optimizer(sdf_file, lr=0.01, use_gpu=True, optimizer='LBFGS')
 
     if visualize_sdf:
         sdf_show = SignedDensityField.from_sdf(sdf_file)
@@ -144,7 +144,10 @@ if __name__ == '__main__':
     R_perturb = axangle2mat(np.random.rand(3,), 20 * np.random.rand() / 57.3, is_normalized=False)
     T_co_init[:3, :3] = np.matmul(T_co_init[:3, :3], R_perturb)
     T_co_init[:3, 3] += 0.05
-    T_co_opt, r = sdf_optim.refine_pose(T_co_init, points_c.clone().cuda(), steps=100)
+    if sdf_optim.optimizer_type=='LBFGS':
+        T_co_opt, r = sdf_optim.refine_pose(T_co_init, points_c.clone().cuda(), steps=10)
+    elif sdf_optim.optimizer_type=='Adam':
+        T_co_opt, r = sdf_optim.refine_pose(T_co_init, points_c.clone().cuda(), steps=1000)
 
     print(r)
     print(T_co_opt)

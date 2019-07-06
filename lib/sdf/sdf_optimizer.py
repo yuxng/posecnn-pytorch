@@ -1,7 +1,7 @@
 from sdf_utils import *
 
 class sdf_optimizer():
-    def __init__(self, sdf_file, lr=0.01, use_gpu=True):
+    def __init__(self, sdf_file, lr=0.01, optimizer='Adam', use_gpu=True):
 
         self.sdf_file = sdf_file
         self.use_gpu = use_gpu
@@ -38,7 +38,15 @@ class sdf_optimizer():
 
         self.optimizer = optim.Adam([self.dpose], lr=lr)
 
-        self.loss = nn.MSELoss(reduction='sum')
+        self.optimizer_type = optimizer
+        if optimizer == 'Adam':
+            self.optimizer = optim.Adam([self.dpose], lr=lr)
+            self.loss = nn.MSELoss(reduction='sum')
+        elif optimizer == 'LBFGS':
+            self.optimizer = optim.LBFGS([self.dpose], lr=0.05, max_iter=10)
+            self.loss = nn.L1Loss(reduction='sum')
+
+        self.dist = None
         if use_gpu:
             self.loss = self.loss.cuda()
 
@@ -80,25 +88,50 @@ class sdf_optimizer():
         self.dpose.data[:3] *= 0
         self.dpose.data[3:] = self.dpose.data[3:] * 0 + 1e-12
 
+        self.dist = torch.zeros((ps_c.size(0),))
+        if self.use_gpu:
+            self.dist = self.dist.cuda()
+
         for i in range(steps):
 
-            self.optimizer.zero_grad()
+            if self.optimizer_type == 'LBFGS':
+                def closure():
+                    self.optimizer.zero_grad()
 
-            dist = self.compute_dist(self.dpose, T_oc_0, ps_c)
-            dist_target = torch.zeros_like(dist)
-            if self.use_gpu:
-                dist_target = dist_target.cuda()
+                    dist = self.compute_dist(self.dpose, T_oc_0, ps_c)
 
-            loss = self.loss(dist, dist_target)
-            loss.backward()
+                    self.dist = dist.detach()
 
-            self.optimizer.step()
+                    dist_target = torch.zeros_like(dist)
+                    if self.use_gpu:
+                        dist_target = dist_target.cuda()
+
+                    loss = self.loss(dist, dist_target)
+                    loss.backward()
+
+                    return loss
+
+                self.optimizer.step(closure)
+
+            elif self.optimizer_type == 'Adam':
+                self.optimizer.zero_grad()
+
+                dist = self.compute_dist(self.dpose, T_oc_0, ps_c)
+                self.dist = dist.detach()
+                dist_target = torch.zeros_like(dist)
+                if self.use_gpu:
+                    dist_target = dist_target.cuda()
+
+                loss = self.loss(dist, dist_target)
+                loss.backward()
+
+                self.optimizer.step()
 
             # print('step: {}, loss = {}'.format(i + 1, loss.data.cpu().item()))
 
         T_oc_opt = Oplus(T_oc_0, self.dpose, self.use_gpu)
         T_co_opt = np.linalg.inv(T_oc_opt.cpu().detach().numpy())
 
-        dist = torch.mean(torch.abs(dist)).detach().cpu().numpy()
+        dist = torch.mean(torch.abs(self.dist)).detach().cpu().numpy()
 
         return T_co_opt, dist
