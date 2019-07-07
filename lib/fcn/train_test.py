@@ -1105,7 +1105,11 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
             cls = 19
             cls_indexes.append(18)
         else:
-            cls_indexes.append(cfg.TEST.CLASSES.index(cls))
+            if cfg.TEST.SYNTHESIZE:
+                cls_render = cfg.TRAIN.CLASSES[cls] - 1
+            else:
+                cls_render = cfg.TEST.CLASSES.index(cls)
+            cls_indexes.append(cls_render)
 
         poses_all = []
         qt = np.zeros((7, ), dtype=np.float32)

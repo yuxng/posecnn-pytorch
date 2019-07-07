@@ -78,6 +78,8 @@ if __name__ == '__main__':
     if args.cfg_file is not None:
         cfg_from_file(args.cfg_file)
 
+    if len(cfg.TEST.CLASSES) == 0:
+        cfg.TEST.CLASSES = cfg.TRAIN.CLASSES
     print('Using config:')
     pprint.pprint(cfg)
 
@@ -140,10 +142,13 @@ if __name__ == '__main__':
     #'''
     print('loading 3D models')
     cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, gpu_id=args.gpu_id, render_marker=False)
-    model_mesh_paths = [dataset.model_mesh_paths[i-1] for i in cfg.TEST.CLASSES]
-    model_texture_paths = [dataset.model_texture_paths[i-1] for i in cfg.TEST.CLASSES]
-    model_colors = [dataset.model_colors[i-1] for i in cfg.TEST.CLASSES]
-    cfg.renderer.load_objects(model_mesh_paths, model_texture_paths, model_colors)
+    if cfg.TEST.SYNTHESIZE:
+        cfg.renderer.load_objects(dataset.model_mesh_paths, dataset.model_texture_paths, dataset.model_colors)
+    else:
+        model_mesh_paths = [dataset.model_mesh_paths[i-1] for i in cfg.TEST.CLASSES]
+        model_texture_paths = [dataset.model_texture_paths[i-1] for i in cfg.TEST.CLASSES]
+        model_colors = [dataset.model_colors[i-1] for i in cfg.TEST.CLASSES]
+        cfg.renderer.load_objects(model_mesh_paths, model_texture_paths, model_colors)
     cfg.renderer.set_camera_default()
     print(dataset.model_mesh_paths)
     #'''
