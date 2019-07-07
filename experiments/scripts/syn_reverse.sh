@@ -13,6 +13,7 @@ cp $DST/lib/utils/*.py lib/utils
 cp $DST/lib/utils/*.pyx lib/utils
 cp $DST/lib/utils/*.c lib/utils
 cp $DST/lib/*.py lib
+cp $DST/lib/sdf/*.py lib/sdf
 
 cp $DST/experiments/cfgs/*.yml experiments/cfgs
 cp $DST/experiments/scripts/*.sh experiments/scripts

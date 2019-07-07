@@ -23,6 +23,8 @@ from utils.pose_error import re, te
 from scipy.optimize import minimize
 from utils.loose_bounding_boxes import compute_centroids_and_loose_bounding_boxes, mean_shift_and_loose_bounding_boxes
 
+import matplotlib.pyplot as plt
+
 class AverageMeter(object):
     """Computes and stores the average and current value"""
 
@@ -236,7 +238,12 @@ def test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset):
     for i in range(num):
         ind = int(rois[i, 0])
         image = inputs[ind].permute(1, 2, 0) + pixel_mean
+
         cls = int(rois[i, 1])
+
+        if cls not in cfg.TEST.CLASSES:
+            continue
+
         points = dataset._points_all[cls]
 
         intrinsic_matrix = meta_data[ind, :9].numpy().reshape((3, 3))
@@ -283,7 +290,7 @@ def test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset):
             # only update rotation from codebook matching
             poses_return[i, :4] = pose[:4]
 
-    return rois_return, poses_return
+    return rois_return, poses_return, image
 
 
 def render_one(dataset, cls, pose):
@@ -441,7 +448,7 @@ def test(test_loader, background_loader, network, pose_rbpf, output_dir):
 
                 # run poseRBPF for codebook matching to compute the rotations
                 if pose_rbpf is not None:
-                    rois, poses = test_pose_rbpf(pose_rbpf, inputs, rois, poses, sample['meta_data'], test_loader.dataset)
+                    rois, poses, im_rgb = test_pose_rbpf(pose_rbpf, inputs, rois, poses, sample['meta_data'], test_loader.dataset)
 
                 # optimize depths
                 if cfg.TEST.POSE_REFINE:
@@ -453,6 +460,9 @@ def test(test_loader, background_loader, network, pose_rbpf, output_dir):
                     for j in range(num):
                         poses[j, 4] *= poses[j, 6] 
                         poses[j, 5] *= poses[j, 6]
+
+                # if pose_rbpf is not None:
+                #     pose_rbpf.evaluate_poses(poses_refined, rois[:,1], im_rgb, im_depth, test_loader.dataset._intrinsic_matrix)
 
         elif cfg.TRAIN.VERTEX_REG_DELTA:
 
@@ -1086,11 +1096,16 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
     for i in range(num):
         cls_indexes = []
         cls = int(rois[i, 1])
+
+        if cls not in cfg.TEST.CLASSES:
+            continue
+
+        # todo: fix the problem for large clamp
         if cls == -1:
             cls = 19
             cls_indexes.append(18)
         else:
-            cls_indexes.append(cfg.TRAIN.CLASSES[cls] - 1)
+            cls_indexes.append(cfg.TEST.CLASSES.index(cls))
 
         poses_all = []
         qt = np.zeros((7, ), dtype=np.float32)
@@ -1134,8 +1149,8 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
             if cls == -1:
                 sdf_optim = cfg.sdf_optimizers[18]
             else:
-                ind = cfg.TRAIN.CLASSES[cls]
-                sdf_optim = cfg.sdf_optimizers[ind-1]
+                ind = cfg.TEST.CLASSES.index(cls)
+                sdf_optim = cfg.sdf_optimizers[ind]
 
             # re-render
             qt[3:] = poses_refined[i, :4]

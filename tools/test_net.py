@@ -140,7 +140,10 @@ if __name__ == '__main__':
     #'''
     print('loading 3D models')
     cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, gpu_id=args.gpu_id, render_marker=False)
-    cfg.renderer.load_objects(dataset.model_mesh_paths, dataset.model_texture_paths, dataset.model_colors)
+    model_mesh_paths = [dataset.model_mesh_paths[i-1] for i in cfg.TEST.CLASSES]
+    model_texture_paths = [dataset.model_texture_paths[i-1] for i in cfg.TEST.CLASSES]
+    model_colors = [dataset.model_colors[i-1] for i in cfg.TEST.CLASSES]
+    cfg.renderer.load_objects(model_mesh_paths, model_texture_paths, model_colors)
     cfg.renderer.set_camera_default()
     print(dataset.model_mesh_paths)
     #'''
@@ -149,9 +152,8 @@ if __name__ == '__main__':
     if cfg.TEST.POSE_REFINE:
         print('loading SDFs')
         cfg.sdf_optimizers = []
-        for i in range(len(dataset.model_sdf_paths)):
-            cfg.sdf_optimizers.append(sdf_optimizer(dataset.model_sdf_paths[i]))
-        print(dataset.model_sdf_paths)
+        for i in cfg.TEST.CLASSES:
+            cfg.sdf_optimizers.append(sdf_optimizer(dataset.model_sdf_paths[i-1]))
 
     # test network
     if args.network_name == 'autoencoder':

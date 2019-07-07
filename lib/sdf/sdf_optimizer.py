@@ -5,7 +5,7 @@ class sdf_optimizer():
 
         self.sdf_file = sdf_file
         self.use_gpu = use_gpu
-        print(' start loading sdf ... ')
+        print(' start loading sdf from {} ... '.format(sdf_file))
 
         if sdf_file[-3:] == 'sdf':
             sdf_info = read_sdf(sdf_file)

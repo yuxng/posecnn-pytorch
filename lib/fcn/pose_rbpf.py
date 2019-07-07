@@ -13,12 +13,13 @@ class PoseRBPF:
     def __init__(self, dataset):
 
         # prepare autoencoder and codebook
-        autoencoders = [[] for i in range(len(cfg.TRAIN.CLASSES))]
-        codebooks = [[] for i in range(len(cfg.TRAIN.CLASSES))]
-        codes_gpu = [[] for i in range(len(cfg.TRAIN.CLASSES))]
-        codebook_names = [[] for i in range(len(cfg.TRAIN.CLASSES))]
-        for i in range(len(cfg.TRAIN.CLASSES)):
-            ind = cfg.TRAIN.CLASSES[i]
+        autoencoders = [[] for i in range(len(cfg.TEST.CLASSES))]
+        codebooks = [[] for i in range(len(cfg.TEST.CLASSES))]
+        codes_gpu = [[] for i in range(len(cfg.TEST.CLASSES))]
+        codebook_names = [[] for i in range(len(cfg.TEST.CLASSES))]
+
+        for i in range(len(cfg.TEST.CLASSES)):
+            ind = cfg.TEST.CLASSES[i]
             cls = dataset._classes_all[ind]
 
             filename = os.path.join('data', 'checkpoints', 'encoder_ycb_object_' + cls + '_epoch_200.checkpoint.pth')
@@ -35,21 +36,21 @@ class PoseRBPF:
                 codes_gpu[i] = torch.from_numpy(codebooks[i]['codes']).cuda()
                 print(filename)
 
-        # append the codebook of 051_large_clamp
-        cls = '051_large_clamp'
-        filename = os.path.join('data', 'checkpoints', 'encoder_ycb_object_' + cls + '_epoch_200.checkpoint.pth')
-        if os.path.exists(filename):
-            autoencoder_data = torch.load(filename)
-            autoencoders.append(networks.__dict__['autoencoder'](1, 128, autoencoder_data).cuda(device=cfg.device))
-            autoencoders[-1] = torch.nn.DataParallel(autoencoders[-1], device_ids=[cfg.gpu_id]).cuda(device=cfg.device)
-            print(filename)
-
-            # load codebook
-            filename = os.path.join('data', 'codebooks', 'codebook_ycb_encoder_test_' + cls + '.mat')
-            codebook_names.append(filename)
-            codebooks.append(scipy.io.loadmat(filename))
-            codes_gpu.append(torch.from_numpy(codebooks[-1]['codes']).cuda())
-            print(filename)
+        # # append the codebook of 051_large_clamp
+        # cls = '051_large_clamp'
+        # filename = os.path.join('data', 'checkpoints', 'encoder_ycb_object_' + cls + '_epoch_200.checkpoint.pth')
+        # if os.path.exists(filename):
+        #     autoencoder_data = torch.load(filename)
+        #     autoencoders.append(networks.__dict__['autoencoder'](1, 128, autoencoder_data).cuda(device=cfg.device))
+        #     autoencoders[-1] = torch.nn.DataParallel(autoencoders[-1], device_ids=[cfg.gpu_id]).cuda(device=cfg.device)
+        #     print(filename)
+        #
+        #     # load codebook
+        #     filename = os.path.join('data', 'codebooks', 'codebook_ycb_encoder_test_' + cls + '.mat')
+        #     codebook_names.append(filename)
+        #     codebooks.append(scipy.io.loadmat(filename))
+        #     codes_gpu.append(torch.from_numpy(codebooks[-1]['codes']).cuda())
+        #     print(filename)
 
         self.autoencoders = autoencoders
         self.codebooks = codebooks
@@ -64,10 +65,12 @@ class PoseRBPF:
     '''
     def initialize(self, image, uv_init, n_init_samples, cls, roi_w, roi_h):
 
+        cls_id = cfg.TEST.CLASSES.index(cls)
+
         # network and codebook of the class
-        autoencoder = self.autoencoders[cls]
-        codebook = self.codebooks[cls]
-        codes_gpu = self.codes_gpu[cls]
+        autoencoder = self.autoencoders[cls_id]
+        codebook = self.codebooks[cls_id]
+        codes_gpu = self.codes_gpu[cls_id]
         pose = np.zeros((7,), dtype=np.float32)
         if not autoencoder or not codebook:
             return pose
@@ -111,11 +114,21 @@ class PoseRBPF:
         pose[:4] = codebook['quaternions'][index_star[1], :]
 
         if cfg.TEST.VISUALIZE:
-            im_render = self.render_image(self.dataset, cls, pose)
+            im_render = self.render_image(self.dataset, cls_id, pose)
             self.visualize(image, im_render, out_images[index_star[0]], in_images[index_star[0]], box_center, box_size)
 
         return pose
 
+    def project(self, ts, intrinsics):
+        # input: ts: nx3,
+        #        intrinsics: 3x3
+        # output: uvs: nx3
+
+        uvs = np.matmul(intrinsics, ts.transpose()).transpose()
+
+        uvs /= np.repeat(uvs[:, [2]], 3, axis=1)
+
+        return uvs
 
     def back_project(self, uv, intrinsics, z):
         # here uv is the homogeneous coordinates todo: maybe make this generic if time permits
@@ -137,12 +150,12 @@ class PoseRBPF:
     def CropAndResizeFunction(self, image, rois):
         return ROIAlign((128, 128), 1.0, 0)(image, rois)
 
-    def trans_zoom_uvz_cuda(self, image, uvs, zs, pf_fu, pf_fv, target_distance=2.5, out_size=128):
+    def trans_zoom_uvz_cuda(self, image, uvs, zs, train_fu, train_fv, pf_fu, pf_fv, target_distance=2.5, out_size=128):
         image = image.permute(2, 0, 1).float().unsqueeze(0).cuda()
 
-        bbox_u = target_distance * (1 / zs) / cfg.TRAIN.FU * pf_fu * out_size / image.size(3)
+        bbox_u = target_distance * (1 / zs) / train_fu * pf_fu * out_size / image.size(3)
         bbox_u = torch.from_numpy(bbox_u).cuda().float().squeeze(1)
-        bbox_v = target_distance * (1 / zs) / cfg.TRAIN.FV * pf_fv * out_size / image.size(2)
+        bbox_v = target_distance * (1 / zs) / train_fv * pf_fv * out_size / image.size(2)
         bbox_v = torch.from_numpy(bbox_v).cuda().float().squeeze(1)
 
         center_uvs = torch.from_numpy(uvs).cuda().float()
@@ -179,7 +192,7 @@ class PoseRBPF:
         # crop the rois from input image
         fu = intrinsics[0, 0]
         fv = intrinsics[1, 1]
-        images_roi_cuda, scale_roi = self.trans_zoom_uvz_cuda(image.detach(), uv, z, fu, fv, render_dist)
+        images_roi_cuda, scale_roi = self.trans_zoom_uvz_cuda(image.detach(), uv, z, cfg.TRAIN.FU, cfg.TRAIN.FV, fu, fv, render_dist)
 
         # forward passing
         out_images, embeddings = autoencoder(images_roi_cuda)
@@ -197,6 +210,33 @@ class PoseRBPF:
         pdf_matrix = self.mat2pdf(cosine_distance_matrix/max_sim_all, 1, gaussian_std)
 
         return pdf_matrix, out_images, images_roi_cuda
+
+    def evaluate_poses(self, poses, cls_list, image_rgb, image_depth, intrinsics):
+
+        # roi
+        ts = poses[:, 4:]
+        uvs = self.project(ts, intrinsics)
+        zs = poses[:, 2]
+        fx = intrinsics[0, 0]
+        fy = intrinsics[1, 1]
+
+        # render dists
+        render_dists = np.zeros_like(zs)
+        train_fu = np.zeros_like(zs)
+        train_fv = np.zeros_like(zs)
+        for i in range(render_dists.shape[0]):
+            render_dists[i] = self.codebooks[int(cls_list[i])]['distance']
+            train_fu[i] = self.codebooks[int(cls_list[i])]['intrinsic_matrix'][0, 0]
+            train_fv[i] = self.codebooks[int(cls_list[i])]['intrinsic_matrix'][1, 1]
+
+        rois, scale_roi = self.trans_zoom_uvz_cuda(image_rgb.detach(), uvs, zs, train_fu, train_fv, fx, fy, render_dists)
+
+        # allocentric orientation similarity
+
+        # depth error
+        # render -> evaluate
+
+        return 0
 
 
     def visualize(self, image, im_render, im_output, im_input, box_center, box_size):
@@ -273,10 +313,12 @@ class PoseRBPF:
         cls_indexes = []
         poses_all = []
 
+        # todo: fix the problem for large clamp
         if cls == -1:
             cls_index = 18
         else:
-            cls_index = cfg.TRAIN.CLASSES[cls] - 1
+            cls_index = cls
+
         cls_indexes.append(cls_index)
         pose_render = pose.copy()
         pose_render[:3] = pose[4:]

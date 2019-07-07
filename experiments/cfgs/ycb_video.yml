@@ -59,3 +59,4 @@ TEST:
   SYNTHESIZE: False
   POSE_REFINE: True
   ROS_CAMERA: camera
+  CLASSES: !!python/tuple [8, 11] # no large clamp
