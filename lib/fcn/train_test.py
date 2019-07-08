@@ -292,6 +292,35 @@ def test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset):
 
     return rois_return, poses_return, image
 
+def eval_poses(pose_rbpf, poses, rois, im_rgb, im_depth, meta_data):
+
+    num = rois.shape[0]
+
+    sims = np.zeros((rois.shape[0],), dtype=np.float32)
+    depth_errors = np.ones((rois.shape[0],), dtype=np.float32)
+    vis_ratios = np.zeros((rois.shape[0],), dtype=np.float32)
+
+    pose_scores = np.zeros((rois.shape[0],), dtype=np.float32)
+
+    for i in range(num):
+        ind = int(rois[i, 0])
+        cls = int(rois[i, 1])
+
+        if cls not in cfg.TEST.CLASSES:
+            continue
+
+        intrinsic_matrix = meta_data[ind, :9].numpy().reshape((3, 3))
+
+        sims[i], depth_errors[i], vis_ratios[i] = pose_rbpf.evaluate_6d_pose(poses[i],
+                                                                             cls,
+                                                                             im_rgb,
+                                                                             im_depth,
+                                                                             intrinsic_matrix)
+
+        pose_scores[i] = sims[i] / (depth_errors[i] / 0.002 / vis_ratios[i])
+
+    return sims, depth_errors, vis_ratios, pose_scores
+
 
 def render_one(dataset, cls, pose):
 
@@ -461,8 +490,8 @@ def test(test_loader, background_loader, network, pose_rbpf, output_dir):
                         poses[j, 4] *= poses[j, 6] 
                         poses[j, 5] *= poses[j, 6]
 
-                # if pose_rbpf is not None:
-                #     pose_rbpf.evaluate_poses(poses_refined, rois[:,1], im_rgb, im_depth, test_loader.dataset._intrinsic_matrix)
+                if pose_rbpf is not None:
+                    sims, depth_errors, vis_ratios, pose_scores = eval_poses(pose_rbpf, poses_refined, rois, im_rgb, im_depth, sample['meta_data'])
 
         elif cfg.TRAIN.VERTEX_REG_DELTA:
 
@@ -529,7 +558,8 @@ def test(test_loader, background_loader, network, pose_rbpf, output_dir):
 
         if cfg.TEST.VISUALIZE:
             _vis_test(inputs, labels, out_label, out_vertex, rois, poses, poses_refined, sample, \
-                test_loader.dataset._points_all, test_loader.dataset._points_clamp, test_loader.dataset.classes, test_loader.dataset.class_colors)
+                test_loader.dataset._points_all, test_loader.dataset._points_clamp, test_loader.dataset.classes, test_loader.dataset.class_colors, \
+                      pose_scores)
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -1586,7 +1616,7 @@ def _vis_minibatch(inputs, background, labels, vertex_targets, sample, class_col
         plt.show()
 
 
-def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, poses_refined, sample, points, points_clamp, classes, class_colors):
+def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, poses_refined, sample, points, points_clamp, classes, class_colors, pose_scores):
 
     """Visualize a mini-batch for debugging."""
     import matplotlib.pyplot as plt
@@ -1825,6 +1855,46 @@ def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, poses_refined,
                         x2d[0, :] = np.divide(x2d[0, :], x2d[2, :])
                         x2d[1, :] = np.divide(x2d[1, :], x2d[2, :])
                         plt.plot(x2d[0, :], x2d[1, :], '.', color=np.divide(class_colors[cls], 255.0), alpha=0.5)
+
+            # show pose estimation quality
+            if cfg.TEST.POSE_REFINE:
+                ax = fig.add_subplot(m, n, start)
+                start += 1
+                ax.set_title('pose score')
+                if cfg.INPUT == 'COLOR' or cfg.INPUT == 'RGBD':
+                    plt.imshow(im)
+                else:
+                    plt.imshow(im_depth[2, :, :])
+                for j in xrange(rois.shape[0]):
+                    if rois[j, 0] != i:
+                        continue
+                    cls = int(rois[j, 1])
+                    if cls not in cfg.TEST.CLASSES:
+                        continue
+
+                    if rois[j, -1] > cfg.TEST.DET_THRESHOLD:
+                        # extract 3D points
+                        x3d = np.ones((4, points.shape[1]), dtype=np.float32)
+                        if cls == -1:
+                            x3d[0, :] = points_clamp[:,0]
+                            x3d[1, :] = points_clamp[:,1]
+                            x3d[2, :] = points_clamp[:,2]
+                        else:
+                            x3d[0, :] = points[cls,:,0]
+                            x3d[1, :] = points[cls,:,1]
+                            x3d[2, :] = points[cls,:,2]
+
+                        # projection
+                        RT = np.zeros((3, 4), dtype=np.float32)
+                        RT[:3, :3] = quat2mat(poses_refined[j, :4])
+                        RT[:, 3] = poses_refined[j, 4:7]
+                        x2d = np.matmul(intrinsic_matrix, np.matmul(RT, x3d))
+                        x2d[0, :] = np.divide(x2d[0, :], x2d[2, :])
+                        x2d[1, :] = np.divide(x2d[1, :], x2d[2, :])
+                        pose_score = pose_scores[j]
+                        if pose_score > 1.0:
+                            pose_score = 1.0
+                        plt.plot(x2d[0, :], x2d[1, :], '.', color=(1.0 - pose_score, pose_score, 0), alpha=0.5)
 
             # show gt vertex targets
             vertex_target = vertex_targets[i, :, :, :]

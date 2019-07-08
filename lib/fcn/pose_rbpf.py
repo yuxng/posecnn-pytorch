@@ -7,6 +7,9 @@ import numpy as np
 from layers.roi_align import ROIAlign
 from fcn.config import cfg
 from utils.blob import add_noise_cuda
+import matplotlib.pyplot as plt
+import torch.nn as nn
+from utils.prbpf_utils import *
 
 class PoseRBPF:
 
@@ -58,7 +61,7 @@ class PoseRBPF:
         self.codebook_names = codebook_names
         self.codes_gpu = codes_gpu
         self.dataset = dataset
-
+        self.cos_sim = nn.CosineSimilarity(dim=1, eps=1e-6)
 
     # initialize PoseRBPF
     '''
@@ -155,12 +158,12 @@ class PoseRBPF:
     def CropAndResizeFunction(self, image, rois):
         return ROIAlign((128, 128), 1.0, 0)(image, rois)
 
-    def trans_zoom_uvz_cuda(self, image, uvs, zs, train_fu, train_fv, pf_fu, pf_fv, target_distance=2.5, out_size=128):
+    def trans_zoom_uvz_cuda(self, image, uvs, zs, pf_fu, pf_fv, target_distance=2.5, out_size=128):
         image = image.permute(2, 0, 1).float().unsqueeze(0).cuda()
 
-        bbox_u = target_distance * (1 / zs) / train_fu * pf_fu * out_size / image.size(3)
+        bbox_u = target_distance * (1 / zs) / cfg.TRAIN.FU * pf_fu * out_size / image.size(3)
         bbox_u = torch.from_numpy(bbox_u).cuda().float().squeeze(1)
-        bbox_v = target_distance * (1 / zs) / train_fv * pf_fv * out_size / image.size(2)
+        bbox_v = target_distance * (1 / zs) / cfg.TRAIN.FV * pf_fv * out_size / image.size(2)
         bbox_v = torch.from_numpy(bbox_v).cuda().float().squeeze(1)
 
         center_uvs = torch.from_numpy(uvs).cuda().float()
@@ -197,7 +200,7 @@ class PoseRBPF:
         # crop the rois from input image
         fu = intrinsics[0, 0]
         fv = intrinsics[1, 1]
-        images_roi_cuda, scale_roi = self.trans_zoom_uvz_cuda(image.detach(), uv, z, cfg.TRAIN.FU, cfg.TRAIN.FV, fu, fv, render_dist)
+        images_roi_cuda, scale_roi = self.trans_zoom_uvz_cuda(image.detach(), uv, z, fu, fv, render_dist)
 
         # forward passing
         out_images, embeddings = autoencoder(images_roi_cuda)
@@ -216,32 +219,72 @@ class PoseRBPF:
 
         return pdf_matrix, out_images, images_roi_cuda
 
-    def evaluate_poses(self, poses, cls_list, image_rgb, image_depth, intrinsics):
+    # evaluate a single 6D pose of a certain object
+    def evaluate_6d_pose(self, pose, cls, image_rgb, image_depth, intrinsics):
 
-        # roi
-        ts = poses[:, 4:]
-        uvs = self.project(ts, intrinsics)
-        zs = poses[:, 2]
-        fx = intrinsics[0, 0]
-        fy = intrinsics[1, 1]
+        sim = 0
+        depth_error = 1
+        vis_ratio = 0
 
-        # render dists
-        render_dists = np.zeros_like(zs)
-        train_fu = np.zeros_like(zs)
-        train_fv = np.zeros_like(zs)
-        for i in range(render_dists.shape[0]):
-            render_dists[i] = self.codebooks[int(cls_list[i])]['distance']
-            train_fu[i] = self.codebooks[int(cls_list[i])]['intrinsic_matrix'][0, 0]
-            train_fv[i] = self.codebooks[int(cls_list[i])]['intrinsic_matrix'][1, 1]
+        if cls in cfg.TEST.CLASSES:
 
-        rois, scale_roi = self.trans_zoom_uvz_cuda(image_rgb.detach(), uvs, zs, train_fu, train_fv, fx, fy, render_dists)
+            cls_id = cfg.TEST.CLASSES.index(cls)
 
-        # allocentric orientation similarity
+            render_dist = self.codebooks[cls_id]['distance']
 
-        # depth error
-        # render -> evaluate
+            t = pose[4:]
+            uv = self.project(np.expand_dims(t, axis=0), intrinsics)
 
-        return 0
+            z = np.array([t[2]], dtype=np.float32)
+            fx = intrinsics[0, 0]
+            fy = intrinsics[1, 1]
+            px = intrinsics[0, 2]
+            py = intrinsics[1, 2]
+
+            # get roi
+            rois, scale_roi = self.trans_zoom_uvz_cuda(image_rgb.detach(), uv, z, fx, fy, render_dist)
+
+            # render object
+            zfar = 6.0
+            znear = 0.01
+            width = image_rgb.shape[1]
+            height = image_rgb.shape[0]
+            # rendering
+            cfg.renderer.set_projection_matrix(width, height, fx, fy, px, py, znear, zfar)
+            image_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
+            seg_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
+            pcloud_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
+            poses_all = []
+            qt = np.zeros((7,), dtype=np.float32)
+            qt[3:] = pose[:4]
+            qt[0] = pose[4]
+            qt[1] = pose[5]
+            qt[2] = pose[6]
+            poses_all.append(qt)
+            cfg.renderer.set_poses(poses_all)
+
+            cfg.renderer.render([cls_id], image_tensor, seg_tensor, pc2_tensor=pcloud_tensor)
+            pcloud_tensor = pcloud_tensor[:, :, :3].flip(0)
+
+            render_bgr = image_tensor[:, :, :3].flip(0)[:, :, (2,1,0)]
+            rois_render, scale_roi_render = self.trans_zoom_uvz_cuda(render_bgr.detach(), uv, z, fx, fy, render_dist)
+
+            # forward passing
+            out_img, embeddings = self.autoencoders[cls_id](torch.cat((rois,rois_render), dim=0))
+            embeddings = embeddings.detach()
+            sim = self.cos_sim(embeddings[[0], :], embeddings[[1], :])[0].detach().cpu().numpy()
+
+            # evaluate depth error
+            depth_render = pcloud_tensor[:, :, 2].cpu().numpy()
+
+            # compute visibility mask
+            visibility_mask = estimate_visib_mask_numba(image_depth, depth_render, 0.02)
+
+            vis_ratio = np.sum(visibility_mask) * 1.0 / np.sum(depth_render!=0)
+
+            depth_error = np.mean(np.abs(depth_render[visibility_mask] - image_depth[visibility_mask]))
+
+        return sim, depth_error, vis_ratio
 
 
     def visualize(self, image, im_render, im_output, im_input, box_center, box_size):
