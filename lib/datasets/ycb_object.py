@@ -18,6 +18,7 @@ from utils.blob import pad_im, chromatic_transform, add_noise, add_noise_cuda, a
 from transforms3d.quaternions import mat2quat, quat2mat
 from transforms3d.euler import euler2quat
 from utils.se3 import *
+import matplotlib.pyplot as plt
 
 class YCBObject(data.Dataset, datasets.imdb):
     def __init__(self, image_set, ycb_object_path = None):
@@ -38,7 +39,7 @@ class YCBObject(data.Dataset, datasets.imdb):
         self._num_classes_all = len(self._classes_all)
         self._class_colors_all = [(255, 255, 255), (255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (255, 0, 255), (0, 255, 255), \
                               (0, 0, 128), (0, 128, 0), (128, 0, 0), (128, 128, 0), (128, 0, 128), (0, 128, 128), \
-                              (0, 64, 0), (64, 0, 0), (0, 0, 64), (64, 64, 0), (64, 0, 64), (0, 64, 64), 
+                              (0, 64, 0), (64, 0, 0), (0, 0, 64), (64, 64, 0), (64, 0, 64), (0, 64, 64), \
                               (192, 0, 0), (0, 192, 0), (0, 0, 192), (192, 192, 0), (192, 0, 192), (0, 192, 192), (32, 0, 0)]
         self._extents_all = self._load_object_extents()
 

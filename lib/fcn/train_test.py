@@ -246,7 +246,7 @@ def test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset):
 
         points = dataset._points_all[cls]
 
-        intrinsic_matrix = meta_data[ind, :9].numpy().reshape((3, 3))
+        intrinsic_matrix = meta_data[ind, :9].cpu().numpy().reshape((3, 3))
         fx = intrinsic_matrix[0, 0]
         fy = intrinsic_matrix[1, 1]
         px = intrinsic_matrix[0, 2]
@@ -309,7 +309,7 @@ def eval_poses(pose_rbpf, poses, rois, im_rgb, im_depth, meta_data):
         if cls not in cfg.TEST.CLASSES:
             continue
 
-        intrinsic_matrix = meta_data[ind, :9].numpy().reshape((3, 3))
+        intrinsic_matrix = meta_data[ind, :9].cpu().numpy().reshape((3, 3))
 
         sims[i], depth_errors[i], vis_ratios[i] = pose_rbpf.evaluate_6d_pose(poses[i],
                                                                              cls,
@@ -578,6 +578,106 @@ def test(test_loader, background_loader, network, pose_rbpf, output_dir):
     filename = os.path.join(output_dir, 'results_posecnn.mat')
     if os.path.exists(filename):
         os.remove(filename)
+
+def test_image_poserbpf(network, pose_rbpf, dataset, im_color, im_depth=None):
+    """test on a single image"""
+
+    num_classes = dataset.num_classes
+
+    # compute image blob
+    im = im_color.astype(np.float32, copy=True)
+    im -= cfg.PIXEL_MEANS
+    height = im.shape[0]
+    width = im.shape[1]
+    im = np.transpose(im / 255.0, (2, 0, 1))
+    im = im[np.newaxis, :, :, :]
+
+    if cfg.INPUT == 'DEPTH' or cfg.INPUT == 'RGBD':
+        im_xyz = dataset.backproject(im_depth, dataset._intrinsic_matrix, 1.0)
+        im_xyz = np.transpose(im_xyz, (2, 0, 1))
+        im_xyz = im_xyz[np.newaxis, :, :, :]
+        depth_mask = im_depth > 0.0
+        depth_mask = depth_mask.astype('float')
+
+    # construct the meta data
+    K = dataset._intrinsic_matrix
+    Kinv = np.linalg.pinv(K)
+    meta_data_blob = np.zeros((1, 18), dtype=np.float32)
+    meta_data_blob[0, 0:9] = K.flatten()
+    meta_data_blob[0, 9:18] = Kinv.flatten()
+
+    # use fake label blob
+    label_blob = np.zeros((1, num_classes, height, width), dtype=np.float32)
+    pose_blob = np.zeros((1, num_classes, 9), dtype=np.float32)
+    gt_boxes = np.zeros((1, num_classes, 5), dtype=np.float32)
+
+    # transfer to GPU
+    if cfg.INPUT == 'DEPTH':
+        inputs = torch.from_numpy(im_xyz).cuda().float()
+    elif cfg.INPUT == 'COLOR':
+        inputs = torch.from_numpy(im).cuda()
+    elif cfg.INPUT == 'RGBD':
+        im_1 = torch.from_numpy(im).cuda()
+        im_2 = torch.from_numpy(im_xyz).cuda().float()
+        im_3 = torch.from_numpy(depth_mask).cuda().float()
+        im_3.unsqueeze_(0).unsqueeze_(0)
+        inputs = torch.cat((im_1, im_2, im_3), dim=1)
+
+    labels = torch.from_numpy(label_blob).cuda()
+    meta_data = torch.from_numpy(meta_data_blob).cuda()
+    extents = torch.from_numpy(dataset._extents).cuda()
+    gt_boxes = torch.from_numpy(gt_boxes).cuda()
+    poses = torch.from_numpy(pose_blob).cuda()
+    points = torch.from_numpy(dataset._point_blob).cuda()
+    symmetry = torch.from_numpy(dataset._symmetry).cuda()
+
+    out_label, out_vertex, rois, out_pose = network(inputs, labels, meta_data, extents, gt_boxes, poses, points,
+                                                    symmetry)
+    labels = out_label.detach().cpu().numpy()[0]
+
+    rois = rois.detach().cpu().numpy()
+    out_pose = out_pose.detach().cpu().numpy()
+    poses = out_pose.copy()
+
+    # filter out detections
+    index = np.where(rois[:, -1] > cfg.TEST.DET_THRESHOLD)[0]
+    rois = rois[index, :]
+    poses = poses[index, :]
+
+    # non-maximum suppression within class
+    index = nms(rois, 0.5)
+    rois = rois[index, :]
+    poses = poses[index, :]
+
+    num = rois.shape[0]
+    for i in range(num):
+        poses[i, 4] *= poses[i, 6]
+        poses[i, 5] *= poses[i, 6]
+
+    # run poseRBPF for codebook matching to compute the rotations
+    if pose_rbpf is not None:
+        rois, poses, im_rgb = test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset)
+
+    # optimize depths
+    if cfg.TEST.POSE_REFINE:
+        labels_out = out_label.detach().cpu().numpy()[0]
+        poses, poses_refined = refine_pose(labels_out, im_depth, rois, poses, dataset)
+    else:
+        num = rois.shape[0]
+        for j in range(num):
+            poses[j, 4] *= poses[j, 6]
+            poses[j, 5] *= poses[j, 6]
+
+    if pose_rbpf is not None:
+        sims, depth_errors, vis_ratios, pose_scores = eval_poses(pose_rbpf, poses_refined, rois, im_rgb, im_depth,
+                                                                 meta_data)
+
+    im_pose, im_label = render_image(dataset, im_color, rois, poses, labels)
+
+    if cfg.TEST.VISUALIZE:
+        vis_test(dataset, im, labels, out_vertex, rois, poses, im_pose)
+
+    return im_pose, im_label, rois, poses_refined
 
 
 def test_image(network, dataset, im_color, im_depth=None):
@@ -856,7 +956,6 @@ def _vis_minibatch_autoencoder(inputs, background, mask, sample, outputs, im_ren
     targets = sample['image_target'].cpu().numpy()
     im_output = outputs.cpu().detach().numpy()
 
-    import matplotlib.pyplot as plt
     for i in range(im_blob.shape[0]):
         fig = plt.figure()
         # show image
@@ -1115,7 +1214,6 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
     py = intrinsic_matrix[1, 2]
     zfar = 6.0
     znear = 0.01
-            
     # rendering
     cfg.renderer.set_projection_matrix(width, height, fx, fy, px, py, znear, zfar)
     image_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
