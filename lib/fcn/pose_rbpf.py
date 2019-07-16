@@ -39,23 +39,6 @@ class PoseRBPF:
                 codes_gpu[i] = torch.from_numpy(codebooks[i]['codes']).cuda()
                 print(filename)
 
-        # append the codebook of 051_large_clamp
-        if 'ycb_video' in dataset.name:
-            cls = '051_large_clamp'
-            filename = os.path.join('data', 'checkpoints', 'encoder_ycb_object_' + cls + '_epoch_200.checkpoint.pth')
-            if os.path.exists(filename):
-                autoencoder_data = torch.load(filename)
-                autoencoders.append(networks.__dict__['autoencoder'](1, 128, autoencoder_data).cuda(device=cfg.device))
-                autoencoders[-1] = torch.nn.DataParallel(autoencoders[-1], device_ids=[cfg.gpu_id]).cuda(device=cfg.device)
-                print(filename)
-        
-                # load codebook
-                filename = os.path.join('data', 'codebooks', 'codebook_ycb_encoder_test_' + cls + '.mat')
-                codebook_names.append(filename)
-                codebooks.append(scipy.io.loadmat(filename))
-                codes_gpu.append(torch.from_numpy(codebooks[-1]['codes']).cuda())
-                print(filename)
-
         self.autoencoders = autoencoders
         self.codebooks = codebooks
         self.codebook_names = codebook_names

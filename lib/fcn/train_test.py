@@ -240,11 +240,8 @@ def test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset):
         image = inputs[ind].permute(1, 2, 0) + pixel_mean
 
         cls = int(rois[i, 1])
-
-        if cls not in cfg.TEST.CLASSES:
+        if cfg.TRAIN.CLASSES[cls] not in cfg.TEST.CLASSES:
             continue
-
-        points = dataset._points_all[cls]
 
         intrinsic_matrix = meta_data[ind, :9].cpu().numpy().reshape((3, 3))
         fx = intrinsic_matrix[0, 0]
@@ -260,7 +257,7 @@ def test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset):
         roi_h = rois[i, 5] - rois[i, 3]
         roi_s = max(roi_w, roi_h)
 
-        pose = pose_rbpf.initialize(image, uv_init, n_init_samples, cls, roi_w, roi_h)
+        pose = pose_rbpf.initialize(image, uv_init, n_init_samples, cfg.TRAIN.CLASSES[cls], roi_w, roi_h)
         if dataset.classes[cls] == '052_extra_large_clamp' and 'ycb_video' in dataset.name:
             pose_extra = pose
             pose_render = poses_return[i,:].copy()
@@ -268,16 +265,16 @@ def test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset):
             pose_render[1] = poses_return[i, 5] * poses_return[i, 6]
             pose_render[2] = poses_return[i, 6]
             pose_render[3:] = pose_extra[:4]
-            im_extra, size_extra = render_one(dataset, cls, pose_render)
+            im_extra, size_extra = render_one(dataset, cfg.TRAIN.CLASSES[cls], pose_render)
 
             print('test RBPF for 051_large_clamp')
-            pose_large = pose_rbpf.initialize(image, uv_init, n_init_samples, -1, roi_w, roi_h)
+            pose_large = pose_rbpf.initialize(image, uv_init, n_init_samples, 19, roi_w, roi_h)
             pose_render = poses_return[i,:].copy()
             pose_render[0] = poses_return[i, 4] * poses_return[i, 6]
             pose_render[1] = poses_return[i, 5] * poses_return[i, 6]
             pose_render[2] = poses_return[i, 6]
             pose_render[3:] = pose_large[:4]
-            im_large, size_large = render_one(dataset, -1, pose_render)
+            im_large, size_large = render_one(dataset, 19, pose_render)
 
             if abs(size_extra - roi_s) < abs(size_large - roi_s):
                 print('it is extra large clamp')
@@ -291,6 +288,7 @@ def test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset):
             poses_return[i, :4] = pose[:4]
 
     return rois_return, poses_return, image
+
 
 def eval_poses(pose_rbpf, poses, rois, im_rgb, im_depth, meta_data):
 
@@ -306,13 +304,18 @@ def eval_poses(pose_rbpf, poses, rois, im_rgb, im_depth, meta_data):
         ind = int(rois[i, 0])
         cls = int(rois[i, 1])
 
-        if cls not in cfg.TEST.CLASSES:
+        # todo: fix the problem for large clamp
+        if cls == -1:
+            cls_id = 19
+        else:
+            cls_id = cfg.TRAIN.CLASSES[cls]
+
+        if cls_id not in cfg.TEST.CLASSES:
             continue
 
         intrinsic_matrix = meta_data[ind, :9].cpu().numpy().reshape((3, 3))
-
         sims[i], depth_errors[i], vis_ratios[i] = pose_rbpf.evaluate_6d_pose(poses[i],
-                                                                             cls,
+                                                                             cls_id,
                                                                              im_rgb,
                                                                              im_depth,
                                                                              intrinsic_matrix)
@@ -324,6 +327,7 @@ def eval_poses(pose_rbpf, poses, rois, im_rgb, im_depth, meta_data):
 
 def render_one(dataset, cls, pose):
 
+    cls_id = cfg.TEST.CLASSES.index(cls)
     intrinsic_matrix = dataset._intrinsic_matrix
     height = dataset._height
     width = dataset._width
@@ -346,13 +350,7 @@ def render_one(dataset, cls, pose):
     # render images
     cls_indexes = []
     poses_all = []
-
-    if cls == -1:
-        cls_index = 18
-    else:
-        cls_index = cfg.TRAIN.CLASSES[cls] - 1
-
-    cls_indexes.append(cls_index)
+    cls_indexes.append(cls_id)
     poses_all.append(pose)
 
     # rendering
@@ -367,6 +365,14 @@ def render_one(dataset, cls, pose):
     im_render = np.clip(im_render, 0, 1)
     im_render = im_render[:, :, :3] * 255
     im_render = im_render.astype(np.uint8)
+
+    '''
+    import matplotlib.pyplot as plt
+    fig = plt.figure()
+    ax = fig.add_subplot(1, 1, 1)
+    plt.imshow(im_render)
+    plt.show()
+    '''
 
     mask = seg.cpu().numpy()
     y, x = np.where(mask > 0)
@@ -1225,19 +1231,17 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
         cls_indexes = []
         cls = int(rois[i, 1])
 
-        if cls not in cfg.TEST.CLASSES:
-            continue
-
         # todo: fix the problem for large clamp
         if cls == -1:
-            cls = 19
-            cls_indexes.append(18)
+            cls_id = 19
         else:
-            if cfg.TEST.SYNTHESIZE:
-                cls_render = cfg.TRAIN.CLASSES[cls] - 1
-            else:
-                cls_render = cfg.TEST.CLASSES.index(cls)
-            cls_indexes.append(cls_render)
+            cls_id = cfg.TRAIN.CLASSES[cls]
+
+        if cls_id not in cfg.TEST.CLASSES:
+            continue
+
+        cls_render = cfg.TEST.CLASSES.index(cls_id)
+        cls_indexes.append(cls_render)
 
         poses_all = []
         qt = np.zeros((7, ), dtype=np.float32)
@@ -1277,12 +1281,7 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
 
         # run SDF optimization
         if len(index) > 10:
-            cls = int(rois[i, 1])
-            if cls == -1:
-                sdf_optim = cfg.sdf_optimizers[18]
-            else:
-                ind = cfg.TEST.CLASSES.index(cls)
-                sdf_optim = cfg.sdf_optimizers[ind]
+            sdf_optim = cfg.sdf_optimizers[cls_render]
 
             # re-render
             qt[3:] = poses_refined[i, :4]
@@ -1313,7 +1312,7 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
                 RT[:3, 3] = T
                 RT[3, 3] = 1.0
                 T_co_init = RT
-                T_co_opt, r = sdf_optim.refine_pose(T_co_init, points.cuda(), steps=200)
+                T_co_opt = sdf_optim.refine_pose_layer(T_co_init, points.cuda(), steps=200)
                 RT_opt = T_co_opt
                 poses_refined[i, :4] = mat2quat(RT_opt[:3, :3])
                 poses_refined[i, 4:] = RT_opt[:3, 3]
@@ -1967,7 +1966,12 @@ def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, poses_refined,
                     if rois[j, 0] != i:
                         continue
                     cls = int(rois[j, 1])
-                    if cls not in cfg.TEST.CLASSES:
+
+                    if cls == -1:
+                        cls_id = 19
+                    else:
+                        cls_id = cfg.TRAIN.CLASSES[cls]
+                    if cls_id not in cfg.TEST.CLASSES:
                         continue
 
                     if rois[j, -1] > cfg.TEST.DET_THRESHOLD:

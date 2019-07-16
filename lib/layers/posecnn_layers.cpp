@@ -219,6 +219,48 @@ std::vector<at::Tensor> pml_backward(
 }
 
 
+/************************************************************
+ sdf matching loss layer
+*************************************************************/
+
+std::vector<at::Tensor> sdf_loss_cuda_forward(
+    at::Tensor pose_delta,
+    at::Tensor pose_init,
+    at::Tensor sdf_grids,
+    at::Tensor sdf_limits,
+    at::Tensor points);
+
+std::vector<at::Tensor> sdf_loss_cuda_backward(
+    at::Tensor grad_loss,
+    at::Tensor bottom_diff);
+
+std::vector<at::Tensor> sdf_loss_forward(
+    at::Tensor pose_delta,
+    at::Tensor pose_init,
+    at::Tensor sdf_grids,
+    at::Tensor sdf_limits,
+    at::Tensor points)
+{
+  CHECK_INPUT(pose_delta);
+  CHECK_INPUT(pose_init);
+  CHECK_INPUT(sdf_grids);
+  CHECK_INPUT(sdf_limits);
+  CHECK_INPUT(points);
+
+  return sdf_loss_cuda_forward(pose_delta, pose_init, sdf_grids, sdf_limits, points);
+}
+
+std::vector<at::Tensor> sdf_loss_backward(
+    at::Tensor grad_loss,
+    at::Tensor bottom_diff) 
+{
+  CHECK_INPUT(grad_loss);
+  CHECK_INPUT(bottom_diff);
+
+  return sdf_loss_cuda_backward(grad_loss, bottom_diff);
+}
+
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("hard_label_forward", &hard_label_forward, "hard_label forward (CUDA)");
   m.def("hard_label_backward", &hard_label_backward, "hard_label backward (CUDA)");
@@ -229,4 +271,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("roi_align_backward", &ROIAlign_backward, "ROIAlign_backward");
   m.def("pml_forward", &pml_forward, "pml forward (CUDA)");
   m.def("pml_backward", &pml_backward, "pml backward (CUDA)");
+  m.def("sdf_loss_forward", &sdf_loss_forward, "SDF loss forward (CUDA)");
+  m.def("sdf_loss_backward", &sdf_loss_backward, "SDF loss backward (CUDA)");
 }

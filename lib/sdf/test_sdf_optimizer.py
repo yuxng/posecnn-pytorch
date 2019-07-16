@@ -1,4 +1,6 @@
 from sdf_optimizer import *
+from transforms3d.quaternions import mat2quat, quat2mat
+import cv2
 
 def Twc_np(pose):
 
@@ -105,9 +107,11 @@ if __name__ == '__main__':
 
     visualize_sdf = False
 
-    sdf_file = '../../data/YCB_Object/models/{}/textured_simple.sdf'.format(object_name)
+    sdf_file = '../../data/YCB_Object/models/{}/textured_simple_low_res.pth'.format(object_name)
 
-    sdf_optim = sdf_optimizer(sdf_file, lr=0.01, use_gpu=True, optimizer='LBFGS')
+    sdf_optim = sdf_optimizer(sdf_file, lr=0.01, use_gpu=True, optimizer='Adam')
+    print(torch.max(sdf_optim.sdf_torch))
+    print(torch.min(sdf_optim.sdf_torch))
 
     if visualize_sdf:
         sdf_show = SignedDensityField.from_sdf(sdf_file)
@@ -136,25 +140,24 @@ if __name__ == '__main__':
     points_c = torch.from_numpy(points_c)
 
     index = np.random.permutation(np.arange(points_c.shape[0]))[:2000]
-    # index = range(500)
     points_c = points_c[index, :]
     print(points_c.shape)
 
     T_co_init = np.linalg.inv(Twc_gt)
     R_perturb = axangle2mat(np.random.rand(3,), 20 * np.random.rand() / 57.3, is_normalized=False)
     T_co_init[:3, :3] = np.matmul(T_co_init[:3, :3], R_perturb)
-    T_co_init[:3, 3] += 0.05
-    if sdf_optim.optimizer_type=='LBFGS':
-        T_co_opt, r = sdf_optim.refine_pose(T_co_init, points_c.clone().cuda(), steps=10)
-    elif sdf_optim.optimizer_type=='Adam':
-        T_co_opt, r = sdf_optim.refine_pose(T_co_init, points_c.clone().cuda(), steps=1000)
+    T_co_init[:3, 3] += 0.03
 
-    print(r)
+    points_init = np.matmul(np.linalg.inv(T_co_init), points_c.numpy().transpose()).transpose()
+
+    # optimization
+    points_input = points_c[:, :3].clone().cuda()
+    T_co_opt = sdf_optim.refine_pose_layer(T_co_init, points_input, steps=100)
+
     print(T_co_opt)
     print(np.linalg.inv(Twc_gt))
 
     # visualization for debugging
-    points_init = np.matmul(np.linalg.inv(T_co_init), points_c.numpy().transpose()).transpose()
     points_opt = np.matmul(np.linalg.inv(T_co_opt), points_c.numpy().transpose()).transpose()
 
     fig = plt.figure()

@@ -89,4 +89,3 @@ def Oplus(T, v, gpu=False):
                           torch.tensor(1, dtype=torch.float32))).view(4, 4)
 
     return torch.mm(T, dT)
-

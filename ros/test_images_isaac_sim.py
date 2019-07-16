@@ -56,6 +56,34 @@ import matplotlib.pyplot as plt
 
 lock = threading.Lock()
 
+def ros_qt_to_rt(rot, trans):
+    qt = np.zeros((4,), dtype=np.float32)
+    qt[0] = rot[3]
+    qt[1] = rot[0]
+    qt[2] = rot[1]
+    qt[3] = rot[2]
+    obj_T = np.eye(4)
+    obj_T[:3, :3] = quat2mat(qt)
+    obj_T[:3, 3] = trans
+
+    return obj_T
+
+def get_relative_pose_from_tf(listener, source_frame, target_frame):
+    first_time = True
+    while True:
+        try:
+            init_trans, init_rot = listener.lookupTransform(target_frame, source_frame, rospy.Time(0))
+            break
+        except Exception as e:
+            if first_time:
+                print(str(e))
+                # first_time = False
+            continue
+
+    # print('got relative pose between {} and {}'.format(source_frame, target_frame))
+
+    return ros_qt_to_rt(init_rot, init_trans)
+
 class ImageListener:
 
     def __init__(self, network, dataset):
@@ -68,6 +96,9 @@ class ImageListener:
         self.im = None
         self.depth = None
         self.rgb_frame_id = None
+        self.rgb_frame_stamp = None
+        self.q_br = None
+        self.t_br = None
 
         suffix = '_%02d' % (cfg.instance_id)
         prefix = '%02d_' % (cfg.instance_id)
@@ -79,11 +110,13 @@ class ImageListener:
             fusion_type = '_rgbd_'
 
         # initialize a node
-        
+        self.listener = tf.TransformListener()
         self.br = tf.TransformBroadcaster()
         rospy.init_node("posecnn_rgb")
         self.label_pub = rospy.Publisher('posecnn_label' + fusion_type + suffix, Image, queue_size=10)
-        self.pose_pub = rospy.Publisher('posecnn_pose' + fusion_type + suffix, Image, queue_size=10)
+        self.rgb_pub = rospy.Publisher('posecnn_rgb' + fusion_type + suffix, Image, queue_size=10)
+        self.depth_pub = rospy.Publisher('posecnn_depth' + fusion_type + suffix, Image, queue_size=10)
+        self.fk_pub = rospy.Publisher('posecnn/T_br', PoseStamped, queue_size=10)  # gripper in base
 
         # create pose publisher for each known object class
         self.pubs = []
@@ -112,24 +145,18 @@ class ImageListener:
             ts = message_filters.ApproximateTimeSynchronizer([rgb_sub, depth_sub], queue_size, slop_seconds)
             ts.registerCallback(self.callback_rgbd)
 
-        # load sdfs
-        if cfg.TEST.POSE_REFINE:
-            print('loading SDFs')
-            cfg.sdf_optimizers = []
-            for i in cfg.TEST.CLASSES:
-                cfg.sdf_optimizers.append(sdf_optimizer(dataset.model_sdf_paths[i-1]))
-
-        if cfg.TRAIN.VERTEX_REG:
-            self.pose_rbpf = PoseRBPF(dataset)
-        else:
-            self.pose_rbpf = None
-
     def callback_rgbd(self, rgb, depth):
+
+        Tbr = get_relative_pose_from_tf(self.listener, 'measured/camera_link', 'base_link')
+
+        self.q_br = mat2quat(Tbr[:3, :3])
+        self.t_br = Tbr[:3, 3]
 
         if depth.encoding == '32FC1':
             depth_cv = self.cv_bridge.imgmsg_to_cv2(depth)
         elif depth.encoding == '16UC1':
             depth_cv = self.cv_bridge.imgmsg_to_cv2(depth)
+            depth_cv /= 1000.0
         else:
             rospy.logerr_throttle(
                 1, 'Unsupported depth type. Expected 16UC1 or 32FC1, got {}'.format(
@@ -142,57 +169,48 @@ class ImageListener:
         im = self.cv_bridge.imgmsg_to_cv2(rgb, 'bgr8')
 
         with lock:
-          #print 'writing objects'
-          self.im = im.copy()
-          self.depth = depth_cv.copy()
-          self.rgb_frame_id = rgb.header.frame_id
-        
+            #print 'writing objects'
+            self.im = im.copy()
+            self.depth = depth_cv.copy()
+            self.rgb_frame_id = rgb.header.frame_id
+            self.rgb_frame_stamp = rgb.header.stamp
+
     def run_network(self):
 
         with lock:
-          if listener.im is None:
-             return
-          im = self.im.copy()
-          depth_cv = self.depth.copy()
-          rgb_frame_id = self.rgb_frame_id
+            if listener.im is None:
+              return
+            im = self.im.copy()
+            depth_cv = self.depth.copy()
+            rgb_frame_id = self.rgb_frame_id
+            rgb_frame_stamp = self.rgb_frame_stamp
 
         fusion_type = '_rgb_'
         if cfg.TRAIN.VERTEX_REG_DELTA:
             fusion_type = '_rgbd_'
 
-        thread_name = threading.current_thread().name
-
-        if not thread_name in self.renders:
-            self.renders[thread_name] = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, gpu_id=cfg.GPU_ID, render_marker=True)
-            model_mesh_paths = [self.dataset.model_mesh_paths[i - 1] for i in cfg.TEST.CLASSES]
-            model_texture_paths = [self.dataset.model_texture_paths[i - 1] for i in cfg.TEST.CLASSES]
-            model_colors = [self.dataset.model_colors[i - 1] for i in cfg.TEST.CLASSES]
-            self.renders[thread_name].load_objects(model_mesh_paths, model_texture_paths, model_colors)
-            self.renders[thread_name].set_camera_default()
-            self.renders[thread_name].set_light_pos([0, 0, 0])
-            self.renders[thread_name].set_light_color([1, 1, 1])
-        cfg.renderer = self.renders[thread_name]
-
-        im_pose, im_label, rois, poses = test_image_poserbpf(self.net, self.pose_rbpf, self.dataset, im, depth_cv)
+        rois, seg_im, poses = test_image_poserbpf(self.net, self.dataset, im, depth_cv)
 
         # publish
-        label_msg = self.cv_bridge.cv2_to_imgmsg(im_label)
-        label_msg.header.stamp = rospy.Time.now()
+        # publish segmentation mask
+        label_msg = self.cv_bridge.cv2_to_imgmsg(seg_im.astype(np.uint8))
+        label_msg.header.stamp = rgb_frame_stamp
         label_msg.header.frame_id = rgb_frame_id
-        label_msg.encoding = 'rgb8'
+        label_msg.encoding = 'mono8'
         self.label_pub.publish(label_msg)
-
-        pose_msg = self.cv_bridge.cv2_to_imgmsg(im_pose)
-        pose_msg.header.stamp = rospy.Time.now()
-        pose_msg.header.frame_id = rgb_frame_id
-        pose_msg.encoding = 'rgb8'
-        self.pose_pub.publish(pose_msg)
-
-        # poses
-        if cfg.TEST.ROS_CAMERA == 'ISAAC_SIM':
-            frame = 'camera_color_optical_frame'
-        else:
-            frame = '%s_depth_optical_frame' % (cfg.TEST.ROS_CAMERA)
+        # publish rgb
+        rgb_msg = self.cv_bridge.cv2_to_imgmsg(im, 'bgr8')
+        rgb_msg.header.stamp = rgb_frame_stamp
+        rgb_msg.header.frame_id = rgb_frame_id
+        self.rgb_pub.publish(rgb_msg)
+        # publish depth
+        depth_msg = self.cv_bridge.cv2_to_imgmsg(depth_cv, '32FC1')
+        depth_msg.header.stamp = rgb_frame_stamp
+        depth_msg.header.frame_id = rgb_frame_id
+        self.depth_pub.publish(depth_msg)
+        # forward kinematics
+        self.br.sendTransform(self.t_br, [self.q_br[1], self.q_br[2], self.q_br[3], self.q_br[0]],
+                              rgb_frame_stamp, 'posecnn_camera_link', 'base_link')
 
         indexes = np.zeros((self.dataset.num_classes, ), dtype=np.int32)
 
@@ -217,9 +235,7 @@ class ImageListener:
                 indexes[cls] += 1
 
                 name = name + '_%02d' % (indexes[cls])
-
                 tf_name = os.path.join("posecnn", name)
-                self.br.sendTransform(poses[i, 4:7], quat, rospy.Time.now(), tf_name, frame)
 
                 # send another transformation as bounding box (mis-used)
                 n = np.linalg.norm(rois[i, 2:6])
@@ -227,22 +243,7 @@ class ImageListener:
                 y1 = rois[i, 3] / n
                 x2 = rois[i, 4] / n
                 y2 = rois[i, 5] / n
-                now = rospy.Time.now()
-                self.br.sendTransform([n, now.secs, 0], [x1, y1, x2, y2], now, tf_name + '_roi', frame)
-
-                # create pose msg
-                msg = PoseStamped()
-                msg.header.stamp = rospy.Time.now()
-                msg.header.frame_id = frame
-                msg.pose.orientation.x = poses[i, 1]
-                msg.pose.orientation.y = poses[i, 2]
-                msg.pose.orientation.z = poses[i, 3]
-                msg.pose.orientation.w = poses[i, 0]
-                msg.pose.position.x = poses[i, 4]
-                msg.pose.position.y = poses[i, 5]
-                msg.pose.position.z = poses[i, 6]
-                pub = self.pubs[cls - 1]
-                pub.publish(msg)
+                self.br.sendTransform([n, rgb_frame_stamp.secs, 0], [x1, y1, x2, y2], rgb_frame_stamp, tf_name + '_roi', 'base_link')
 
 
 def parse_args():
@@ -328,14 +329,6 @@ if __name__ == '__main__':
     network = networks.__dict__[args.network_name](dataset.num_classes, cfg.TRAIN.NUM_UNITS, network_data).cuda(device=cfg.device)
     network = torch.nn.DataParallel(network, device_ids=[0]).cuda(device=cfg.device)
     cudnn.benchmark = True
-
-    # print 'loading 3D models'
-    cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, gpu_id=cfg.GPU_ID, render_marker=False)
-    model_mesh_paths = [dataset.model_mesh_paths[i - 1] for i in cfg.TEST.CLASSES]
-    model_texture_paths = [dataset.model_texture_paths[i - 1] for i in cfg.TEST.CLASSES]
-    model_colors = [dataset.model_colors[i - 1] for i in cfg.TEST.CLASSES]
-    cfg.renderer.load_objects(model_mesh_paths, model_texture_paths, model_colors)
-    cfg.renderer.set_camera_default()
 
     # image listener
     network.eval()
