@@ -26,6 +26,7 @@ import pprint
 import time, os, sys
 import os.path as osp
 import numpy as np
+import time
 
 import _init_paths
 from fcn.train_test import test, test_image
@@ -148,7 +149,7 @@ class ImageListener:
         thread_name = threading.current_thread().name
 
         if not thread_name in self.renders:
-            self.renders[thread_name] = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, gpu_id=cfg.GPU_ID, render_marker=True)
+            self.renders[thread_name] = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, gpu_id=cfg.gpu_id, render_marker=True)
             self.renders[thread_name].load_objects(self.dataset.model_mesh_paths_target,
                                                    self.dataset.model_texture_paths_target,
                                                    self.dataset.model_colors_target)
@@ -157,7 +158,9 @@ class ImageListener:
             self.renders[thread_name].set_light_color([1, 1, 1])
         cfg.renderer = self.renders[thread_name]
 
+        start_time = time.time()
         im_pose, im_label, rois, poses = test_image(self.net, self.dataset, im, depth_cv)
+        print("--- %s seconds ---" % (time.time() - start_time))
 
         # publish
         label_msg = self.cv_bridge.cv2_to_imgmsg(im_label)
@@ -179,7 +182,6 @@ class ImageListener:
             frame = '%s_depth_optical_frame' % (cfg.TEST.ROS_CAMERA)
 
         indexes = np.zeros((self.dataset.num_classes, ), dtype=np.int32)
-
         if not rois.shape[0]:
             return
 
@@ -192,20 +194,16 @@ class ImageListener:
                 if not np.any(poses[i, 4:]):
                     continue
 
-                quat = [poses[i, 1], poses[i, 2], poses[i, 3], poses[i, 0]]
                 if self.dataset.classes[cls][3] == '_':
                     name = self.prefix + self.dataset.classes[cls][4:]
                 else:
                     name = self.prefix + self.dataset.classes[cls]
                 name = name + fusion_type
                 indexes[cls] += 1
-
                 name = name + '_%02d' % (indexes[cls])
-
                 tf_name = os.path.join("posecnn", name)
-                self.br.sendTransform(poses[i, 4:7], quat, rospy.Time.now(), tf_name, frame)
 
-                # send another transformation as bounding box (mis-used)
+                # send transformation as bounding box (mis-used)
                 n = np.linalg.norm(rois[i, 2:6])
                 x1 = rois[i, 2] / n
                 y1 = rois[i, 3] / n
@@ -214,19 +212,23 @@ class ImageListener:
                 now = rospy.Time.now()
                 self.br.sendTransform([n, now.secs, 0], [x1, y1, x2, y2], now, tf_name + '_roi', frame)
 
-                # create pose msg
-                msg = PoseStamped()
-                msg.header.stamp = rospy.Time.now()
-                msg.header.frame_id = frame
-                msg.pose.orientation.x = poses[i, 1]
-                msg.pose.orientation.y = poses[i, 2]
-                msg.pose.orientation.z = poses[i, 3]
-                msg.pose.orientation.w = poses[i, 0]
-                msg.pose.position.x = poses[i, 4]
-                msg.pose.position.y = poses[i, 5]
-                msg.pose.position.z = poses[i, 6]
-                pub = self.pubs[cls - 1]
-                pub.publish(msg)
+                if cfg.TRAIN.POSE_REG:
+                    quat = [poses[i, 1], poses[i, 2], poses[i, 3], poses[i, 0]]
+                    self.br.sendTransform(poses[i, 4:7], quat, rospy.Time.now(), tf_name, frame)
+
+                    # create pose msg
+                    msg = PoseStamped()
+                    msg.header.stamp = rospy.Time.now()
+                    msg.header.frame_id = frame
+                    msg.pose.orientation.x = poses[i, 1]
+                    msg.pose.orientation.y = poses[i, 2]
+                    msg.pose.orientation.z = poses[i, 3]
+                    msg.pose.orientation.w = poses[i, 0]
+                    msg.pose.position.x = poses[i, 4]
+                    msg.pose.position.y = poses[i, 5]
+                    msg.pose.position.z = poses[i, 6]
+                    pub = self.pubs[cls - 1]
+                    pub.publish(msg)
 
 
 def parse_args():

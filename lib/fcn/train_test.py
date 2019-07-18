@@ -689,8 +689,6 @@ def test_image_poserbpf(network, pose_rbpf, dataset, im_color, im_depth=None):
 def test_image(network, dataset, im_color, im_depth=None):
     """test on a single image"""
 
-    num_classes = dataset.num_classes
-
     # compute image blob
     im = im_color.astype(np.float32, copy=True)
     im -= cfg.PIXEL_MEANS
@@ -706,18 +704,6 @@ def test_image(network, dataset, im_color, im_depth=None):
         depth_mask = im_depth > 0.0
         depth_mask = depth_mask.astype('float')
 
-    # construct the meta data
-    K = dataset._intrinsic_matrix
-    Kinv = np.linalg.pinv(K)
-    meta_data_blob = np.zeros((1, 18), dtype=np.float32)
-    meta_data_blob[0, 0:9] = K.flatten()
-    meta_data_blob[0, 9:18] = Kinv.flatten()
-
-    # use fake label blob
-    label_blob = np.zeros((1, num_classes, height, width), dtype=np.float32)
-    pose_blob = np.zeros((1, num_classes, 9), dtype=np.float32)
-    gt_boxes = np.zeros((1, num_classes, 5), dtype=np.float32)
-
     # transfer to GPU
     if cfg.INPUT == 'DEPTH':
         inputs = torch.from_numpy(im_xyz).cuda().float()
@@ -730,18 +716,11 @@ def test_image(network, dataset, im_color, im_depth=None):
         im_3.unsqueeze_(0).unsqueeze_(0)
         inputs = torch.cat((im_1, im_2, im_3), dim=1)
 
-    labels = torch.from_numpy(label_blob).cuda()
-    meta_data = torch.from_numpy(meta_data_blob).cuda()
-    extents = torch.from_numpy(dataset._extents).cuda()
-    gt_boxes = torch.from_numpy(gt_boxes).cuda()
-    poses = torch.from_numpy(pose_blob).cuda()
-    points = torch.from_numpy(dataset._point_blob).cuda()
-    symmetry = torch.from_numpy(dataset._symmetry).cuda()
-
     if cfg.TRAIN.VERTEX_REG:
 
         if cfg.TRAIN.POSE_REG:
-            out_label, out_vertex, rois, out_pose, out_quaternion = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
+            out_label, out_vertex, rois, out_pose, out_quaternion = network(inputs, dataset.input_labels, dataset.input_meta_data, \
+                dataset.input_extents, dataset.input_gt_boxes, dataset.input_poses, dataset.input_points, dataset.input_symmetry)
             labels = out_label.detach().cpu().numpy()[0]
 
             # combine poses
@@ -776,8 +755,9 @@ def test_image(network, dataset, im_color, im_depth=None):
                 poses_tmp, poses = optimize_depths(rois, poses, dataset._points_all, dataset._intrinsic_matrix)
 
         else:
+            out_label, out_vertex, rois, out_pose = network(inputs, dataset.input_labels, dataset.input_meta_data, \
+                dataset.input_extents, dataset.input_gt_boxes, dataset.input_poses, dataset.input_points, dataset.input_symmetry)
 
-            out_label, out_vertex, rois, out_pose = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
             labels = out_label.detach().cpu().numpy()[0]
 
             rois = rois.detach().cpu().numpy()
@@ -800,7 +780,8 @@ def test_image(network, dataset, im_color, im_depth=None):
                 poses[i, 5] *= poses[i, 6]
 
     elif cfg.TRAIN.VERTEX_REG_DELTA:
-        out_label, out_vertex = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
+        out_label, out_vertex = network(inputs, dataset.input_labels, dataset.input_meta_data, \
+            dataset.input_extents, dataset.input_gt_boxes, dataset.input_poses, dataset.input_points, dataset.input_symmetry)
         if not cfg.TEST.MEAN_SHIFT:
             out_center, rois = compute_centroids_and_loose_bounding_boxes(out_vertex, out_label, extents,
                                                                           inputs[:, 3:6, :, :], inputs[:, 6, :, :],
@@ -821,7 +802,8 @@ def test_image(network, dataset, im_color, im_depth=None):
         poses = poses_vis
 
     else:
-        out_label = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
+        out_label = network(inputs, dataset.input_labels, dataset.input_meta_data, \
+            dataset.input_extents, dataset.input_gt_boxes, dataset.input_poses, dataset.input_points, dataset.input_symmetry)
         labels = out_label.detach().cpu().numpy()[0]
         rois = np.zeros((0, 7), dtype=np.float32)
         poses = np.zeros((0, 7), dtype=np.float32)
@@ -1376,34 +1358,16 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
 
 def render_image(dataset, im, rois, poses, labels):
 
-    intrinsic_matrix = dataset._intrinsic_matrix
-    height = im.shape[0]
-    width = im.shape[1]
-    classes = dataset._classes
-    class_colors = dataset._class_colors
-
+    # label image
     label_image = dataset.labels_to_image(labels)
     im_label = im[:, :, (2, 1, 0)].copy()
     I = np.where(labels != 0)
     im_label[I[0], I[1], :] = 0.5 * label_image[I[0], I[1], :] + 0.5 * im_label[I[0], I[1], :]
 
-    fx = intrinsic_matrix[0, 0]
-    fy = intrinsic_matrix[1, 1]
-    px = intrinsic_matrix[0, 2]
-    py = intrinsic_matrix[1, 2]
-    zfar = 6.0
-    znear = 0.01
     num = poses.shape[0]
+    classes = dataset._classes
+    class_colors = dataset._class_colors
 
-    image_tensor = torch.cuda.FloatTensor(height, width, 4)
-    seg_tensor = torch.cuda.FloatTensor(height, width, 4)
-
-    # set renderer
-    cfg.renderer.set_light_pos([0, 0, 0])
-    cfg.renderer.set_light_color([1, 1, 1])
-    cfg.renderer.set_projection_matrix(width, height, fx, fy, px, py, znear, zfar)
-
-    # render images
     cls_indexes = []
     poses_all = []
     for i in range(num):
@@ -1415,17 +1379,16 @@ def render_image(dataset, im, rois, poses, labels):
         if cls_index < 0:
             continue
 
-        cls_indexes.append(cls_index)
-
-        qt = np.zeros((7, ), dtype=np.float32)
-        qt[:3] = poses[i, 4:7]
-        qt[3:] = poses[i, :4]
-        poses_all.append(qt)
+        if cfg.TRAIN.POSE_REG:
+            cls_indexes.append(cls_index)
+            qt = np.zeros((7, ), dtype=np.float32)
+            qt[:3] = poses[i, 4:7]
+            qt[3:] = poses[i, :4]
+            poses_all.append(qt)
 
         cls = int(rois[i, 1])
-        print classes[cls], rois[i, -1]
+        print(classes[cls], rois[i, -1])
         if cls > 0 and rois[i, -1] > cfg.TEST.DET_THRESHOLD:
-
             # draw roi
             x1 = rois[i, 2]
             y1 = rois[i, 3]
@@ -1435,6 +1398,24 @@ def render_image(dataset, im, rois, poses, labels):
 
     # rendering
     if len(cls_indexes) > 0 and cfg.TRAIN.POSE_REG:
+
+        height = im.shape[0]
+        width = im.shape[1]
+        intrinsic_matrix = dataset._intrinsic_matrix
+        fx = intrinsic_matrix[0, 0]
+        fy = intrinsic_matrix[1, 1]
+        px = intrinsic_matrix[0, 2]
+        py = intrinsic_matrix[1, 2]
+        zfar = 6.0
+        znear = 0.01
+        image_tensor = torch.cuda.FloatTensor(height, width, 4)
+        seg_tensor = torch.cuda.FloatTensor(height, width, 4)
+
+        # set renderer
+        cfg.renderer.set_light_pos([0, 0, 0])
+        cfg.renderer.set_light_color([1, 1, 1])
+        cfg.renderer.set_projection_matrix(width, height, fx, fy, px, py, znear, zfar)
+
         cfg.renderer.set_poses(poses_all)
         frame = cfg.renderer.render(cls_indexes, image_tensor, seg_tensor)
         image_tensor = image_tensor.flip(0)
@@ -1445,11 +1426,6 @@ def render_image(dataset, im, rois, poses, labels):
         im_render = np.clip(im_render, 0, 1)
         im_render = im_render[:, :, :3] * 255
         im_render = im_render.astype(np.uint8)
-    
-        # mask
-        seg = torch.sum(seg_tensor[:, :, :3], dim=2)
-        mask = (seg != 0).cpu().numpy()
-
         im_output = 0.4 * im[:,:,(2, 1, 0)].astype(np.float32) + 0.6 * im_render.astype(np.float32)
     else:
         im_output = 0.4 * im[:,:,(2, 1, 0)]
