@@ -90,7 +90,15 @@ class PoseCNN(nn.Module):
 
         self.features = nn.ModuleList(features)
         self.classifier = vgg16.classifier[:-1]
+        if cfg.TRAIN.SLIM:
+            dim_fc = 256
+            self.classifier[0] = nn.Linear(512*7*7, 256)
+            self.classifier[3] = nn.Linear(256, 256)
+        else:
+            dim_fc = 4096
+            
         print(self.features)
+        print(self.classifier)
 
         # freeze some layers
         if cfg.TRAIN.FREEZE_LAYERS:
@@ -120,11 +128,11 @@ class PoseCNN(nn.Module):
 
             self.roi_pool_conv4 = RoIPool(pool_height=7, pool_width=7, spatial_scale=1.0 / 8.0)
             self.roi_pool_conv5 = RoIPool(pool_height=7, pool_width=7, spatial_scale=1.0 / 16.0)
-            self.fc8 = fc(4096, num_classes)
-            self.fc9 = fc(4096, 4 * num_classes, relu=False)
+            self.fc8 = fc(dim_fc, num_classes)
+            self.fc9 = fc(dim_fc, 4 * num_classes, relu=False)
 
             if cfg.TRAIN.POSE_REG:
-                self.fc10 = fc(4096, 4 * num_classes, relu=False)
+                self.fc10 = fc(dim_fc, 4 * num_classes, relu=False)
                 self.pml = PMLoss(hard_angle=cfg.TRAIN.HARD_ANGLE)
 
         for m in self.modules():
