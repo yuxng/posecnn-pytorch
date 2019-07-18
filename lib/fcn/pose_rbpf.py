@@ -102,7 +102,7 @@ class PoseRBPF:
 
         if cfg.TEST.VISUALIZE:
             if cfg.TEST.SYNTHESIZE:
-                cls_render = cfg.TRAIN.CLASSES[cls] - 1
+                cls_render = cls - 1
             else:
                 cls_render = cls_id
             im_render = self.render_image(self.dataset, cls_render, pose)

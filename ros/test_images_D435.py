@@ -310,7 +310,7 @@ if __name__ == '__main__':
     cudnn.benchmark = True
 
     print 'loading 3D models'
-    cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, gpu_id=cfg.GPU_ID, render_marker=False)
+    cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, gpu_id=cfg.gpu_id, render_marker=False)
     cfg.renderer.load_objects(dataset.model_mesh_paths, dataset.model_texture_paths, dataset.model_colors)
     cfg.renderer.set_camera_default()
 
