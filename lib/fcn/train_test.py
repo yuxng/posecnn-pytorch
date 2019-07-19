@@ -578,6 +578,8 @@ def test(test_loader, background_loader, network, pose_rbpf, output_dir):
                 filename = os.path.join(output_dir, '%06d.mat' % i)
             print(filename)
             scipy.io.savemat(filename, result, do_compression=True)
+        else:
+            print(sample['video_id'], sample['image_id'])
 
         print('[%d/%d], batch time %.2f' % (i, epoch_size, batch_time.val))
 
@@ -1215,9 +1217,11 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
 
         # todo: fix the problem for large clamp
         if cls == -1:
+            cls_label = cfg.TRAIN.CLASSES.index(20)
             cls_id = 19
         else:
             cls_id = cfg.TRAIN.CLASSES[cls]
+            cls_label = cls
 
         if cls_id not in cfg.TEST.CLASSES:
             continue
@@ -1244,9 +1248,9 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
         y2 = min(int(rois[i, 5]), height-1)
         labels = np.zeros((height, width), dtype=np.float32)
         labels[y1:y2, x1:x2] = im_label[y1:y2, x1:x2]
-        mask_label = np.ma.getmaskarray(np.ma.masked_equal(labels, cls))
+        mask_label = np.ma.getmaskarray(np.ma.masked_equal(labels, cls_label))
         labels = labels.reshape((width * height, ))
-        index = np.where((labels == cls) & np.isfinite(dpoints[:, 0]) & (dpoints[:, 0] != 0) & (pcloud[:, 0] != 0))[0]
+        index = np.where((labels == cls_label) & np.isfinite(dpoints[:, 0]) & (dpoints[:, 0] != 0) & (pcloud[:, 0] != 0))[0]  
 
         if len(index) > 10:
             T = np.mean(dpoints[index, :] - pcloud[index, :], axis=0)
@@ -1302,7 +1306,7 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
                 if cfg.TEST.VISUALIZE:
                     import matplotlib.pyplot as plt
                     fig = plt.figure()
-                    ax = fig.add_subplot(3, 3, 1, projection='3d')
+                    ax = fig.add_subplot(2, 2, 1, projection='3d')
                     if cls == -1:
                         points_obj = dataset._points_clamp
                     else:
@@ -1323,33 +1327,33 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
                     ax.set_ylim(sdf_optim.ymin, sdf_optim.ymax)
                     ax.set_zlim(sdf_optim.zmin, sdf_optim.zmax)
 
-                    ax = fig.add_subplot(3, 3, 2)
+                    ax = fig.add_subplot(2, 2, 2)
                     plt.imshow(mask_label)
                     ax.set_title('mask label')
 
-                    ax = fig.add_subplot(3, 3, 3)
-                    plt.imshow(mask_depth_meas)
-                    ax.set_title('mask_depth_meas')
+                    # ax = fig.add_subplot(3, 3, 3)
+                    # plt.imshow(mask_depth_meas)
+                    # ax.set_title('mask_depth_meas')
 
-                    ax = fig.add_subplot(3, 3, 4)
-                    plt.imshow(mask_depth_render)
-                    ax.set_title('mask_depth_render')
+                    # ax = fig.add_subplot(3, 3, 4)
+                    # plt.imshow(mask_depth_render)
+                    # ax.set_title('mask_depth_render')
 
-                    ax = fig.add_subplot(3, 3, 5)
-                    plt.imshow(mask_depth_vis)
-                    ax.set_title('mask_depth_vis')
+                    # ax = fig.add_subplot(3, 3, 5)
+                    # plt.imshow(mask_depth_vis)
+                    # ax.set_title('mask_depth_vis')
 
-                    ax = fig.add_subplot(3, 3, 6)
+                    ax = fig.add_subplot(2, 2, 3)
                     plt.imshow(mask)
                     ax.set_title('mask')
 
-                    ax = fig.add_subplot(3, 3, 7)
+                    ax = fig.add_subplot(2, 2, 4)
                     plt.imshow(depth_meas_roi)
                     ax.set_title('depth input')
 
-                    ax = fig.add_subplot(3, 3, 8)
-                    plt.imshow(depth_render_roi)
-                    ax.set_title('depth render')
+                    # ax = fig.add_subplot(3, 3, 8)
+                    # plt.imshow(depth_render_roi)
+                    # ax.set_title('depth render')
 
                     plt.show()
 

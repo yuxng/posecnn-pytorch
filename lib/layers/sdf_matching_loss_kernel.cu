@@ -44,7 +44,7 @@ inline __device__ __host__ Dtype getValueInterpolated(const float3 & pGrid, cons
   const int z1 = z0 + 1;
 
   if ( !(x0 >= 0 && x1 < dim.x && y0 >= 0 && y1 < dim.y && z0 >=0 && z1 < dim.z) )
-    return 1.0;
+    return 0.1;
 
   const float dx00 = lerp( getValue(make_int3(x0,y0,z0), dim, sdf_grids), getValue(make_int3(x1,y0,z0), dim, sdf_grids), fx);
   const float dx01 = lerp( getValue(make_int3(x0,y0,z1), dim, sdf_grids), getValue(make_int3(x1,y0,z1), dim, sdf_grids), fx);
@@ -53,7 +53,12 @@ inline __device__ __host__ Dtype getValueInterpolated(const float3 & pGrid, cons
 
   const float dxy0 = lerp( dx00, dx10, fy );
   const float dxy1 = lerp( dx01, dx11, fy );
-  const float dxyz = lerp( dxy0, dxy1, fz );
+  float dxyz = lerp( dxy0, dxy1, fz );
+
+  // penalize inside objects
+  if (dxyz < 0)
+    dxyz *= 10;
+
   return dxyz;
 }
 
@@ -133,14 +138,14 @@ __global__ void SDFdistanceForward(const int nthreads, const Dtype* pose_delta, 
     int3 dim = make_int3(d0, d1, d2);
     Dtype value = getValueInterpolated(pGrid, dim, sdf_grids);
 
-    // penalize inside objects
-    if (value < 0)
-      value *= 10;
-
     int flag = 1;
     if (value < 0)
       flag = -1;
     losses[index] = flag * value;
+
+    // L2 penalty on translation
+    float lambda = 0.001;
+    losses[index] += 0.5 * lambda * (pose_delta[0] * pose_delta[0] + pose_delta[1] * pose_delta[1] + pose_delta[2] * pose_delta[2]);
 
     // compute gradient
     float3 grad = getGradientInterpolated(pGrid, dim, sdf_grids);
@@ -157,6 +162,11 @@ __global__ void SDFdistanceForward(const int nthreads, const Dtype* pose_delta, 
     // assign gradient
     for (int i = 0; i < 6; i++)
       diffs[6 * index + i] = flag * grad_pose(i);
+
+    // L2 penalty on translation
+    diffs[6 * index + 0] += lambda * pose_delta[0];
+    diffs[6 * index + 1] += lambda * pose_delta[1];
+    diffs[6 * index + 2] += lambda * pose_delta[2];
   }
 }
 
