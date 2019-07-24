@@ -34,17 +34,20 @@ If you find PoseCNN useful in your research, please consider citing:
 
 3. Install Eigen from the Github source code [here](https://github.com/eigenteam/eigen-git-mirror)
 
-4. Compile the new layers under $ROOT/lib/layers we introduce in PoseCNN.
+4. Install Sophus from the Github source code [here](https://github.com/strasdat/Sophus)
+   Check out this commit "ceb6380a1584b300e687feeeea8799353d48859f"
+
+5. Compile the new layers under $ROOT/lib/layers we introduce in PoseCNN.
     ```Shell
     cd $ROOT/lib/layers
     python setup.py install
     ```
 
-5. Download the VGG16 weights from [here](https://drive.google.com/file/d/1tTd64s1zNnjONlXvTFDZAf4E68Pupc_S/view?usp=sharing) (528M). Put the weight file to $ROOT/data/checkpoints.
+6. Download the VGG16 weights from [here](https://drive.google.com/file/d/1tTd64s1zNnjONlXvTFDZAf4E68Pupc_S/view?usp=sharing) (528M). Put the weight file to $ROOT/data/checkpoints.
 
-6. Compile the ycb_render in $ROOT/ycb_render
+7. Compile the ycb_render in $ROOT/ycb_render
 
-7. Compile cython components
+8. Compile cython components
     ```Shell
     cd $ROOT/lib
     python setup.py build_ext --inplace
@@ -52,8 +55,8 @@ If you find PoseCNN useful in your research, please consider citing:
 
 ### Required environment
 - Ubuntu 16.04
-- PyTorch 0.4.1
-- CUDA 9.1
+- PyTorch 0.4.1 or above
+- CUDA 9.1 or above
 
 ### Running the demo
 1. Download our trained model on five YCB Objects from [here](https://drive.google.com/open?id=1fxfBBCOPqSMYARiJQBc8ZjcWq5LiLHDq), and save it to $ROOT/data/checkpoints.

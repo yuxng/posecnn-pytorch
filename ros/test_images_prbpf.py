@@ -53,6 +53,7 @@ from Queue import Queue
 from sdf.sdf_optimizer import *
 from fcn.pose_rbpf import *
 import matplotlib.pyplot as plt
+from rospy_tutorials.srv import *
 
 lock = threading.Lock()
 
@@ -110,13 +111,14 @@ class ImageListener:
             fusion_type = '_rgbd_'
 
         # initialize a node
+        rospy.init_node("posecnn_rgb")
         self.listener = tf.TransformListener()
         self.br = tf.TransformBroadcaster()
-        rospy.init_node("posecnn_rgb")
         self.label_pub = rospy.Publisher('posecnn_label' + fusion_type + suffix, Image, queue_size=10)
         self.rgb_pub = rospy.Publisher('posecnn_rgb' + fusion_type + suffix, Image, queue_size=10)
         self.depth_pub = rospy.Publisher('posecnn_depth' + fusion_type + suffix, Image, queue_size=10)
         self.fk_pub = rospy.Publisher('posecnn/T_br', PoseStamped, queue_size=10)  # gripper in base
+        self.posecnn_pub = rospy.Publisher('posecnn_detection', Image, queue_size=10)
 
         # create pose publisher for each known object class
         self.pubs = []
@@ -129,25 +131,42 @@ class ImageListener:
             self.pubs.append(rospy.Publisher('/objects/prior_pose/' + cls, PoseStamped, queue_size=10))
 
         if cfg.TEST.ROS_CAMERA == 'ISAAC_SIM':
-            # use RealSense D435
+            # ISAAC SIM
             rgb_sub = message_filters.Subscriber('/sim/left_color_camera/image', Image, queue_size=10)
             depth_sub = message_filters.Subscriber('/sim/left_depth_camera/image', Image, queue_size=10)
-
             # update camera intrinsics
             msg = rospy.wait_for_message('/sim/left_color_camera/camera_info', CameraInfo)
-
             K = np.array(msg.K).reshape(3, 3)
             dataset._intrinsic_matrix = K
             print(dataset._intrinsic_matrix)
+        elif cfg.TEST.ROS_CAMERA == 'D415':
+            # use RealSense D435
+            rgb_sub = message_filters.Subscriber('/camera/color/image_raw', Image, queue_size=10)
+            depth_sub = message_filters.Subscriber('/camera/aligned_depth_to_color/image_raw', Image, queue_size=10)
+            K = np.array([[616.3653, 0, 310.2588], [0., 616.2029, 236.5998], [0, 0, 1]], dtype=np.float32)
+            dataset._intrinsic_matrix = K
+            print(dataset._intrinsic_matrix)
 
-            queue_size = 1
-            slop_seconds = 0.1
-            ts = message_filters.ApproximateTimeSynchronizer([rgb_sub, depth_sub], queue_size, slop_seconds)
-            ts.registerCallback(self.callback_rgbd)
+        queue_size = 1
+        slop_seconds = 0.1
+        ts = message_filters.ApproximateTimeSynchronizer([rgb_sub, depth_sub], queue_size, slop_seconds)
+        ts.registerCallback(self.callback_rgbd)
+
+        # posecnn service (based on the predefined service in the tutorial)
+        self.run_posecnn_flag = False
+        s = rospy.Service('run_posecnn', AddTwoInts, self.set_run_posecnn_flag)
+
+    def set_run_posecnn_flag(self, req):
+        print("run posecnn on current image ! ")
+        self.run_posecnn_flag = bool(req.a)
+        return self.run_posecnn_flag
 
     def callback_rgbd(self, rgb, depth):
 
-        Tbr = get_relative_pose_from_tf(self.listener, 'measured/camera_link', 'base_link')
+        if cfg.TEST.ROS_CAMERA == 'ISAAC_SIM':
+            Tbr = get_relative_pose_from_tf(self.listener, 'measured/camera_link', 'base_link')
+        else:
+            Tbr = get_relative_pose_from_tf(self.listener, 'measured/camera_link', 'measured/base_link')
 
         self.q_br = mat2quat(Tbr[:3, :3])
         self.t_br = Tbr[:3, 3]
@@ -155,7 +174,7 @@ class ImageListener:
         if depth.encoding == '32FC1':
             depth_cv = self.cv_bridge.imgmsg_to_cv2(depth)
         elif depth.encoding == '16UC1':
-            depth_cv = self.cv_bridge.imgmsg_to_cv2(depth)
+            depth_cv = self.cv_bridge.imgmsg_to_cv2(depth).copy().astype(np.float32)
             depth_cv /= 1000.0
         else:
             rospy.logerr_throttle(
@@ -189,7 +208,17 @@ class ImageListener:
         if cfg.TRAIN.VERTEX_REG_DELTA:
             fusion_type = '_rgbd_'
 
-        rois, seg_im, poses = test_image_simple(self.net, self.dataset, im, depth_cv)
+        if self.run_posecnn_flag:
+            rois, seg_im, poses, im_label = test_image_simple(self.net, self.dataset, im, depth_cv)
+            self.run_posecnn_flag = False
+            rgb_msg = self.cv_bridge.cv2_to_imgmsg(im_label, 'rgb8')
+            rgb_msg.header.stamp = rgb_frame_stamp
+            rgb_msg.header.frame_id = rgb_frame_id
+            self.posecnn_pub.publish(rgb_msg)
+        else:
+            rois = np.zeros((0, 6))
+            seg_im = np.zeros_like(depth_cv)
+            rospy.sleep(0.025)
 
         # publish
         # publish segmentation mask
@@ -208,9 +237,14 @@ class ImageListener:
         depth_msg.header.stamp = rgb_frame_stamp
         depth_msg.header.frame_id = rgb_frame_id
         self.depth_pub.publish(depth_msg)
+
         # forward kinematics
-        self.br.sendTransform(self.t_br, [self.q_br[1], self.q_br[2], self.q_br[3], self.q_br[0]],
-                              rgb_frame_stamp, 'posecnn_camera_link', 'base_link')
+        if cfg.TEST.ROS_CAMERA == 'ISAAC_SIM':
+            self.br.sendTransform(self.t_br, [self.q_br[1], self.q_br[2], self.q_br[3], self.q_br[0]],
+                                  rgb_frame_stamp, 'posecnn_camera_link', 'base_link')
+        else:
+            self.br.sendTransform(self.t_br, [self.q_br[1], self.q_br[2], self.q_br[3], self.q_br[0]],
+                                  rgb_frame_stamp, 'posecnn_camera_link', 'measured/base_link')
 
         indexes = np.zeros((self.dataset.num_classes, ), dtype=np.int32)
 
@@ -243,8 +277,12 @@ class ImageListener:
                 y1 = rois[i, 3] / n
                 x2 = rois[i, 4] / n
                 y2 = rois[i, 5] / n
-                self.br.sendTransform([n, rgb_frame_stamp.secs, 0], [x1, y1, x2, y2], rgb_frame_stamp, tf_name + '_roi', 'base_link')
-
+                if cfg.TEST.ROS_CAMERA == 'ISAAC_SIM':
+                    self.br.sendTransform([n, rgb_frame_stamp.secs, 0], [x1, y1, x2, y2], rgb_frame_stamp,
+                                          tf_name + '_roi', 'base_link')
+                else:
+                    self.br.sendTransform([n, rgb_frame_stamp.secs, 0], [x1, y1, x2, y2], rgb_frame_stamp,
+                                          tf_name + '_roi', 'measured/base_link')
 
 def parse_args():
     """

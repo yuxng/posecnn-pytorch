@@ -587,7 +587,7 @@ def test(test_loader, background_loader, network, pose_rbpf, output_dir):
     if os.path.exists(filename):
         os.remove(filename)
 
-def test_image_poserbpf(network, pose_rbpf, dataset, im_color, im_depth=None):
+def test_image_simple(network, dataset, im_color, im_depth=None):
     """test on a single image"""
 
     num_classes = dataset.num_classes
@@ -639,6 +639,7 @@ def test_image_poserbpf(network, pose_rbpf, dataset, im_color, im_depth=None):
     points = torch.from_numpy(dataset._point_blob).cuda()
     symmetry = torch.from_numpy(dataset._symmetry).cuda()
 
+    cfg.TRAIN.POSE_REG = False
     out_label, out_vertex, rois, out_pose = network(inputs, labels, meta_data, extents, gt_boxes, poses, points,
                                                     symmetry)
     labels = out_label.detach().cpu().numpy()[0]
@@ -662,30 +663,9 @@ def test_image_poserbpf(network, pose_rbpf, dataset, im_color, im_depth=None):
         poses[i, 4] *= poses[i, 6]
         poses[i, 5] *= poses[i, 6]
 
-    # run poseRBPF for codebook matching to compute the rotations
-    if pose_rbpf is not None:
-        rois, poses, im_rgb = test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset)
+    im_label = render_image_detection(dataset, im_color, rois, labels)
 
-    # optimize depths
-    if cfg.TEST.POSE_REFINE:
-        labels_out = out_label.detach().cpu().numpy()[0]
-        poses, poses_refined = refine_pose(labels_out, im_depth, rois, poses, dataset)
-    else:
-        num = rois.shape[0]
-        for j in range(num):
-            poses[j, 4] *= poses[j, 6]
-            poses[j, 5] *= poses[j, 6]
-
-    if pose_rbpf is not None:
-        sims, depth_errors, vis_ratios, pose_scores = eval_poses(pose_rbpf, poses_refined, rois, im_rgb, im_depth,
-                                                                 meta_data)
-
-    im_pose, im_label = render_image(dataset, im_color, rois, poses, labels)
-
-    if cfg.TEST.VISUALIZE:
-        vis_test(dataset, im, labels, out_vertex, rois, poses, im_pose)
-
-    return im_pose, im_label, rois, poses_refined
+    return rois, labels, poses, im_label
 
 
 def test_image(network, dataset, im_color, im_depth=None):
@@ -1358,6 +1338,40 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
                     plt.show()
 
     return poses, poses_refined
+
+
+# only render rois and segmentation masks
+def render_image_detection(dataset, im, rois, labels):
+    # label image
+    label_image = dataset.labels_to_image(labels)
+    im_label = im[:, :, (2, 1, 0)].copy()
+    I = np.where(labels != 0)
+    im_label[I[0], I[1], :] = 0.5 * label_image[I[0], I[1], :] + 0.5 * im_label[I[0], I[1], :]
+
+    num = rois.shape[0]
+    classes = dataset._classes
+    class_colors = dataset._class_colors
+
+    for i in range(num):
+        if cfg.MODE == 'TEST':
+            cls_index = int(rois[i, 1]) - 1
+        else:
+            cls_index = cfg.TRAIN.CLASSES[int(rois[i, 1])] - 1
+
+        if cls_index < 0:
+            continue
+
+        cls = int(rois[i, 1])
+        print(classes[cls], rois[i, -1])
+        if cls > 0 and rois[i, -1] > cfg.TEST.DET_THRESHOLD:
+            # draw roi
+            x1 = rois[i, 2]
+            y1 = rois[i, 3]
+            x2 = rois[i, 4]
+            y2 = rois[i, 5]
+            cv2.rectangle(im_label, (x1, y1), (x2, y2), class_colors[cls], 2)
+
+    return im_label
 
 
 def render_image(dataset, im, rois, poses, labels):
