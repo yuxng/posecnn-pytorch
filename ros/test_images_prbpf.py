@@ -163,10 +163,7 @@ class ImageListener:
 
     def callback_rgbd(self, rgb, depth):
 
-        if cfg.TEST.ROS_CAMERA == 'ISAAC_SIM':
-            Tbr = get_relative_pose_from_tf(self.listener, 'measured/camera_link', 'base_link')
-        else:
-            Tbr = get_relative_pose_from_tf(self.listener, 'measured/camera_link', 'measured/base_link')
+        Tbr = get_relative_pose_from_tf(self.listener, 'measured/camera_link', 'measured/base_link')
 
         self.q_br = mat2quat(Tbr[:3, :3])
         self.t_br = Tbr[:3, 3]
@@ -239,12 +236,8 @@ class ImageListener:
         self.depth_pub.publish(depth_msg)
 
         # forward kinematics
-        if cfg.TEST.ROS_CAMERA == 'ISAAC_SIM':
-            self.br.sendTransform(self.t_br, [self.q_br[1], self.q_br[2], self.q_br[3], self.q_br[0]],
-                                  rgb_frame_stamp, 'posecnn_camera_link', 'base_link')
-        else:
-            self.br.sendTransform(self.t_br, [self.q_br[1], self.q_br[2], self.q_br[3], self.q_br[0]],
-                                  rgb_frame_stamp, 'posecnn_camera_link', 'measured/base_link')
+        self.br.sendTransform(self.t_br, [self.q_br[1], self.q_br[2], self.q_br[3], self.q_br[0]],
+                              rgb_frame_stamp, 'posecnn_camera_link', 'measured/base_link')
 
         indexes = np.zeros((self.dataset.num_classes, ), dtype=np.int32)
 
@@ -277,12 +270,8 @@ class ImageListener:
                 y1 = rois[i, 3] / n
                 x2 = rois[i, 4] / n
                 y2 = rois[i, 5] / n
-                if cfg.TEST.ROS_CAMERA == 'ISAAC_SIM':
-                    self.br.sendTransform([n, rgb_frame_stamp.secs, 0], [x1, y1, x2, y2], rgb_frame_stamp,
-                                          tf_name + '_roi', 'base_link')
-                else:
-                    self.br.sendTransform([n, rgb_frame_stamp.secs, 0], [x1, y1, x2, y2], rgb_frame_stamp,
-                                          tf_name + '_roi', 'measured/base_link')
+                self.br.sendTransform([n, rgb_frame_stamp.secs, 0], [x1, y1, x2, y2], rgb_frame_stamp,
+                                      tf_name + '_roi', 'measured/base_link')
 
 def parse_args():
     """
