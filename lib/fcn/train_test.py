@@ -561,6 +561,7 @@ def test(test_loader, background_loader, network, pose_rbpf, output_dir):
             rois = []
             poses = []
             poses_refined = []
+            pose_scores = []
 
         if cfg.TEST.VISUALIZE:
             _vis_test(inputs, labels, out_label, out_vertex, rois, poses, poses_refined, sample, \
@@ -578,8 +579,6 @@ def test(test_loader, background_loader, network, pose_rbpf, output_dir):
                 filename = os.path.join(output_dir, '%06d.mat' % i)
             print(filename)
             scipy.io.savemat(filename, result, do_compression=True)
-        else:
-            print(sample['video_id'], sample['image_id'])
 
         print('[%d/%d], batch time %.2f' % (i, epoch_size, batch_time.val))
 

@@ -29,6 +29,7 @@ If you find PoseCNN useful in your research, please consider citing:
 
 2. Initialize all submodules
    ```Shell
+   git lfs clone
    git submodule update --init --recursive
    ```
 
@@ -52,6 +53,9 @@ If you find PoseCNN useful in your research, please consider citing:
     cd $ROOT/lib
     python setup.py build_ext --inplace
     ```
+
+### Background datasets
+- AllenCenter [here](https://drive.google.com/open?id=1YDnGV4poelk9iezxLxYK_zexXugc4Ih1)
 
 ### Required environment
 - Ubuntu 16.04
