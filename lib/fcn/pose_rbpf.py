@@ -100,7 +100,8 @@ class PoseRBPF:
         pose[4:] = self.back_project(uv_star, intrinsics, z_star)
         pose[:4] = codebook['quaternions'][index_star[1], :]
 
-        if cfg.TEST.VISUALIZE:
+        if 0:
+        #if cfg.TEST.VISUALIZE:
             if cfg.TEST.SYNTHESIZE:
                 cls_render = cls - 1
             else:

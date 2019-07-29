@@ -530,8 +530,8 @@ class YCBVideo(data.Dataset, datasets.imdb):
                 qt_allocentric = egocentric2allocentric(qt, T)
                 if qt_allocentric[0] < 0:
                    qt_allocentric = -1 * qt_allocentric
-                pose_blob[i, 2:6] = qt_allocentric
-                pose_blob[i, 6:] = T
+                pose_blob[count, 2:6] = qt_allocentric
+                pose_blob[count, 6:] = T
 
                 # compute box
                 x3d = np.ones((4, self._points_all.shape[1]), dtype=np.float32)

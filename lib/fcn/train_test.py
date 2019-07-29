@@ -1282,7 +1282,8 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
                 poses_refined[i, :4] = mat2quat(RT_opt[:3, :3])
                 poses_refined[i, 4:] = RT_opt[:3, 3]
 
-                if cfg.TEST.VISUALIZE:
+                if 0:
+                # if cfg.TEST.VISUALIZE:
                     import matplotlib.pyplot as plt
                     fig = plt.figure()
                     ax = fig.add_subplot(2, 2, 1, projection='3d')
