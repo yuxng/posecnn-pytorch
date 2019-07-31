@@ -666,15 +666,17 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
         Load the indexes of images in the data folder
         """
 
-        filename = os.path.join(self._data_path, '*.mat')
-        files = glob.glob(filename)
-
         image_index = []
-        for i in range(len(files)):
-            filename = files[i]
-            head, name = os.path.split(filename)
-            index = name[:-9]
-            image_index.append(index)
+        subdirs = os.listdir(self._data_path)
+        for i in xrange(len(subdirs)):
+            subdir = subdirs[i]
+            filename = os.path.join(self._data_path, subdir, '*.mat')
+            files = glob.glob(filename)
+            for j in range(len(files)):
+                filename = files[j]
+                head, name = os.path.split(filename)
+                index = subdir + '/' + name[:-9]
+                image_index.append(index)
 
         print('=======================================================')
         print('%d image in %s' % (len(image_index), self._data_path))
