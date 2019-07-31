@@ -11,6 +11,7 @@ __sets = {}
 
 import datasets.ycb_video
 import datasets.ycb_object
+import datasets.ycb_self_supervision
 import datasets.ycb_encoder
 import datasets.linemod
 import datasets.isaac_sim
@@ -30,6 +31,13 @@ for split in ['train', 'test']:
     print name
     __sets[name] = (lambda split=split:
             datasets.YCBObject(split))
+
+# ycb self supervision dataset
+for split in ['train', 'test']:
+    name = 'ycb_self_supervision_{}'.format(split)
+    print name
+    __sets[name] = (lambda split=split:
+            datasets.YCBSelfSupervision(split))
 
 # ycb encoder dataset
 for split in ['train', 'test']:

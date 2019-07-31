@@ -7,6 +7,7 @@
 
 from .imdb import imdb
 from .ycb_video import YCBVideo
+from .ycb_self_supervision import YCBSelfSupervision
 from .ycb_encoder import YCBEncoder
 from .ycb_object import YCBObject
 from .background import BackgroundDataset
