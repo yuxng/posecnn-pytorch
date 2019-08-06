@@ -165,9 +165,9 @@ class sdf_optimizer():
         for i in range(steps):
 
             self.optimizer.zero_grad()
-            loss, T_oc_opt = self.sdf_loss(self.dpose, pose_init, self.sdf_torch, self.sdf_limits, points)
+            loss, sdf_values, T_oc_opt = self.sdf_loss(self.dpose, pose_init, self.sdf_torch, self.sdf_limits, points)
             loss.backward()
             self.optimizer.step()
 
         T_co_opt = np.linalg.inv(T_oc_opt.cpu().detach().numpy())
-        return T_co_opt
+        return T_co_opt, sdf_values
