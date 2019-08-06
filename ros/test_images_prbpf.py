@@ -54,6 +54,7 @@ from sdf.sdf_optimizer import *
 from fcn.pose_rbpf import *
 import matplotlib.pyplot as plt
 from rospy_tutorials.srv import *
+import copy
 
 lock = threading.Lock()
 
@@ -87,12 +88,16 @@ def get_relative_pose_from_tf(listener, source_frame, target_frame):
 
 class ImageListener:
 
-    def __init__(self, network, dataset):
+    def __init__(self, network, dataset, network_compare=None):
 
         self.net = network
         self.dataset = dataset
         self.cv_bridge = CvBridge()
         self.renders = dict()
+
+        self.net_compare = network_compare
+        if network_compare is not None:
+            self.posecnn_compare_pub = rospy.Publisher('posecnn_detection_comparison', Image, queue_size=10)
 
         self.im = None
         self.depth = None
@@ -205,6 +210,9 @@ class ImageListener:
         if cfg.TRAIN.VERTEX_REG_DELTA:
             fusion_type = '_rgbd_'
 
+        if self.net_compare is not None:
+            self.run_posecnn_flag = True
+
         if self.run_posecnn_flag:
             rois, seg_im, poses, im_label = test_image_simple(self.net, self.dataset, im, depth_cv)
             self.run_posecnn_flag = False
@@ -212,6 +220,14 @@ class ImageListener:
             rgb_msg.header.stamp = rgb_frame_stamp
             rgb_msg.header.frame_id = rgb_frame_id
             self.posecnn_pub.publish(rgb_msg)
+
+            if self.net_compare is not None:
+                _, _, _, im_label_c = test_image_simple(self.net_compare, self.dataset, im, depth_cv)
+                rgb_msg = self.cv_bridge.cv2_to_imgmsg(im_label_c, 'rgb8')
+                rgb_msg.header.stamp = rgb_frame_stamp
+                rgb_msg.header.frame_id = rgb_frame_id
+                self.posecnn_compare_pub.publish(rgb_msg)
+
         else:
             rois = np.zeros((0, 6))
             seg_im = np.zeros_like(depth_cv)
@@ -305,6 +321,9 @@ def parse_args():
     parser.add_argument('--background', dest='background_name',
                         help='name of the background file',
                         default=None, type=str)
+    parser.add_argument('--pretrained_compare', dest='pretrained_compare',
+                        help='initialize with pretrained checkpoint',
+                        default=None, type=str)
 
     if len(sys.argv) == 1:
         parser.print_help()
@@ -353,13 +372,33 @@ if __name__ == '__main__':
         print("no pretrained network specified")
         sys.exit()
 
-    network = networks.__dict__[args.network_name](dataset.num_classes, cfg.TRAIN.NUM_UNITS, network_data).cuda(device=cfg.device)
+    if args.pretrained_compare is not None:
+        network = copy.deepcopy(networks.__dict__[args.network_name](dataset.num_classes,
+                                                                     cfg.TRAIN.NUM_UNITS,
+                                                                     network_data).cuda(device=cfg.device))
+    else:
+        network = networks.__dict__[args.network_name](dataset.num_classes,
+                                                 cfg.TRAIN.NUM_UNITS,
+                                                 network_data).cuda(device=cfg.device)
     network = torch.nn.DataParallel(network, device_ids=[0]).cuda(device=cfg.device)
     cudnn.benchmark = True
 
+    network_compare = None
+    if args.pretrained_compare is not None:
+        network_data_compare = torch.load(args.pretrained_compare)
+        print("=> using pre-trained network to compare '{}'".format(args.pretrained_compare))
+
+        network_compare = networks.__dict__[args.network_name](dataset.num_classes, cfg.TRAIN.NUM_UNITS, network_data_compare).cuda(
+            device=cfg.device)
+
+
+        # network_compare
+        network_compare = torch.nn.DataParallel(network_compare, device_ids=[0]).cuda(device=cfg.device)
+        network_compare.eval()
+
     # image listener
     network.eval()
-    listener = ImageListener(network, dataset)
+    listener = ImageListener(network, dataset, network_compare)
 
     while not rospy.is_shutdown():
        listener.run_network()
