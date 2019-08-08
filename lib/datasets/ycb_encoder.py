@@ -140,8 +140,6 @@ class YCBEncoder(data.Dataset, datasets.imdb):
 
         self._class_to_ind = dict(zip(self._classes, xrange(self._num_classes)))
         self._size = cfg.TRAIN.SYNNUM
-        if cfg.MODE == 'TRAIN' or (cfg.MODE == 'TEST' and cfg.TEST.SYNTHESIZE == True):
-            self._build_background_images()
         self._build_uniform_poses()
         self._losses_pose = torch.cuda.FloatTensor(self._size).detach()
 
@@ -149,13 +147,13 @@ class YCBEncoder(data.Dataset, datasets.imdb):
                 'ycb_object path does not exist: {}'.format(self._ycb_object_path)
 
         # compute the canonical distance to render
+        print('computing canonical depths')
         self.render_depths = np.zeros((self._extents.shape[0], ), dtype=np.float32)
         margin = 20
         for i in range(self._extents.shape[0]):
             points = get_bb3D(np.transpose(self._points[i]))
             self.render_depths[i] = optimize_depths(self._width - margin, self._height - margin, points, self._intrinsic_matrix)
-        print('depth for rendering:')
-        print(self.render_depths)
+            print(self._classes[i], self.render_depths[i])
 
         self.lb_shift = -margin
         self.ub_shift = margin
@@ -186,7 +184,7 @@ class YCBEncoder(data.Dataset, datasets.imdb):
 
         # sample target object (train one object only)
         cls_indexes = []
-        cls_target = 0
+        cls_target = np.random.randint(0, len(cfg.TRAIN.CLASSES))
         cls_indexes.append(cfg.TRAIN.CLASSES[cls_target]-1)
 
         # sample target pose
@@ -240,9 +238,16 @@ class YCBEncoder(data.Dataset, datasets.imdb):
                         cls_indexes.append(0)
                         poses_all.append(np.zeros((7, ), dtype=np.float32))
 
-                    ind = np.random.randint(self._num_classes_other, size=1)[0]
-                    cls_occ = self._classes_other[ind]
-                    cls_indexes[1] = cls_occ - 1
+                    # ind = np.random.randint(self._num_classes_other, size=1)[0]
+                    # cls_occ = self._classes_other[ind]
+                    # cls_occ = self._classes_other[ind]
+                    # cls_indexes[1] = cls_occ - 1
+
+                    while 1:
+                        ind = np.random.randint(1, self._num_classes_all) - 1
+                        if ind != cls_indexes[0]:
+                            break
+                    cls_indexes[1] = ind
 
                     # sample poses
                     cls = int(cls_indexes[1])
@@ -294,7 +299,7 @@ class YCBEncoder(data.Dataset, datasets.imdb):
                 non_occluded = np.sum(np.logical_and(seg_target > 0, seg_target == seg_input)).astype(np.float)
                 occluded_ratio = 1 - non_occluded / np.sum(seg_target>0).astype(np.float)
 
-                if occluded_ratio < 0.95:
+                if occluded_ratio < 0.8:
                     break
 
             # foreground mask

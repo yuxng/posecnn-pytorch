@@ -807,7 +807,10 @@ def train_autoencoder(train_loader, background_loader, network, optimizer, epoch
 
     epoch_size = len(train_loader)
     enum_background = enumerate(background_loader)
-    cls = train_loader.dataset.classes[0]
+    if train_loader.dataset.num_classes == 1:
+        cls = train_loader.dataset.classes[0]
+    else:
+        cls = '%d classes' % (train_loader.dataset.num_classes)
 
     # switch to train mode
     network.train()
