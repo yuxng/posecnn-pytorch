@@ -3,22 +3,22 @@ INPUT: COLOR
 TRAIN:
   TRAINABLE: True
   WEIGHT_DECAY: 0.0001
-  LEARNING_RATE: 0.0002
-  MILESTONES: !!python/tuple [100]
+  LEARNING_RATE: 0.00002
+  MILESTONES: !!python/tuple [10000000]
   MOMENTUM: 0.9
   BETA: 0.999
   GAMMA: 0.1
   SCALES_BASE: !!python/tuple [1.0]
-  IMS_PER_BATCH: 128
+  IMS_PER_BATCH: 64
   NUM_UNITS: 128
   CLASSES: !!python/tuple [21]
-  SNAPSHOT_INFIX: ycb_object_061_foam_brick
+  SNAPSHOT_INFIX: ycb_object_061_foam_brick_self_supervision
   SNAPSHOT_EPOCHS: 20
   SNAPSHOT_PREFIX: encoder
   USE_FLIPPED: False
   CHROMATIC: True
   ADD_NOISE: True
-  VISUALIZE: True
+  VISUALIZE: False
   BOOSTRAP_PIXELS: 2000
   # synthetic data
   UNIFORM_POSE_INTERVAL: 5
@@ -33,6 +33,6 @@ TRAIN:
 TEST:
   SCALES_BASE: !!python/tuple [1.0]
   IMS_PER_BATCH: 256
-  VISUALIZE: False
+  VISUALIZE: True
   SYNTHESIZE: True
-  BUILD_CODEBOOK: True
+  BUILD_CODEBOOK: False

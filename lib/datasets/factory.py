@@ -39,6 +39,13 @@ for split in ['train', 'test']:
     __sets[name] = (lambda split=split:
             datasets.YCBSelfSupervision(split))
 
+# ycb encoder self supervision dataset
+for split in ['train', 'test']:
+    name = 'ycb_encoder_self_supervision_{}'.format(split)
+    print name
+    __sets[name] = (lambda split=split:
+            datasets.YCBEncoderSelfSupervision(split))
+
 # ycb encoder dataset
 for split in ['train', 'test']:
     name = 'ycb_encoder_{}'.format(split)
