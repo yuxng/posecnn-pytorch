@@ -16,30 +16,31 @@ class PoseRBPF:
     def __init__(self, dataset):
 
         # prepare autoencoder and codebook
-        autoencoders = [[] for i in range(len(cfg.TEST.CLASSES))]
+        autoencoder = []
         codebooks = [[] for i in range(len(cfg.TEST.CLASSES))]
         codes_gpu = [[] for i in range(len(cfg.TEST.CLASSES))]
         codebook_names = [[] for i in range(len(cfg.TEST.CLASSES))]
+
+        # load autoencoder
+        filename = os.path.join('data', 'checkpoints', 'encoder_ycb_object_all_epoch_80.checkpoint.pth')
+        if os.path.exists(filename):
+            autoencoder_data = torch.load(filename)
+            autoencoder.append(networks.__dict__['autoencoder'](1, 128, autoencoder_data).cuda(device=cfg.device))
+            autoencoder[0] = torch.nn.DataParallel(autoencoder[0], device_ids=[cfg.gpu_id]).cuda(device=cfg.device)
+            print(filename)
 
         for i in range(len(cfg.TEST.CLASSES)):
             ind = cfg.TEST.CLASSES[i]
             cls = dataset._classes_all[ind]
 
-            filename = os.path.join('data', 'checkpoints', 'encoder_ycb_object_' + cls + '_epoch_200.checkpoint.pth')
+            filename = os.path.join('data', 'codebooks', 'codebook_ycb_encoder_test_' + cls + '.mat')
             if os.path.exists(filename):
-                autoencoder_data = torch.load(filename)
-                autoencoders[i] = networks.__dict__['autoencoder'](1, 128, autoencoder_data).cuda(device=cfg.device)
-                autoencoders[i] = torch.nn.DataParallel(autoencoders[i], device_ids=[cfg.gpu_id]).cuda(device=cfg.device)
-                print(filename)
-
-                # load codebook
-                filename = os.path.join('data', 'codebooks', 'codebook_ycb_encoder_test_' + cls + '.mat')
                 codebook_names[i] = filename
                 codebooks[i] = scipy.io.loadmat(filename)
                 codes_gpu[i] = torch.from_numpy(codebooks[i]['codes']).cuda()
                 print(filename)
 
-        self.autoencoders = autoencoders
+        self.autoencoder = autoencoder
         self.codebooks = codebooks
         self.codebook_names = codebook_names
         self.codes_gpu = codes_gpu
@@ -55,7 +56,7 @@ class PoseRBPF:
         cls_id = cfg.TEST.CLASSES.index(cls)
 
         # network and codebook of the class
-        autoencoder = self.autoencoders[cls_id]
+        autoencoder = self.autoencoder[0]
         codebook = self.codebooks[cls_id]
         codes_gpu = self.codes_gpu[cls_id]
         pose = np.zeros((7,), dtype=np.float32)
@@ -100,8 +101,8 @@ class PoseRBPF:
         pose[4:] = self.back_project(uv_star, intrinsics, z_star)
         pose[:4] = codebook['quaternions'][index_star[1], :]
 
-        if 0:
-        #if cfg.TEST.VISUALIZE:
+        # if 0:
+        if cfg.TEST.VISUALIZE:
             if cfg.TEST.SYNTHESIZE:
                 cls_render = cls - 1
             else:
@@ -254,7 +255,7 @@ class PoseRBPF:
             rois_render, scale_roi_render = self.trans_zoom_uvz_cuda(render_bgr.detach(), uv, z, fx, fy, render_dist)
 
             # forward passing
-            out_img, embeddings = self.autoencoders[cls_id](torch.cat((rois,rois_render), dim=0))
+            out_img, embeddings = self.autoencoder[0](torch.cat((rois,rois_render), dim=0))
             embeddings = embeddings.detach()
             sim = self.cos_sim(embeddings[[0], :], embeddings[[1], :])[0].detach().cpu().numpy()
 

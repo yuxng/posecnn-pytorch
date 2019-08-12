@@ -162,7 +162,9 @@ if __name__ == '__main__':
 
     # test network
     if args.network_name == 'autoencoder':
-        test_autoencoder(dataloader, background_loader, network, output_dir)
+        for i in range(len(cfg.TEST.CLASSES)):
+            dataloader.dataset.cls_target = i
+            test_autoencoder(dataloader, background_loader, network, output_dir)
     else:
         #'''
         # prepare autoencoder and codebook

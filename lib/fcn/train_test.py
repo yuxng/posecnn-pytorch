@@ -844,7 +844,7 @@ def train_autoencoder(train_loader, background_loader, network, optimizer, epoch
         inputs = torch.clamp(inputs, min=0.0, max=1.0)
 
         # compute output
-        out_images, embeddings = network(inputs)
+        out_images, embeddings = network(inputs, sample['cls_index'])
 
         # reconstruction loss
         targets = sample['image_target']
@@ -852,9 +852,11 @@ def train_autoencoder(train_loader, background_loader, network, optimizer, epoch
 
         # record the losses for each euler pose
         index_euler = sample['index_euler']
+        cls_index = sample['cls_index']
         for j in range(index_euler.shape[0]):
             if index_euler[j] >= 0:
-                train_loader.dataset._losses_pose[index_euler[j]] = losses_euler[j]
+                ind = int(cls_index[j, 0])
+                train_loader.dataset._losses_pose[ind, index_euler[j]] = losses_euler[j]
 
         if cfg.TRAIN.VISUALIZE:
             _vis_minibatch_autoencoder(inputs, background_color, mask, sample, out_images)
@@ -993,7 +995,8 @@ def test_autoencoder(test_loader, background_loader, network, output_dir):
     batch_time = AverageMeter()
     epoch_size = len(test_loader)
     enum_background = enumerate(background_loader)
-    cls = test_loader.dataset.classes[0]
+    cls_index = test_loader.dataset.cls_target
+    cls = test_loader.dataset.classes[cls_index]
 
     if cfg.TEST.BUILD_CODEBOOK:
         num = len(test_loader.dataset.eulers)

@@ -3,6 +3,7 @@ import os.path
 import cv2
 import random
 import glob
+import cPickle
 import torch
 import torch.utils.data as data
 import torchvision
@@ -141,24 +142,48 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         self._class_to_ind = dict(zip(self._classes, xrange(self._num_classes)))
         self._size = cfg.TRAIN.SYNNUM
         self._build_uniform_poses()
-        self._losses_pose = torch.cuda.FloatTensor(self._size).detach()
+        self._losses_pose = np.zeros((self._num_classes, self._size), dtype=np.float32)
+
+        self._perm = np.random.permutation(np.arange(self._num_classes))
+        self._cur = 0
 
         assert os.path.exists(self._ycb_object_path), \
                 'ycb_object path does not exist: {}'.format(self._ycb_object_path)
 
         # compute the canonical distance to render
-        print('computing canonical depths')
-        self.render_depths = np.zeros((self._extents.shape[0], ), dtype=np.float32)
         margin = 20
-        for i in range(self._extents.shape[0]):
-            points = get_bb3D(np.transpose(self._points[i]))
-            self.render_depths[i] = optimize_depths(self._width - margin, self._height - margin, points, self._intrinsic_matrix)
-            print(self._classes[i], self.render_depths[i])
-
+        self.render_depths = self.compute_render_depths(margin)
         self.lb_shift = -margin
         self.ub_shift = margin
         self.lb_scale = 0.8
         self.ub_scale = 1.2
+        self.cls_target = 0
+
+
+    def compute_render_depths(self, margin):
+
+        prefix = '_class'
+        for i in range(len(cfg.TRAIN.CLASSES)):
+            prefix += '_%d' % cfg.TRAIN.CLASSES[i]
+        cache_file = os.path.join(self.cache_path, self.name + prefix + '_render_depths.pkl')
+        if os.path.exists(cache_file):
+            with open(cache_file, 'rb') as fid:
+                render_depths = cPickle.load(fid)
+            print '{} render_depths loaded from {}'.format(self.name, cache_file)
+            return render_depths
+
+        print('computing canonical depths')
+        render_depths = np.zeros((self._extents.shape[0], ), dtype=np.float32)
+        for i in range(self._extents.shape[0]):
+            points = get_bb3D(np.transpose(self._points[i]))
+            render_depths[i] = optimize_depths(self._width - margin, self._height - margin, points, self._intrinsic_matrix)
+            print(self._classes[i], render_depths[i])
+
+        with open(cache_file, 'wb') as fid:
+            cPickle.dump(render_depths, fid, cPickle.HIGHEST_PROTOCOL)
+        print 'wrote render_depths to {}'.format(cache_file)
+
+        return render_depths
 
 
     def _render_item(self, sample_index):
@@ -170,8 +195,14 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         qt = np.zeros((7, ), dtype=np.float32)
         if cfg.MODE == 'TEST' and cfg.TEST.BUILD_CODEBOOK:
             interval = 0
+            cls_target = self.cls_target
         else:
             interval = cfg.TRAIN.UNIFORM_POSE_INTERVAL
+            if self._cur >= self._num_classes:
+                self._perm = np.random.permutation(np.arange(self._num_classes))
+                self._cur = 0
+            cls_target = self._perm[self._cur]
+            self._cur += 1
 
         # initialize renderer
         fx = self._intrinsic_matrix[0, 0]
@@ -184,7 +215,6 @@ class YCBEncoder(data.Dataset, datasets.imdb):
 
         # sample target object (train one object only)
         cls_indexes = []
-        cls_target = np.random.randint(0, len(cfg.TRAIN.CLASSES))
         cls_indexes.append(cfg.TRAIN.CLASSES[cls_target]-1)
 
         # sample target pose
@@ -198,8 +228,7 @@ class YCBEncoder(data.Dataset, datasets.imdb):
 
         # use hard pose
         if (sample_index + 1) % cfg.TRAIN.IMS_PER_BATCH == 0:
-            loss, index_euler = torch.max(self._losses_pose, 0)
-            index_euler = index_euler.cpu().detach().numpy()
+            index_euler = np.argmax(self._losses_pose[cls_target, :])
 
         yaw = self.eulers[index_euler][0] + interval * np.random.randn()
         pitch = self.eulers[index_euler][1] + interval * np.random.randn()
@@ -330,12 +359,14 @@ class YCBEncoder(data.Dataset, datasets.imdb):
             sample = {'image_input': im_cuda.permute(2, 0, 1),
                   'image_target': image_target_tensor.permute(2, 0, 1),
                   'mask': mask,
+                  'cls_index': torch.from_numpy(np.array([cls_target]).astype(np.float32)),
                   'index_euler': torch.from_numpy(np.array([index_euler])),
                   'affine_matrix': torch.from_numpy(affine_matrix).cuda()}
         else:
             sample = {'image_input': image_target_tensor.permute(2, 0, 1),
                   'image_target': image_target_tensor.permute(2, 0, 1),
                   'mask': mask_target,
+                  'cls_index': torch.from_numpy(np.array([cls_target]).astype(np.float32)),
                   'pose_target': pose_target}
 
         return sample

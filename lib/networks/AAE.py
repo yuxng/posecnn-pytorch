@@ -36,10 +36,10 @@ def fc(in_planes, out_planes, relu=True):
         return nn.Linear(in_planes, out_planes)
 
 
-class AutoEncoder(nn.Module):
+class Encoder(nn.Module):
 
     def __init__(self, code_dim=128):
-        super(AutoEncoder, self).__init__()
+        super(Encoder, self).__init__()
 
         # encoder
         self.conv1 = conv(3, 128, kernel_size=5, stride=2)
@@ -47,23 +47,6 @@ class AutoEncoder(nn.Module):
         self.conv3 = conv(256, 256, kernel_size=5, stride=2)
         self.conv4 = conv(256, 512, kernel_size=5, stride=2)
         self.fc1 = fc(512 * 8 * 8, code_dim)
-
-        # decoder
-        self.fc2 = fc(code_dim, 512 * 8 * 8)
-        self.deconv1 = deconv(512, 256, kernel_size=5, stride=2, output_padding=1)
-        self.deconv2 = deconv(256, 256, kernel_size=5, stride=2, output_padding=1)
-        self.deconv3 = deconv(256, 128, kernel_size=5, stride=2, output_padding=1)
-        self.deconv4 = deconv(128, 3, kernel_size=5, stride=2, output_padding=1)
-
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d) or isinstance(m, nn.Linear):
-                print(m)
-                nn.init.xavier_uniform_(m.weight)
-                if m.bias is not None:
-                    m.bias.data.zero_()
-            elif isinstance(m, nn.BatchNorm2d):
-                m.weight.data.fill_(1)
-                m.bias.data.zero_()
 
     def forward(self, x):
 
@@ -75,6 +58,23 @@ class AutoEncoder(nn.Module):
         out = out.view(-1, 512 * 8 * 8)
         embedding = self.fc1(out)
 
+        return embedding
+
+
+class Decoder(nn.Module):
+
+    def __init__(self, code_dim=128):
+        super(Decoder, self).__init__()
+
+        # decoder
+        self.fc2 = fc(code_dim, 512 * 8 * 8)
+        self.deconv1 = deconv(512, 256, kernel_size=5, stride=2, output_padding=1)
+        self.deconv2 = deconv(256, 256, kernel_size=5, stride=2, output_padding=1)
+        self.deconv3 = deconv(256, 128, kernel_size=5, stride=2, output_padding=1)
+        self.deconv4 = deconv(128, 3, kernel_size=5, stride=2, output_padding=1)
+
+    def forward(self, embedding):
+
         # decoder
         out = self.fc2(embedding)
         out = out.view(-1, 512, 8, 8)
@@ -83,14 +83,53 @@ class AutoEncoder(nn.Module):
         out = self.deconv3(out)
         out = self.deconv4(out)
 
-        return out, embedding
+        return out
+
+
+class AutoEncoder(nn.Module):
+
+    def __init__(self, num_classes=1, code_dim=128):
+        super(AutoEncoder, self).__init__()
+
+        # encoder and decoder
+        self.num_classes = num_classes
+        self.code_dim = code_dim
+        self.encoder = Encoder(code_dim)
+        self.decoders = nn.ModuleList()
+
+        for i in range(num_classes):
+            self.decoders.append(Decoder(code_dim))
+
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d) or isinstance(m, nn.Linear):
+                print(m)
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    m.bias.data.zero_()
+            elif isinstance(m, nn.BatchNorm2d):
+                m.weight.data.fill_(1)
+                m.bias.data.zero_()
+
+
+    def forward(self, x, cls_indexes):
+
+        embeddings = []
+        outputs = []
+        for i in range(cls_indexes.shape[0]):
+            cls_index = int(cls_indexes[i, 0])
+            image = x[i, :, :, :].unsqueeze(0)
+            embedding = self.encoder(image)
+            out = self.decoders[cls_index](embedding)
+            embeddings.append(embedding)
+            outputs.append(out)
+
+        return torch.cat(outputs), torch.cat(embeddings)
 
     def weight_parameters(self):
         return [param for name, param in self.named_parameters() if 'weight' in name]
 
     def bias_parameters(self):
         return [param for name, param in self.named_parameters() if 'bias' in name]
-
 
     """
     :param x: batch of code from the encoder (batch size x code size)
@@ -105,8 +144,9 @@ class AutoEncoder(nn.Module):
         return dot_product / normalizer.clamp(min=eps)
 
 
+
 def autoencoder(num_classes=1, num_units=128, data=None):
-    model = AutoEncoder(num_units)
+    model = AutoEncoder(num_classes, num_units)
 
     if data is not None:
         model_dict = model.state_dict()
