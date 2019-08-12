@@ -835,12 +835,13 @@ def train_autoencoder(train_loader, background_loader, network, optimizer, epoch
             enum_background = enumerate(background_loader)
             _, background = next(enum_background)
 
-        if image.size(0) != background['background_color'].size(0):
+        num = image.size(0)
+        if background['background_color'].size(0) < num:
             enum_background = enumerate(background_loader)
             _, background = next(enum_background)
 
         background_color = background['background_color'].cuda()
-        inputs = mask * image + (1 - mask) * background_color
+        inputs = mask * image + (1 - mask) * background_color[:num]
         inputs = torch.clamp(inputs, min=0.0, max=1.0)
 
         # compute output
