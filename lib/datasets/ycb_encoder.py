@@ -252,7 +252,10 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         seg_target_tensor = seg_target_tensor.flip(0)
         image_target_tensor = torch.clamp(image_target_tensor, min=0.0, max=1.0)
         seg_target = seg_target_tensor[:,:,2] + 256*seg_target_tensor[:,:,1] + 256*256*seg_target_tensor[:,:,0]
-        image_target_tensor[seg_target == 0] = 0.5
+
+        # set background color here
+        # image_target_tensor[seg_target == 0] = 0.5
+
         mask_target = (seg_target != 0).unsqueeze(0).repeat((3, 1, 1)).float()
         seg_target = seg_target.cpu().numpy()
 

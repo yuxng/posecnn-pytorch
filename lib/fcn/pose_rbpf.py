@@ -22,10 +22,10 @@ class PoseRBPF:
         codebook_names = [[] for i in range(len(cfg.TEST.CLASSES))]
 
         # load autoencoder
-        filename = os.path.join('data', 'checkpoints', 'encoder_ycb_object_all_epoch_80.checkpoint.pth')
+        filename = os.path.join('data', 'checkpoints', 'encoder_ycb_object_all_epoch_50.checkpoint.pth')
         if os.path.exists(filename):
             autoencoder_data = torch.load(filename)
-            autoencoder.append(networks.__dict__['autoencoder'](1, 128, autoencoder_data).cuda(device=cfg.device))
+            autoencoder.append(networks.__dict__['autoencoder'](len(cfg.TEST.CLASSES), 128, autoencoder_data).cuda(device=cfg.device))
             autoencoder[0] = torch.nn.DataParallel(autoencoder[0], device_ids=[cfg.gpu_id]).cuda(device=cfg.device)
             print(filename)
 
@@ -88,7 +88,8 @@ class PoseRBPF:
         z = np.random.uniform(0.9 * z_init, 1.1 * z_init, (n_init_samples, 1))
 
         # evaluate translation
-        distribution, out_images, in_images = self.evaluate_particles(autoencoder, codebook, codes_gpu, image, intrinsics, uv_h, z, render_dist, 0.1)
+        distribution, out_images, in_images = self.evaluate_particles(autoencoder, codebook, codes_gpu, image, cls_id, \
+            intrinsics, uv_h, z, render_dist, 0.1)
 
         # find the max pdf from the distribution matrix
         index_star = self.arg_max_func(distribution)
@@ -180,7 +181,7 @@ class PoseRBPF:
 
 
     # evaluate particles according to the RGB images
-    def evaluate_particles(self, autoencoder, codebook, codes_gpu, image, intrinsics, uv, z, render_dist, gaussian_std):
+    def evaluate_particles(self, autoencoder, codebook, codes_gpu, image, cls_id, intrinsics, uv, z, render_dist, gaussian_std):
 
         # crop the rois from input image
         fu = intrinsics[0, 0]
@@ -188,7 +189,10 @@ class PoseRBPF:
         images_roi_cuda, scale_roi = self.trans_zoom_uvz_cuda(image.detach(), uv, z, fu, fv, render_dist)
 
         # forward passing
-        out_images, embeddings = autoencoder(images_roi_cuda)
+        cls_indexes = np.zeros((1, 1), dtype=np.float32)
+        cls_indexes[0, 0] = cls_id
+        cls_indexes = torch.from_numpy(cls_indexes).cuda()
+        out_images, embeddings = autoencoder(images_roi_cuda, cls_indexes)
 
         # compute the similarity between particles' codes and the codebook
         cosine_distance_matrix = autoencoder.module.pairwise_cosine_distances(embeddings, codes_gpu)
@@ -255,7 +259,10 @@ class PoseRBPF:
             rois_render, scale_roi_render = self.trans_zoom_uvz_cuda(render_bgr.detach(), uv, z, fx, fy, render_dist)
 
             # forward passing
-            out_img, embeddings = self.autoencoder[0](torch.cat((rois,rois_render), dim=0))
+            cls_indexes = np.zeros((2, 1), dtype=np.float32)
+            cls_indexes[:, 0] = cls_id
+            cls_indexes = torch.from_numpy(cls_indexes).cuda()
+            out_img, embeddings = self.autoencoder[0](torch.cat((rois,rois_render), dim=0), cls_indexes)
             embeddings = embeddings.detach()
             sim = self.cos_sim(embeddings[[0], :], embeddings[[1], :])[0].detach().cpu().numpy()
 

@@ -1046,7 +1046,7 @@ def test_autoencoder(test_loader, background_loader, network, output_dir):
         inputs = torch.clamp(inputs, min=0.0, max=1.0)
 
         # compute output
-        out_images, embeddings = network(inputs)
+        out_images, embeddings = network(inputs, sample['cls_index'])
 
         im_render = None
         if cfg.TEST.BUILD_CODEBOOK:
