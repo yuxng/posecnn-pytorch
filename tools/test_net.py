@@ -161,10 +161,10 @@ if __name__ == '__main__':
             cfg.sdf_optimizers.append(sdf_optimizer(dataset.model_sdf_paths[i-1]))
 
     # test network
-    if args.network_name == 'autoencoder':
+    if args.network_name == 'autoencoder' or args.network_name == 'pggan':
         for i in range(len(cfg.TEST.CLASSES)):
             dataloader.dataset.cls_target = i
-            test_autoencoder(dataloader, background_loader, network, output_dir)
+            test_autoencoder(dataloader, background_loader, network, output_dir, args.network_name)
     else:
         #'''
         # prepare autoencoder and codebook

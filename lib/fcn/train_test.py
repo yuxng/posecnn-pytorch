@@ -806,7 +806,13 @@ def lsgan_loss(input, target):
     loss = (input.squeeze() - target) ** 2
     return loss.mean()
 
-def train_autoencoder(train_loader, background_loader, network, optimizer, optimizer_discriminator, epoch):
+def multiscale_lsgan_loss(inputs, target):
+    loss = 0
+    for input in inputs:
+        loss += lsgan_loss(input, target)
+    return loss
+
+def train_autoencoder(train_loader, background_loader, network, optimizer, optimizer_discriminator, epoch, network_name):
 
     batch_time = AverageMeter()
     losses = AverageMeter()
@@ -856,8 +862,8 @@ def train_autoencoder(train_loader, background_loader, network, optimizer, optim
         inputs_noise = add_gaussian_noise_cuda(inputs)
         d_real = network.module.run_discriminator(targets_noise)
         d_fake = network.module.run_discriminator(inputs_noise)
-        loss_d_real = lsgan_loss(d_real, 1.0)
-        loss_d_fake = lsgan_loss(d_fake, 0.0)
+        loss_d_real = multiscale_lsgan_loss(d_real, 1.0)
+        loss_d_fake = multiscale_lsgan_loss(d_fake, 0.0)
         loss_d = loss_d_real + loss_d_fake
 
         optimizer_discriminator.zero_grad()
@@ -866,10 +872,13 @@ def train_autoencoder(train_loader, background_loader, network, optimizer, optim
 
         ############## train generator ##############
         g_fake = network.module.run_discriminator(inputs)
-        loss_g_fake = lsgan_loss(g_fake, 1.0)
-        out_images, embeddings = network(inputs, sample['cls_index'])
+        loss_g_fake = multiscale_lsgan_loss(g_fake, 1.0)
+        if network_name == 'autoencoder':
+            out_images, embeddings = network(inputs, sample['cls_index'])
+        elif network_name == 'pggan':
+            out_images, embeddings = network(inputs)
         loss_recon, losses_euler = BootstrapedMSEloss(out_images, targets, cfg.TRAIN.BOOSTRAP_PIXELS)
-        loss = loss_recon + loss_g_fake
+        loss = loss_recon + 0.1 * loss_g_fake
 
         # record the losses for each euler pose
         index_euler = sample['index_euler']
@@ -1012,7 +1021,7 @@ def _vis_minibatch_autoencoder(inputs, background, mask, sample, outputs, im_ren
         plt.show()
 
 
-def test_autoencoder(test_loader, background_loader, network, output_dir):
+def test_autoencoder(test_loader, background_loader, network, output_dir, network_name):
 
     batch_time = AverageMeter()
     epoch_size = len(test_loader)
@@ -1067,7 +1076,12 @@ def test_autoencoder(test_loader, background_loader, network, output_dir):
         inputs = torch.clamp(inputs, min=0.0, max=1.0)
 
         # compute output
-        out_images, embeddings = network(inputs, sample['cls_index'])
+        if network_name == 'autoencoder':
+            out_images, embeddings = network(inputs, sample['cls_index'])
+        elif network_name == 'pggan':
+            out_images, embeddings = network(inputs)
+            embeddings = embeddings.view(image.size(0), -1)
+            print(embeddings.shape)
 
         im_render = None
         if cfg.TEST.BUILD_CODEBOOK:
