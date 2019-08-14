@@ -147,6 +147,16 @@ def add_noise_depth_cuda(image, level = 0.1):
     noisy = image + gauss
     return noisy
 
+def add_gaussian_noise_cuda(image, level = 0.1):
+
+    # gaussian noise
+    noise_level = random.uniform(0, level)
+    gauss = torch.randn_like(image) * noise_level
+    noisy = image + gauss
+    noisy = torch.clamp(noisy, 0, 1.0)
+    return noisy
+
+
 def add_noise_cuda(image, level = 0.1):
     # random number
     r = np.random.rand(1)

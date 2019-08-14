@@ -145,6 +145,7 @@ if __name__ == '__main__':
     print('=> setting {} solver'.format(args.solver))
     param_groups = [{'params': network.module.bias_parameters(), 'weight_decay': cfg.TRAIN.WEIGHT_DECAY},
                     {'params': network.module.weight_parameters(), 'weight_decay': cfg.TRAIN.WEIGHT_DECAY}]
+
     if args.solver == 'adam':
         optimizer = torch.optim.Adam(param_groups, cfg.TRAIN.LEARNING_RATE,
                                      betas=(cfg.TRAIN.MOMENTUM, cfg.TRAIN.BETA))
@@ -156,11 +157,21 @@ if __name__ == '__main__':
         milestones=[m - args.startepoch for m in cfg.TRAIN.MILESTONES], gamma=cfg.TRAIN.GAMMA)
     cfg.epochs = args.epochs
 
+    # optimizer for discriminator
+    if args.network_name == 'autoencoder':
+        param_groups_discriminator = [{'params': network.module.bias_parameters_discriminator(), 'weight_decay': cfg.TRAIN.WEIGHT_DECAY},
+                                      {'params': network.module.weight_parameters_discriminator(), 'weight_decay': cfg.TRAIN.WEIGHT_DECAY}]
+        optimizer_discriminator = torch.optim.Adam(param_groups_discriminator, cfg.TRAIN.LEARNING_RATE,
+                                     betas=(cfg.TRAIN.MOMENTUM, cfg.TRAIN.BETA))
+        scheduler_discriminator = torch.optim.lr_scheduler.MultiStepLR(optimizer_discriminator, \
+            milestones=[m - args.startepoch for m in cfg.TRAIN.MILESTONES], gamma=cfg.TRAIN.GAMMA)
+
     for epoch in range(args.startepoch, args.epochs):
         scheduler.step()
         
         if args.network_name == 'autoencoder':
-            train_autoencoder(dataloader, background_loader, network, optimizer, epoch)
+            scheduler_discriminator.step()
+            train_autoencoder(dataloader, background_loader, network, optimizer, optimizer_discriminator, epoch)
         else:
             train(dataloader, background_loader, network, optimizer, epoch)
 

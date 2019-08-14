@@ -60,6 +60,12 @@ class Encoder(nn.Module):
 
         return embedding
 
+    def weight_parameters(self):
+        return [param for name, param in self.named_parameters() if 'weight' in name]
+
+    def bias_parameters(self):
+        return [param for name, param in self.named_parameters() if 'bias' in name]
+
 
 class Decoder(nn.Module):
 
@@ -85,6 +91,36 @@ class Decoder(nn.Module):
 
         return out
 
+    def weight_parameters(self):
+        return [param for name, param in self.named_parameters() if 'weight' in name]
+
+    def bias_parameters(self):
+        return [param for name, param in self.named_parameters() if 'bias' in name]
+
+
+class Discriminator(nn.Module):
+
+    def __init__(self):
+        super(Discriminator, self).__init__()
+        self.conv1 = conv(3, 128, kernel_size=5, stride=2)
+        self.conv2 = conv(128, 256, kernel_size=5, stride=2)
+        self.conv3 = conv(256, 512, kernel_size=5, stride=2)
+        self.conv4 = conv(512, 1, kernel_size=5, stride=2)
+
+
+    def forward(self, x):
+        out = self.conv1(x)
+        out = self.conv2(out)
+        out = self.conv3(out)
+        out = self.conv4(out)
+        return out
+
+    def weight_parameters(self):
+        return [param for name, param in self.named_parameters() if 'weight' in name]
+
+    def bias_parameters(self):
+        return [param for name, param in self.named_parameters() if 'bias' in name]
+
 
 class AutoEncoder(nn.Module):
 
@@ -95,6 +131,7 @@ class AutoEncoder(nn.Module):
         self.num_classes = num_classes
         self.code_dim = code_dim
         self.encoder = Encoder(code_dim)
+        self.discriminator = Discriminator()
         self.decoders = nn.ModuleList()
 
         for i in range(num_classes):
@@ -125,11 +162,27 @@ class AutoEncoder(nn.Module):
 
         return torch.cat(outputs), torch.cat(embeddings)
 
+
+    def run_discriminator(self, x):
+        return self.discriminator(x)
+
     def weight_parameters(self):
-        return [param for name, param in self.named_parameters() if 'weight' in name]
+        param = self.encoder.weight_parameters()
+        for i in range(len(self.decoders)):
+            param += self.decoders[i].weight_parameters()
+        return param
 
     def bias_parameters(self):
-        return [param for name, param in self.named_parameters() if 'bias' in name]
+        param = self.encoder.bias_parameters()
+        for i in range(len(self.decoders)):
+            param += self.decoders[i].bias_parameters()
+        return param
+
+    def weight_parameters_discriminator(self):
+        return self.discriminator.weight_parameters()
+
+    def bias_parameters_discriminator(self):
+        return self.discriminator.bias_parameters()
 
     """
     :param x: batch of code from the encoder (batch size x code size)

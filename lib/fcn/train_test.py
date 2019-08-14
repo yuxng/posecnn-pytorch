@@ -22,6 +22,7 @@ from utils.nms import *
 from utils.pose_error import re, te
 from scipy.optimize import minimize
 from utils.loose_bounding_boxes import compute_centroids_and_loose_bounding_boxes, mean_shift_and_loose_bounding_boxes
+from utils.blob import add_gaussian_noise_cuda
 
 import matplotlib.pyplot as plt
 
@@ -800,7 +801,12 @@ def test_image(network, dataset, im_color, im_depth=None):
 #************************************#
 #    train and test autoencoders     #
 #************************************#
-def train_autoencoder(train_loader, background_loader, network, optimizer, epoch):
+
+def lsgan_loss(input, target):
+    loss = (input.squeeze() - target) ** 2
+    return loss.mean()
+
+def train_autoencoder(train_loader, background_loader, network, optimizer, optimizer_discriminator, epoch):
 
     batch_time = AverageMeter()
     losses = AverageMeter()
@@ -844,12 +850,26 @@ def train_autoencoder(train_loader, background_loader, network, optimizer, epoch
         inputs = mask * image + (1 - mask) * background_color[:num]
         inputs = torch.clamp(inputs, min=0.0, max=1.0)
 
-        # compute output
-        out_images, embeddings = network(inputs, sample['cls_index'])
-
-        # reconstruction loss
+        ############## train discriminator ##############
         targets = sample['image_target']
-        loss, losses_euler = BootstrapedMSEloss(out_images, targets, cfg.TRAIN.BOOSTRAP_PIXELS)
+        targets_noise = add_gaussian_noise_cuda(targets)
+        inputs_noise = add_gaussian_noise_cuda(inputs)
+        d_real = network.module.run_discriminator(targets_noise)
+        d_fake = network.module.run_discriminator(inputs_noise)
+        loss_d_real = lsgan_loss(d_real, 1.0)
+        loss_d_fake = lsgan_loss(d_fake, 0.0)
+        loss_d = loss_d_real + loss_d_fake
+
+        optimizer_discriminator.zero_grad()
+        loss_d.backward()
+        optimizer_discriminator.step()
+
+        ############## train generator ##############
+        g_fake = network.module.run_discriminator(inputs)
+        loss_g_fake = lsgan_loss(g_fake, 1.0)
+        out_images, embeddings = network(inputs, sample['cls_index'])
+        loss_recon, losses_euler = BootstrapedMSEloss(out_images, targets, cfg.TRAIN.BOOSTRAP_PIXELS)
+        loss = loss_recon + loss_g_fake
 
         # record the losses for each euler pose
         index_euler = sample['index_euler']
@@ -873,8 +893,9 @@ def train_autoencoder(train_loader, background_loader, network, optimizer, epoch
         # measure elapsed time
         batch_time.update(time.time() - end)
 
-        print('%s, [%d/%d][%d/%d], loss %.4f, lr %.6f, boost %d, time %.2f' \
-           % (cls, epoch, cfg.epochs, i, epoch_size, loss, optimizer.param_groups[0]['lr'], cfg.TRAIN.BOOSTRAP_PIXELS, batch_time.val))
+        print('%s, [%d/%d][%d/%d], loss_r %.4f, loss_g %.4f, loss_d %.4f, lr %.6f, boost %d, time %.2f' \
+           % (cls, epoch, cfg.epochs, i, epoch_size, loss_recon, loss_g_fake, loss_d, \
+              optimizer.param_groups[0]['lr'], cfg.TRAIN.BOOSTRAP_PIXELS, batch_time.val))
         cfg.TRAIN.ITERS += 1
 
 
