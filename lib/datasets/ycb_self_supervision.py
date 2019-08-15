@@ -511,7 +511,7 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
                 cls_indexes.append(index[0])
             else:
                 cls_indexes.append(meta_data['cls_indexes'][i] - 1)
-            poses_all.append(qt)
+            poses_all.append(qt.copy())
             
         # rendering
         cfg.renderer.set_poses(poses_all)
