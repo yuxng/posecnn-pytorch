@@ -13,7 +13,7 @@ TRAIN:
   NUM_UNITS: 128
   CLASSES: !!python/tuple [4]
   SNAPSHOT_INFIX: ycb_object_005_tomato_soup_can
-  SNAPSHOT_EPOCHS: 20
+  SNAPSHOT_EPOCHS: 10
   SNAPSHOT_PREFIX: encoder
   USE_FLIPPED: False
   CHROMATIC: True

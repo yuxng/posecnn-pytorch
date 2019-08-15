@@ -68,7 +68,7 @@ for i in range(len(classes)):
         f.write('  NUM_UNITS: 128\n')
         f.write('  CLASSES: !!python/tuple [' + str(i+1) + ']\n')
         f.write('  SNAPSHOT_INFIX: ycb_object_' + cls + '\n')
-        f.write('  SNAPSHOT_EPOCHS: 20\n')
+        f.write('  SNAPSHOT_EPOCHS: 10\n')
         f.write('  SNAPSHOT_PREFIX: encoder\n')
         f.write('  USE_FLIPPED: False\n')
         f.write('  CHROMATIC: True\n')

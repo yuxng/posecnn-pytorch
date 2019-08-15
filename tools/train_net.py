@@ -95,7 +95,7 @@ if __name__ == '__main__':
     cfg.MODE = 'TRAIN'
     dataset = get_dataset(args.dataset_name)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=cfg.TRAIN.IMS_PER_BATCH, shuffle=True, num_workers=0)
-    print 'Use dataset `{:s}` for training'.format(dataset.name)
+    print('Use dataset `{:s}` for training'.format(dataset.name))
 
     if cfg.INPUT == 'COLOR':
         if cfg.TRAIN.SYN_BACKGROUND_SPECIFIC:
@@ -115,7 +115,7 @@ if __name__ == '__main__':
         print(dataset._intrinsic_matrix)
 
     output_dir = get_output_dir(dataset, None)
-    print 'Output will be saved to `{:s}`'.format(output_dir)
+    print('Output will be saved to `{:s}`'.format(output_dir))
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
@@ -135,11 +135,11 @@ if __name__ == '__main__':
     cudnn.benchmark = True
 
     if cfg.TRAIN.SYNTHESIZE:
-        print 'loading 3D models'
+        print('loading 3D models')
         cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, render_marker=False)
         cfg.renderer.load_objects(dataset.model_mesh_paths, dataset.model_texture_paths, dataset.model_colors)
         cfg.renderer.set_camera_default()
-        print dataset.model_mesh_paths
+        print(dataset.model_mesh_paths)
 
     assert(args.solver in ['adam', 'sgd'])
     print('=> setting {} solver'.format(args.solver))
@@ -158,7 +158,7 @@ if __name__ == '__main__':
     cfg.epochs = args.epochs
 
     # optimizer for discriminator
-    if args.network_name == 'autoencoder' or args.network_name == 'pggan':
+    if args.network_name == 'autoencoder':
         param_groups_discriminator = [{'params': network.module.bias_parameters_discriminator(), 'weight_decay': cfg.TRAIN.WEIGHT_DECAY},
                                       {'params': network.module.weight_parameters_discriminator(), 'weight_decay': cfg.TRAIN.WEIGHT_DECAY}]
         optimizer_discriminator = torch.optim.Adam(param_groups_discriminator, cfg.TRAIN.LEARNING_RATE,
@@ -169,9 +169,9 @@ if __name__ == '__main__':
     for epoch in range(args.startepoch, args.epochs):
         scheduler.step()
         
-        if args.network_name == 'autoencoder' or args.network_name == 'pggan':
+        if args.network_name == 'autoencoder':
             scheduler_discriminator.step()
-            train_autoencoder(dataloader, background_loader, network, optimizer, optimizer_discriminator, epoch, args.network_name)
+            train_autoencoder(dataloader, background_loader, network, optimizer, optimizer_discriminator, epoch)
         else:
             train(dataloader, background_loader, network, optimizer, epoch)
 
@@ -182,4 +182,4 @@ if __name__ == '__main__':
                      if cfg.TRAIN.SNAPSHOT_INFIX != '' else '')
             filename = (cfg.TRAIN.SNAPSHOT_PREFIX + infix + '_epoch_{:d}'.format(epoch+1) + '.checkpoint.pth')
             torch.save(state, os.path.join(output_dir, filename))
-            print filename
+            print(filename)

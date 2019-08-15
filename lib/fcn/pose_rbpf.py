@@ -22,7 +22,7 @@ class PoseRBPF:
         codebook_names = [[] for i in range(len(cfg.TEST.CLASSES))]
 
         # load autoencoder
-        filename = os.path.join('data', 'checkpoints', 'encoder_ycb_object_all_epoch_50.checkpoint.pth')
+        filename = os.path.join('data', 'checkpoints', 'encoder_ycb_object_all_epoch_110.checkpoint.pth')
         if os.path.exists(filename):
             autoencoder_data = torch.load(filename)
             autoencoder.append(networks.__dict__['autoencoder'](len(cfg.TEST.CLASSES), 128, autoencoder_data).cuda(device=cfg.device))

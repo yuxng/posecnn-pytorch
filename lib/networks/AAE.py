@@ -107,7 +107,6 @@ class Discriminator(nn.Module):
         self.conv3 = conv(256, 512, kernel_size=5, stride=2)
         self.conv4 = conv(512, 1, kernel_size=5, stride=2)
 
-
     def forward(self, x):
         out = self.conv1(x)
         out = self.conv2(out)
@@ -132,10 +131,7 @@ class AutoEncoder(nn.Module):
         self.code_dim = code_dim
         self.encoder = Encoder(code_dim)
         self.discriminator = Discriminator()
-        self.decoders = nn.ModuleList()
-
-        for i in range(num_classes):
-            self.decoders.append(Decoder(code_dim))
+        self.decoder = Decoder(code_dim)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d) or isinstance(m, nn.Linear):
@@ -147,35 +143,20 @@ class AutoEncoder(nn.Module):
                 m.weight.data.fill_(1)
                 m.bias.data.zero_()
 
-
-    def forward(self, x, cls_indexes):
-
-        embeddings = []
-        outputs = []
-        for i in range(cls_indexes.shape[0]):
-            cls_index = int(cls_indexes[i, 0])
-            image = x[i, :, :, :].unsqueeze(0)
-            embedding = self.encoder(image)
-            out = self.decoders[cls_index](embedding)
-            embeddings.append(embedding)
-            outputs.append(out)
-
-        return torch.cat(outputs), torch.cat(embeddings)
-
+    def forward(self, x):
+        embeddings = self.encoder(x)
+        outputs = self.decoder(embeddings)
+        return outputs, embeddings
 
     def run_discriminator(self, x):
         return self.discriminator(x)
 
     def weight_parameters(self):
-        param = self.encoder.weight_parameters()
-        for i in range(len(self.decoders)):
-            param += self.decoders[i].weight_parameters()
+        param = self.encoder.weight_parameters() + self.decoder.weight_parameters()
         return param
 
     def bias_parameters(self):
-        param = self.encoder.bias_parameters()
-        for i in range(len(self.decoders)):
-            param += self.decoders[i].bias_parameters()
+        param = self.encoder.bias_parameters() + self.decoder.bias_parameters()
         return param
 
     def weight_parameters_discriminator(self):
@@ -195,7 +176,6 @@ class AutoEncoder(nn.Module):
         y_norm = torch.norm(y, 2, 1).unsqueeze(1)
         normalizer = torch.mm(x_norm, torch.t(y_norm))
         return dot_product / normalizer.clamp(min=eps)
-
 
 
 def autoencoder(num_classes=1, num_units=128, data=None):

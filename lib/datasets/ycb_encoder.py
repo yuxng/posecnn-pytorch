@@ -142,10 +142,7 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         self._class_to_ind = dict(zip(self._classes, xrange(self._num_classes)))
         self._size = cfg.TRAIN.SYNNUM
         self._build_uniform_poses()
-        self._losses_pose = np.zeros((self._num_classes, self._size), dtype=np.float32)
-
-        self._perm = np.random.permutation(np.arange(self._num_classes))
-        self._cur = 0
+        self._losses_pose = np.zeros((self._size), dtype=np.float32)
 
         assert os.path.exists(self._ycb_object_path), \
                 'ycb_object path does not exist: {}'.format(self._ycb_object_path)
@@ -157,7 +154,6 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         self.ub_shift = margin
         self.lb_scale = 0.8
         self.ub_scale = 1.2
-        self.cls_target = 0
 
 
     def compute_render_depths(self, margin):
@@ -195,14 +191,8 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         qt = np.zeros((7, ), dtype=np.float32)
         if cfg.MODE == 'TEST' and cfg.TEST.BUILD_CODEBOOK:
             interval = 0
-            cls_target = self.cls_target
         else:
             interval = cfg.TRAIN.UNIFORM_POSE_INTERVAL
-            if self._cur >= self._num_classes:
-                self._perm = np.random.permutation(np.arange(self._num_classes))
-                self._cur = 0
-            cls_target = self._perm[self._cur]
-            self._cur += 1
 
         # initialize renderer
         fx = self._intrinsic_matrix[0, 0]
@@ -215,6 +205,7 @@ class YCBEncoder(data.Dataset, datasets.imdb):
 
         # sample target object (train one object only)
         cls_indexes = []
+        cls_target = 0
         cls_indexes.append(cfg.TRAIN.CLASSES[cls_target]-1)
 
         # sample target pose
@@ -228,7 +219,7 @@ class YCBEncoder(data.Dataset, datasets.imdb):
 
         # use hard pose
         if (sample_index + 1) % cfg.TRAIN.IMS_PER_BATCH == 0:
-            index_euler = np.argmax(self._losses_pose[cls_target, :])
+            index_euler = np.argmax(self._losses_pose)
 
         yaw = self.eulers[index_euler][0] + interval * np.random.randn()
         pitch = self.eulers[index_euler][1] + interval * np.random.randn()
@@ -245,7 +236,7 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         poses_all.append(qt.copy())
         cfg.renderer.set_poses(poses_all)
         cfg.renderer.set_light_pos([0, 0, 0])
-        cfg.renderer.set_light_color([1.0, 1.0, 1.0])
+        cfg.renderer.set_light_color([2.0, 2.0, 2.0])
         cfg.renderer.render(cls_indexes, image_target_tensor, seg_target_tensor)
         image_target_tensor = image_target_tensor.flip(0)
         image_target_tensor = image_target_tensor[:, :, (2, 1, 0)]
@@ -270,16 +261,9 @@ class YCBEncoder(data.Dataset, datasets.imdb):
                         cls_indexes.append(0)
                         poses_all.append(np.zeros((7, ), dtype=np.float32))
 
-                    # ind = np.random.randint(self._num_classes_other, size=1)[0]
-                    # cls_occ = self._classes_other[ind]
-                    # cls_occ = self._classes_other[ind]
-                    # cls_indexes[1] = cls_occ - 1
-
-                    while 1:
-                        ind = np.random.randint(1, self._num_classes_all) - 1
-                        if ind != cls_indexes[0]:
-                            break
-                    cls_indexes[1] = ind
+                    ind = np.random.randint(self._num_classes_other, size=1)[0]
+                    cls_occ = self._classes_other[ind]
+                    cls_indexes[1] = cls_occ - 1
 
                     # sample poses
                     cls = int(cls_indexes[1])
