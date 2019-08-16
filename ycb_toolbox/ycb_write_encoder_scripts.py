@@ -42,7 +42,7 @@ for i in range(len(classes)):
         f.write('export CUDA_VISIBLE_DEVICES=$1\n\n')
         f.write('./tools/test_net.py --gpu $1 \\\n')
         f.write('  --network autoencoder \\\n')
-        f.write('  --pretrained output/ycb_object/ycb_encoder_train/encoder_ycb_object_' + cls + '_epoch_200.checkpoint.pth \\\n')
+        f.write('  --pretrained output/ycb_object/ycb_encoder_train/encoder_ycb_object_' + cls + '_epoch_40.checkpoint.pth \\\n')
         f.write('  --dataset ycb_encoder_test \\\n')
         f.write('  --cfg experiments/cfgs/ycb_encoder_' + cls + '.yml \\\n')
     f.close()
@@ -87,9 +87,9 @@ for i in range(len(classes)):
         f.write('TEST:\n')
         f.write('  SCALES_BASE: !!python/tuple [1.0]\n')
         f.write('  IMS_PER_BATCH: 256\n')
-        f.write('  VISUALIZE: False\n')
+        f.write('  VISUALIZE: True\n')
         f.write('  SYNTHESIZE: True\n')
-        f.write('  BUILD_CODEBOOK: True\n')
+        f.write('  BUILD_CODEBOOK: False\n')
     f.close()
 
     # write docker

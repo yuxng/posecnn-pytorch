@@ -1010,8 +1010,7 @@ def test_autoencoder(test_loader, background_loader, network, output_dir):
     batch_time = AverageMeter()
     epoch_size = len(test_loader)
     enum_background = enumerate(background_loader)
-    cls_index = test_loader.dataset.cls_target
-    cls = test_loader.dataset.classes[cls_index]
+    cls = test_loader.dataset.classes[0]
 
     if cfg.TEST.BUILD_CODEBOOK:
         num = len(test_loader.dataset.eulers)
