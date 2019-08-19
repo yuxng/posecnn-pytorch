@@ -13,7 +13,7 @@ do
     # test
     ./tools/test_net.py --gpu 1 \
          --network autoencoder \
-         --pretrained output/ycb_object/ycb_encoder_train/encoder_ycb_object_"$i"_epoch_200.checkpoint.pth \
+         --pretrained output/ycb_object/ycb_encoder_train/encoder_ycb_object_"$i"_epoch_50.checkpoint.pth \
          --dataset ycb_encoder_test \
          --cfg experiments/cfgs/ycb_encoder_"$i".yml
 

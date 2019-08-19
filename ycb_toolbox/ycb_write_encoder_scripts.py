@@ -4,13 +4,23 @@ import os.path as osp
 classes = ('002_master_chef_can', '003_cracker_box', '004_sugar_box', '005_tomato_soup_can', '006_mustard_bottle', \
            '007_tuna_fish_can', '008_pudding_box', '009_gelatin_box', '010_potted_meat_can', '011_banana', '019_pitcher_base', \
            '021_bleach_cleanser', '024_bowl', '025_mug', '035_power_drill', '036_wood_block', '037_scissors', '040_large_marker', \
-           '051_large_clamp', '052_extra_large_clamp', '061_foam_brick')
+           '051_large_clamp', '052_extra_large_clamp', '061_foam_brick', 'block_red', 'block_green', 'block_blue', 'block_yellow')
+
+classes_all = ('__background__', '002_master_chef_can', '003_cracker_box', '004_sugar_box', '005_tomato_soup_can', '006_mustard_bottle', \
+               '007_tuna_fish_can', '008_pudding_box', '009_gelatin_box', '010_potted_meat_can', '011_banana', '019_pitcher_base', \
+               '021_bleach_cleanser', '024_bowl', '025_mug', '035_power_drill', '036_wood_block', '037_scissors', '040_large_marker', \
+               '051_large_clamp', '052_extra_large_clamp', '061_foam_brick', 'holiday_cup1', 'holiday_cup2', 'sanning_mug', \
+               '001_chips_can', 'block_red', 'block_green', 'block_blue', 'block_yellow')
 
 this_dir = osp.dirname(__file__)
 root_path = osp.join(this_dir, '..')
 
 for i in range(len(classes)):
     cls = classes[i]
+
+    for ind, c in enumerate(classes_all):
+        if c == cls:
+            break
 
     # write training script
     filename = osp.join(root_path, 'experiments', 'scripts', 'ycb_encoder_train_' + cls + '.sh')
@@ -42,7 +52,7 @@ for i in range(len(classes)):
         f.write('export CUDA_VISIBLE_DEVICES=$1\n\n')
         f.write('./tools/test_net.py --gpu $1 \\\n')
         f.write('  --network autoencoder \\\n')
-        f.write('  --pretrained output/ycb_object/ycb_encoder_train/encoder_ycb_object_' + cls + '_epoch_40.checkpoint.pth \\\n')
+        f.write('  --pretrained output/ycb_object/ycb_encoder_train/encoder_ycb_object_' + cls + '_epoch_200.checkpoint.pth \\\n')
         f.write('  --dataset ycb_encoder_test \\\n')
         f.write('  --cfg experiments/cfgs/ycb_encoder_' + cls + '.yml \\\n')
     f.close()
@@ -66,7 +76,7 @@ for i in range(len(classes)):
         f.write('  SCALES_BASE: !!python/tuple [1.0]\n')
         f.write('  IMS_PER_BATCH: 128\n')
         f.write('  NUM_UNITS: 128\n')
-        f.write('  CLASSES: !!python/tuple [' + str(i+1) + ']\n')
+        f.write('  CLASSES: !!python/tuple [' + str(ind) + ']\n')
         f.write('  SNAPSHOT_INFIX: ycb_object_' + cls + '\n')
         f.write('  SNAPSHOT_EPOCHS: 10\n')
         f.write('  SNAPSHOT_PREFIX: encoder\n')

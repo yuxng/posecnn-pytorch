@@ -148,6 +148,10 @@ class AutoEncoder(nn.Module):
         outputs = self.decoder(embeddings)
         return outputs, embeddings
 
+    def encode(self, x):
+        embeddings = self.encoder(x)
+        return embeddings
+
     def run_discriminator(self, x):
         return self.discriminator(x)
 

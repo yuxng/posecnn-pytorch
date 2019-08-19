@@ -1059,7 +1059,10 @@ def test_autoencoder(test_loader, background_loader, network, output_dir):
         inputs = torch.clamp(inputs, min=0.0, max=1.0)
 
         # compute output
-        out_images, embeddings = network(inputs)
+        if cfg.TEST.BUILD_CODEBOOK and not cfg.TEST.VISUALIZE:
+            embeddings = network.module.encode(inputs)
+        else:
+            out_images, embeddings = network(inputs)
 
         im_render = None
         if cfg.TEST.BUILD_CODEBOOK:

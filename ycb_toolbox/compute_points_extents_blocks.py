@@ -5,9 +5,6 @@ import numpy as np
 
 this_dir = osp.dirname(__file__)
 root_path = osp.join(this_dir, '..', 'data', 'YCB_Object')
-#opt = ycb_video()
-
-# classes = opt.classes + ('holiday_cup1', 'holiday_cup2', 'sanning_mug_new', )
 classes = ('block_red', 'block_green', 'block_blue', 'block_yellow')
 
 # extent file
@@ -15,6 +12,12 @@ filename = osp.join(root_path, 'models', 'extents_blocks.txt')
 fext = open(filename, "w")
 
 for i in range(len(classes)):
+
+    # clear model
+    bpy.ops.object.select_all(action='DESELECT')
+    bpy.ops.object.select_pattern(pattern="Camera")
+    bpy.ops.object.select_all(action='INVERT')
+    bpy.ops.object.delete()
 
     cls = classes[i]
     print(cls)
@@ -34,41 +37,22 @@ for i in range(len(classes)):
 
     print(vertices.shape)
 
-    # normalization
-    i = 0
-    m = 0
-    factor = 0.01
-
-    for item in bpy.data.objects:
-        if item.type == 'MESH':
-            for vertex in item.data.vertices:
-                rv = vertex.co
-                vertex.co[0] = vertices[i, 0] * factor
-                vertex.co[1] = vertices[i, 1] * factor
-                vertex.co[2] = vertices[i, 2] * factor
-                i += 1
-       
-    # save model
-    bpy.data.objects[obj_object.name].select = True
-    filename = osp.join(root_path, 'models', cls, 'textured_simple_new.obj')
-    bpy.ops.export_scene.obj(filepath=filename, use_selection=True)
-
-    vertices[:, 0] *= factor
-    vertices[:, 1] -= m
-    vertices[:, 1] *= factor
-    vertices[:, 2] *= factor
-
     # write extent
     extent = 2 * np.max(np.absolute(vertices), axis=0)
     print(extent)
     fext.write('%f %f %f\n' % (extent[0], extent[1], extent[2]))
 
     # write points
-    perm = np.random.permutation(np.arange(vertices.shape[0]))
-    index = perm[:3000]
-    pcloud = vertices[index, :]
+    num = 3000
+    if vertices.shape[0] > num:
+        perm = np.random.permutation(np.arange(vertices.shape[0]))
+        index = perm[:3000]
+        pcloud = vertices[index, :]
+    else:
+        factor = np.ceil(num / vertices.shape[0])
+        pcloud = np.repeat(vertices, factor, axis=0)
 
-    filename = osp.join(root_path, 'models', cls, 'points_new.xyz')
+    filename = osp.join(root_path, 'models', cls, 'points.xyz')
     f = open(filename, "w")
     for i in range(pcloud.shape[0]):
         f.write('%f %f %f\n' % (pcloud[i, 0], pcloud[i, 1], pcloud[i, 2]))
