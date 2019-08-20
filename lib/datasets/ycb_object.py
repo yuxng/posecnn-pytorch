@@ -71,9 +71,18 @@ class YCBObject(data.Dataset, datasets.imdb):
         self._num_classes_other = len(self._classes_other)
 
         # 3D model paths
-        self.model_mesh_paths = ['{}/models/{}/textured_simple.obj'.format(self._ycb_object_path, cls) for cls in self._classes_all[1:]]
         self.model_sdf_paths = ['{}/models/{}/textured_simple_low_res.pth'.format(self._ycb_object_path, cls) for cls in self._classes_all[1:22]]
         self.model_colors = [np.array(self._class_colors_all[i]) / 255.0 for i in range(1, len(self._classes_all))]
+
+        self.model_mesh_paths = []
+        for cls in self._classes_all[1:]:
+            filename = '{}/models/{}/textured_simple.obj'.format(self._ycb_object_path, cls)
+            if osp.exists(filename):
+                self.model_mesh_paths.append(filename)
+                continue
+            filename = '{}/models/{}/textured_simple.ply'.format(self._ycb_object_path, cls)
+            if osp.exists(filename):
+                self.model_mesh_paths.append(filename)
 
         self.model_texture_paths = []
         for cls in self._classes_all[1:]:
@@ -83,8 +92,17 @@ class YCBObject(data.Dataset, datasets.imdb):
             else:
                 self.model_texture_paths.append('')
 
-        self.model_mesh_paths_target = ['{}/models/{}/textured_simple.obj'.format(self._ycb_object_path, cls) for cls in self._classes[1:]]
+        # target meshes
         self.model_colors_target = [np.array(self._class_colors_all[i]) / 255.0 for i in cfg.TRAIN.CLASSES[1:]]
+        self.model_mesh_paths_target = []
+        for cls in self._classes[1:]:
+            filename = '{}/models/{}/textured_simple.obj'.format(self._ycb_object_path, cls)
+            if osp.exists(filename):
+                self.model_mesh_paths_target.append(filename)
+                continue
+            filename = '{}/models/{}/textured_simple.ply'.format(self._ycb_object_path, cls)
+            if osp.exists(filename):
+                self.model_mesh_paths_target.append(filename)
 
         self.model_texture_paths_target = []
         for cls in self._classes[1:]:
