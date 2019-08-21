@@ -26,7 +26,7 @@ class PoseRBPF:
             cls = dataset._classes_all[ind]
 
             # load autoencoder
-            filename = os.path.join('data', 'checkpoints', 'encoder_ycb_object_' + cls + '_epoch_180.checkpoint.pth')
+            filename = os.path.join('data', 'checkpoints', 'encoder_ycb_object_' + cls + '_epoch_200.checkpoint.pth')
             if os.path.exists(filename):
                 autoencoder_data = torch.load(filename)
                 autoencoders[i] = networks.__dict__['autoencoder'](1, 128, autoencoder_data).cuda(device=cfg.device)
@@ -109,6 +109,32 @@ class PoseRBPF:
             else:
                 cls_render = cls_id
             im_render = self.render_image(self.dataset, cls_render, pose)
+
+            '''
+            for i in range(0, out_images.shape[0], 10):            
+                import matplotlib.pyplot as plt
+                fig = plt.figure()
+                im_input = in_images[i]
+                im = im_input.cpu().detach().numpy()
+                im = np.clip(im, 0, 1)
+                im = im.transpose((1, 2, 0)) * 255.0
+                im = im [:, :, (2, 1, 0)]
+                im = im.astype(np.uint8)
+                ax = fig.add_subplot(1, 2, 1)
+                plt.imshow(im)
+                ax.set_title('input roi')
+                im_output = out_images[i]
+                im = im_output.cpu().detach().numpy()
+                im = np.clip(im, 0, 1)
+                im = im.transpose((1, 2, 0)) * 255.0
+                im = im [:, :, (2, 1, 0)]
+                im = im.astype(np.uint8)
+                ax = fig.add_subplot(1, 2, 2)
+                plt.imshow(im)
+                ax.set_title('reconstruction')
+                plt.show()
+            #'''
+
             self.visualize(image, im_render, out_images[index_star[0]], in_images[index_star[0]], box_center, box_size)
 
         return pose

@@ -476,6 +476,7 @@ def test(test_loader, background_loader, network, pose_rbpf, output_dir):
                 out_pose = out_pose.detach().cpu().numpy()
                 poses = out_pose.copy()
                 poses_refined = []
+                pose_scores = []
 
                 # non-maximum suppression within class
                 index = nms(rois, 0.5)
@@ -487,18 +488,17 @@ def test(test_loader, background_loader, network, pose_rbpf, output_dir):
                     rois, poses, im_rgb = test_pose_rbpf(pose_rbpf, inputs, rois, poses, sample['meta_data'], test_loader.dataset)
 
                 # optimize depths
+                im_depth = sample['im_depth'].numpy()[0]
                 if cfg.TEST.POSE_REFINE:
                     labels_out = out_label.detach().cpu().numpy()[0]
-                    im_depth = sample['im_depth'].numpy()[0]
                     poses, poses_refined = refine_pose(labels_out, im_depth, rois, poses, test_loader.dataset)
+                    if pose_rbpf is not None:
+                        sims, depth_errors, vis_ratios, pose_scores = eval_poses(pose_rbpf, poses_refined, rois, im_rgb, im_depth, sample['meta_data'])
                 else:
                     num = rois.shape[0]
                     for j in range(num):
                         poses[j, 4] *= poses[j, 6] 
                         poses[j, 5] *= poses[j, 6]
-
-                if pose_rbpf is not None:
-                    sims, depth_errors, vis_ratios, pose_scores = eval_poses(pose_rbpf, poses_refined, rois, im_rgb, im_depth, sample['meta_data'])
 
         elif cfg.TRAIN.VERTEX_REG_DELTA:
 

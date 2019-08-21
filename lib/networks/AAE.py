@@ -56,7 +56,8 @@ class Encoder(nn.Module):
         out = self.conv3(out)
         out = self.conv4(out)
         out = out.view(-1, 512 * 8 * 8)
-        embedding = self.fc1(out)
+        out = self.fc1(out)
+        embedding = nn.functional.normalize(out)
 
         return embedding
 

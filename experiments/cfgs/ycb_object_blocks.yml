@@ -27,7 +27,7 @@ TRAIN:
   USE_FLIPPED: False
   CHROMATIC: True
   ADD_NOISE: True
-  VISUALIZE: False
+  VISUALIZE: True
   VERTEX_REG: True
   POSE_REG: False       # no rotation regression
   SLIM: True
@@ -54,8 +54,7 @@ TEST:
   HOUGH_SKIP_PIXELS: 10
   DET_THRESHOLD: 0.1
   SCALES_BASE: !!python/tuple [1.0]
-  VISUALIZE: True
+  VISUALIZE: False
   SYNTHESIZE: True
-  POSE_REFINE: True
+  POSE_REFINE: False
   ROS_CAMERA: D435
-  CLASSES: !!python/tuple [6]
