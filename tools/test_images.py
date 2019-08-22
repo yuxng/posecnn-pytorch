@@ -21,6 +21,7 @@ import os.path as osp
 import numpy as np
 import cv2
 import scipy.io
+import glob
 
 import _init_paths
 from fcn.train_test import test_image
@@ -29,6 +30,8 @@ from datasets.factory import get_dataset
 import networks
 from ycb_renderer import YCBRenderer
 from utils.blob import pad_im
+from fcn.pose_rbpf import PoseRBPF
+from sdf.sdf_optimizer import sdf_optimizer
 
 def parse_args():
     """
@@ -81,6 +84,8 @@ if __name__ == '__main__':
     if args.cfg_file is not None:
         cfg_from_file(args.cfg_file)
 
+    if len(cfg.TEST.CLASSES) == 0:
+        cfg.TEST.CLASSES = cfg.TRAIN.CLASSES
     print('Using config:')
     pprint.pprint(cfg)
 
@@ -91,22 +96,32 @@ if __name__ == '__main__':
     # device
     cfg.device = torch.device('cuda:{:d}'.format(args.gpu_id))
     cfg.gpu_id = args.gpu_id
-    print 'GPU device {:d}'.format(args.gpu_id)
+    print('GPU device {:d}'.format(args.gpu_id))
 
     # dataset
     cfg.MODE = 'TEST'
     dataset = get_dataset(args.dataset_name)
 
+    # overwrite intrinsics
+    if len(cfg.INTRINSICS) > 0:
+        K = np.array(cfg.INTRINSICS).reshape(3, 3)
+        dataset._intrinsic_matrix = K
+        print(dataset._intrinsic_matrix)
+
     # list images
-    images = []
-    files = os.listdir(args.imgdir)
+    images_color = []
+    images_depth = []
+    filename = os.path.join(args.imgdir, '*color.png')
+    files = glob.glob(filename)
     for i in range(len(files)):
-        filename = os.path.join(args.imgdir, files[i])
-        images.append(filename)
+        filename = files[i]
+        images_color.append(filename)
+        images_depth.append(filename.replace('color', 'depth'))
 
     if cfg.TEST.VISUALIZE:
-        images = np.random.permutation(images)
+        index_images = np.random.permutation(len(images_color))
     else:
+        index_images = np.range(len(images_color))
         resdir = args.imgdir + '_posecnn_results'
         if not os.path.exists(resdir):
             os.makedirs(resdir)
@@ -125,24 +140,47 @@ if __name__ == '__main__':
     cudnn.benchmark = True
     network.eval()
 
-    cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, gpu_id=cfg.gpu_id, render_marker=False)
-    cfg.renderer.load_objects(dataset.model_mesh_paths_target,
-                              dataset.model_texture_paths_target,
-                              dataset.model_colors_target)
+    #'''
+    print('loading 3D models')
+    cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, gpu_id=args.gpu_id, render_marker=False)
+    if cfg.TEST.SYNTHESIZE:
+        cfg.renderer.load_objects(dataset.model_mesh_paths, dataset.model_texture_paths, dataset.model_colors)
+    else:
+        model_mesh_paths = [dataset.model_mesh_paths[i-1] for i in cfg.TEST.CLASSES]
+        model_texture_paths = [dataset.model_texture_paths[i-1] for i in cfg.TEST.CLASSES]
+        model_colors = [dataset.model_colors[i-1] for i in cfg.TEST.CLASSES]
+        cfg.renderer.load_objects(model_mesh_paths, model_texture_paths, model_colors)
     cfg.renderer.set_camera_default()
-    cfg.renderer.set_light_pos([0, 0, 0])
-    cfg.renderer.set_light_color([1, 1, 1])
+    print(dataset.model_mesh_paths)
+    #'''
+
+    # load sdfs
+    if cfg.TEST.POSE_REFINE:
+        print('loading SDFs')
+        cfg.sdf_optimizers = []
+        for i in cfg.TEST.CLASSES:
+            cfg.sdf_optimizers.append(sdf_optimizer(dataset.model_sdf_paths[i-1]))
+
+    # prepare autoencoder and codebook
+    if cfg.TRAIN.VERTEX_REG:
+        pose_rbpf = PoseRBPF(dataset)
+    else:
+        pose_rbpf = None
 
     # run network
-    for i in range(len(images)):
-        im = pad_im(cv2.imread(images[i], cv2.IMREAD_COLOR), 16)
-        depth = None
-        im_pose, labels, rois, poses = test_image(network, dataset, im, depth)
+    for i in index_images:
+        im = pad_im(cv2.imread(images_color[i], cv2.IMREAD_COLOR), 16)
+        if osp.exists(images_depth[i]):
+            depth = pad_im(cv2.imread(images_depth[i], cv2.IMREAD_UNCHANGED), 16)
+            depth = depth.astype('float') / 1000.0
+        else:
+            depth = None
+        im_pose, labels, rois, poses = test_image(network, pose_rbpf, dataset, im, depth)
 
         # save result
         if not cfg.TEST.VISUALIZE:
             result = {'labels': labels, 'rois': rois, 'poses': poses, 'intrinsic_matrix': dataset._intrinsic_matrix}
-            head, tail = os.path.split(images[i])
+            head, tail = os.path.split(images_color[i])
             filename = os.path.join(resdir, tail + '.mat')
-            print(images[i], filename)
+            print(images_color[i], filename)
             scipy.io.savemat(filename, result, do_compression=True)

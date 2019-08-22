@@ -110,7 +110,7 @@ class PoseRBPF:
                 cls_render = cls_id
             im_render = self.render_image(self.dataset, cls_render, pose)
 
-            #'''
+            '''
             for i in range(0, out_images.shape[0], 10):            
                 import matplotlib.pyplot as plt
                 fig = plt.figure()

@@ -668,7 +668,7 @@ def test_image_simple(network, dataset, im_color, im_depth=None):
     return rois, labels, poses, im_label
 
 
-def test_image(network, dataset, im_color, im_depth=None):
+def test_image(network, pose_rbpf, dataset, im_color, im_depth=None):
     """test on a single image"""
 
     # compute image blob
@@ -678,6 +678,14 @@ def test_image(network, dataset, im_color, im_depth=None):
     width = im.shape[1]
     im = np.transpose(im / 255.0, (2, 0, 1))
     im = im[np.newaxis, :, :, :]
+
+    K = dataset._intrinsic_matrix
+    K[2, 2] = 1
+    Kinv = np.linalg.pinv(K)
+    meta_data = np.zeros((1, 18), dtype=np.float32)
+    meta_data[0, 0:9] = K.flatten()
+    meta_data[0, 9:18] = Kinv.flatten()
+    meta_data = torch.from_numpy(meta_data).cuda()
 
     if cfg.INPUT == 'DEPTH' or cfg.INPUT == 'RGBD':
         im_xyz = dataset.backproject(im_depth, dataset._intrinsic_matrix, 1.0)
@@ -701,7 +709,7 @@ def test_image(network, dataset, im_color, im_depth=None):
     if cfg.TRAIN.VERTEX_REG:
 
         if cfg.TRAIN.POSE_REG:
-            out_label, out_vertex, rois, out_pose, out_quaternion = network(inputs, dataset.input_labels, dataset.input_meta_data, \
+            out_label, out_vertex, rois, out_pose, out_quaternion = network(inputs, dataset.input_labels, meta_data, \
                 dataset.input_extents, dataset.input_gt_boxes, dataset.input_poses, dataset.input_points, dataset.input_symmetry)
             labels = out_label.detach().cpu().numpy()[0]
 
@@ -737,7 +745,7 @@ def test_image(network, dataset, im_color, im_depth=None):
                 poses_tmp, poses = optimize_depths(rois, poses, dataset._points_all, dataset._intrinsic_matrix)
 
         else:
-            out_label, out_vertex, rois, out_pose = network(inputs, dataset.input_labels, dataset.input_meta_data, \
+            out_label, out_vertex, rois, out_pose = network(inputs, dataset.input_labels, meta_data, \
                 dataset.input_extents, dataset.input_gt_boxes, dataset.input_poses, dataset.input_points, dataset.input_symmetry)
 
             labels = out_label.detach().cpu().numpy()[0]
@@ -750,16 +758,29 @@ def test_image(network, dataset, im_color, im_depth=None):
             index = np.where(rois[:, -1] > cfg.TEST.DET_THRESHOLD)[0]
             rois = rois[index, :]
             poses = poses[index, :]
+            poses_refined = []
+            pose_scores = []
 
             # non-maximum suppression within class
             index = nms(rois, 0.5)
             rois = rois[index, :]
             poses = poses[index, :]
 
-            num = rois.shape[0]
-            for i in range(num):
-                poses[i, 4] *= poses[i, 6] 
-                poses[i, 5] *= poses[i, 6]
+            # run poseRBPF for codebook matching to compute the rotations
+            if pose_rbpf is not None:
+                rois, poses, im_rgb = test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset)
+
+            # optimize depths
+            if cfg.TEST.POSE_REFINE and im_depth is not None:
+                labels_out = out_label.detach().cpu().numpy()[0]
+                poses, poses_refined = refine_pose(labels_out, im_depth, rois, poses, dataset)
+                if pose_rbpf is not None:
+                    sims, depth_errors, vis_ratios, pose_scores = eval_poses(pose_rbpf, poses_refined, rois, im_rgb, im_depth, meta_data)
+            else:
+                num = rois.shape[0]
+                for j in range(num):
+                    poses[j, 4] *= poses[j, 6] 
+                    poses[j, 5] *= poses[j, 6]
 
     elif cfg.TRAIN.VERTEX_REG_DELTA:
         out_label, out_vertex = network(inputs, dataset.input_labels, dataset.input_meta_data, \
@@ -790,10 +811,13 @@ def test_image(network, dataset, im_color, im_depth=None):
         rois = np.zeros((0, 7), dtype=np.float32)
         poses = np.zeros((0, 7), dtype=np.float32)
 
-    im_pose, im_label = render_image(dataset, im_color, rois, poses, labels)
+    if cfg.TEST.POSE_REFINE and im_depth is not None:
+        im_pose, im_label = render_image(dataset, im_color, rois, poses_refined, labels)
+    else:
+        im_pose, im_label = render_image(dataset, im_color, rois, poses, labels)
 
     if cfg.TEST.VISUALIZE:
-        vis_test(dataset, im, labels, out_vertex, rois, poses, im_pose)
+        vis_test(dataset, im, labels, out_vertex, rois, poses, poses_refined, im_pose)
 
     return im_pose, im_label, rois, poses
 
@@ -1322,8 +1346,8 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
                 poses_refined[i, :4] = mat2quat(RT_opt[:3, :3])
                 poses_refined[i, 4:] = RT_opt[:3, 3]
 
-                if 0:
-                # if cfg.TEST.VISUALIZE:
+                # if 0:
+                if cfg.TEST.VISUALIZE:
                     import matplotlib.pyplot as plt
                     fig = plt.figure()
                     ax = fig.add_subplot(2, 2, 1, projection='3d')
@@ -1437,15 +1461,14 @@ def render_image(dataset, im, rois, poses, labels):
         if cls_index < 0:
             continue
 
-        if cfg.TRAIN.POSE_REG:
-            cls_indexes.append(cls_index)
-            qt = np.zeros((7, ), dtype=np.float32)
-            qt[:3] = poses[i, 4:7]
-            qt[3:] = poses[i, :4]
-            poses_all.append(qt)
+        cls_indexes.append(cls_index)
+        qt = np.zeros((7, ), dtype=np.float32)
+        qt[:3] = poses[i, 4:7]
+        qt[3:] = poses[i, :4]
+        poses_all.append(qt)
 
         cls = int(rois[i, 1])
-        print(classes[cls], rois[i, -1])
+        print(classes[cls], rois[i, -1], cls_index)
         if cls > 0 and rois[i, -1] > cfg.TEST.DET_THRESHOLD:
             # draw roi
             x1 = rois[i, 2]
@@ -1455,7 +1478,7 @@ def render_image(dataset, im, rois, poses, labels):
             cv2.rectangle(im_label, (x1, y1), (x2, y2), class_colors[cls], 2)
 
     # rendering
-    if len(cls_indexes) > 0 and cfg.TRAIN.POSE_REG:
+    if len(cls_indexes) > 0:
 
         height = im.shape[0]
         width = im.shape[1]
@@ -2084,7 +2107,7 @@ def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, poses_refined,
 
 
 
-def vis_test(dataset, im, label, out_vertex, rois, poses, im_pose):
+def vis_test(dataset, im, label, out_vertex, rois, poses, poses_refined, im_pose):
 
     """Visualize a testing results."""
     import matplotlib.pyplot as plt

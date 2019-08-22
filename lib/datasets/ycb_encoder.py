@@ -199,7 +199,8 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         if os.path.exists(cache_file):
             with open(cache_file, 'rb') as fid:
                 render_depths = cPickle.load(fid)
-            print '{} render_depths loaded from {}'.format(self.name, cache_file)
+            print('{} render_depths loaded from {}'.format(self.name, cache_file))
+            print(render_depths)
             return render_depths
 
         print('computing canonical depths')

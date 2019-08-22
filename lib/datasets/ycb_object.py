@@ -71,7 +71,7 @@ class YCBObject(data.Dataset, datasets.imdb):
         self._num_classes_other = len(self._classes_other)
 
         # 3D model paths
-        self.model_sdf_paths = ['{}/models/{}/textured_simple_low_res.pth'.format(self._ycb_object_path, cls) for cls in self._classes_all[1:22]]
+        self.model_sdf_paths = ['{}/models/{}/textured_simple_low_res.pth'.format(self._ycb_object_path, cls) for cls in self._classes_all[1:]]
         self.model_colors = [np.array(self._class_colors_all[i]) / 255.0 for i in range(1, len(self._classes_all))]
 
         self.model_mesh_paths = []
