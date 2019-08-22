@@ -288,45 +288,40 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         if cfg.MODE == 'TRAIN' or cfg.TEST.BUILD_CODEBOOK == False:
 
             while 1:
-                # sample an occluder
+                # sample occluders
                 if np.random.rand(1) < 0.8:
+                    num_occluder = 3
 
                     if len(cls_indexes) == 1:
-                        cls_indexes.append(0)
-                        poses_all.append(np.zeros((7, ), dtype=np.float32))
+                        for i in range(num_occluder):
+                            cls_indexes.append(0)
+                            poses_all.append(np.zeros((7, ), dtype=np.float32))
 
-                    ind = np.random.randint(self._num_classes_other, size=1)[0]
-                    cls_occ = self._classes_other[ind]
-                    cls_indexes[1] = cls_occ - 1
+                    for i in range(num_occluder):
+                        ind = np.random.randint(self._num_classes_other, size=1)[0]
+                        cls_occ = self._classes_other[ind]
+                        cls_indexes[i + 1] = cls_occ - 1
 
-                    # sample poses
-                    cls = int(cls_indexes[1])
-                    if self.pose_indexes[cls] >= len(self.pose_lists[cls]):
-                        self.pose_indexes[cls] = 0
-                        self.pose_lists[cls] = np.random.permutation(np.arange(len(self.eulers)))
-                    yaw = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][0] + 5 * np.random.randn()
-                    pitch = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][1] + 5 * np.random.randn()
-                    roll = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][2] + 5 * np.random.randn()
-                    qt[3:] = euler2quat(roll * math.pi / 180.0, pitch * math.pi / 180.0, yaw * math.pi / 180.0, 'syxz')
-                    self.pose_indexes[cls] += 1
+                        # sample poses
+                        cls = int(cls_indexes[i + 1])
+                        if self.pose_indexes[cls] >= len(self.pose_lists[cls]):
+                            self.pose_indexes[cls] = 0
+                            self.pose_lists[cls] = np.random.permutation(np.arange(len(self.eulers)))
+                        yaw = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][0] + 5 * np.random.randn()
+                        pitch = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][1] + 5 * np.random.randn()
+                        roll = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][2] + 5 * np.random.randn()
+                        qt[3:] = euler2quat(roll * math.pi / 180.0, pitch * math.pi / 180.0, yaw * math.pi / 180.0, 'syxz')
+                        self.pose_indexes[cls] += 1
 
-                    # translation, sample an object nearby
-                    object_id = 0
-                    extent = np.maximum(np.mean(self._extents_all[cls+1, :]), extent_target)
+                        # translation, sample an object nearby
+                        object_id = 0
+                        extent = np.mean(self._extents_all[cls+1, :])
+                        qt[0] = poses_all[object_id][0] + np.random.uniform(-0.1, 0.1)
+                        qt[1] = poses_all[object_id][1] + np.random.uniform(-0.1, 0.1)
+                        qt[2] = poses_all[object_id][2] - np.random.uniform(extent, extent+0.2)
 
-                    flag = np.random.randint(0, 2)
-                    if flag == 0:
-                        flag = -1
-                    qt[0] = poses_all[object_id][0] + flag * extent * np.random.uniform(0.25, 0.5)
-
-                    flag = np.random.randint(0, 2)
-                    if flag == 0:
-                        flag = -1
-                    qt[1] = poses_all[object_id][1] + flag * extent * np.random.uniform(0.25, 0.5)
-
-                    qt[2] = poses_all[object_id][2] - extent * np.random.uniform(1.0, 2.0)
-                    poses_all[1] = qt
-                    cfg.renderer.set_poses(poses_all)
+                        poses_all[i + 1] = qt.copy()
+                        cfg.renderer.set_poses(poses_all)
 
                 # rendering
                 # light pose
@@ -351,6 +346,9 @@ class YCBEncoder(data.Dataset, datasets.imdb):
 
                 if occluded_ratio < 0.8:
                     break
+                else:
+                    cls_indexes = cls_indexes[:1]
+                    poses_all = poses_all[:1]
 
             # foreground mask
             mask = (seg != 0).unsqueeze(0).repeat((3, 1, 1)).float()

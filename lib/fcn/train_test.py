@@ -848,6 +848,21 @@ def train_autoencoder(train_loader, background_loader, network, optimizer, optim
         inputs = mask * image + (1 - mask) * background_color[:num]
         inputs = torch.clamp(inputs, min=0.0, max=1.0)
 
+        # add truncation
+        if np.random.uniform(0, 1) < 0.1:
+            affine_mat_trunc = torch.zeros(inputs.size(0), 2, 3).float().cuda()
+            affine_mat_trunc[:, 0, 2] = torch.from_numpy(np.random.uniform(-1, 1, size=(inputs.size(0),))).cuda()
+            affine_mat_trunc[:, 1, 2] = torch.from_numpy(np.random.uniform(-1, 1, size=(inputs.size(0),))).cuda()
+            affine_mat_trunc[:, 0, 0] = 1
+            affine_mat_trunc[:, 1, 1] = 1
+            aff_grid_trunc = nn.functional.affine_grid(affine_mat_trunc, inputs.size()).cuda()
+            inputs = nn.functional.grid_sample(inputs, aff_grid_trunc)
+
+            affine_mat_trunc[:, 0, 2] *= -1
+            affine_mat_trunc[:, 1, 2] *= -1
+            aff_grid_trunc = nn.functional.affine_grid(affine_mat_trunc, inputs.size()).cuda()
+            inputs = nn.functional.grid_sample(inputs, aff_grid_trunc)
+
         # run generator
         out_images, embeddings = network(inputs)
 

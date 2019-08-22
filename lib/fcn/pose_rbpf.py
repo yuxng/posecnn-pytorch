@@ -26,7 +26,7 @@ class PoseRBPF:
             cls = dataset._classes_all[ind]
 
             # load autoencoder
-            filename = os.path.join('data', 'checkpoints', 'encoder_ycb_object_' + cls + '_epoch_20.checkpoint.pth')
+            filename = os.path.join('data', 'checkpoints', 'encoder_ycb_object_' + cls + '_epoch_30.checkpoint.pth')
             if os.path.exists(filename):
                 autoencoder_data = torch.load(filename)
                 autoencoders[i] = networks.__dict__['autoencoder'](1, 128, autoencoder_data).cuda(device=cfg.device)
@@ -110,7 +110,7 @@ class PoseRBPF:
                 cls_render = cls_id
             im_render = self.render_image(self.dataset, cls_render, pose)
 
-            '''
+            #'''
             for i in range(0, out_images.shape[0], 10):            
                 import matplotlib.pyplot as plt
                 fig = plt.figure()
