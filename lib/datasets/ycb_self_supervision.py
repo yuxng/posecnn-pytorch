@@ -52,12 +52,13 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
                          '007_tuna_fish_can', '008_pudding_box', '009_gelatin_box', '010_potted_meat_can', '011_banana', '019_pitcher_base', \
                          '021_bleach_cleanser', '024_bowl', '025_mug', '035_power_drill', '036_wood_block', '037_scissors', '040_large_marker', \
                          '051_large_clamp', '052_extra_large_clamp', '061_foam_brick', 'holiday_cup1', 'holiday_cup2', 'sanning_mug', \
-                         '001_chips_can')
+                         '001_chips_can', 'block_red', 'block_green', 'block_blue', 'block_yellow')
         self._num_classes_all = len(self._classes_all)
         self._class_colors_all = [(255, 255, 255), (255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (255, 0, 255), (0, 255, 255), \
                               (0, 0, 128), (0, 128, 0), (128, 0, 0), (128, 128, 0), (128, 0, 128), (0, 128, 128), \
                               (0, 64, 0), (64, 0, 0), (0, 0, 64), (64, 64, 0), (64, 0, 64), (0, 64, 64), \
-                              (192, 0, 0), (0, 192, 0), (0, 0, 192), (192, 192, 0), (192, 0, 192), (0, 192, 192), (32, 0, 0)]
+                              (192, 0, 0), (0, 192, 0), (0, 0, 192), (192, 192, 0), (192, 0, 192), (0, 192, 192), (32, 0, 0), \
+                              (150, 0, 0), (0, 150, 0), (0, 0, 150), (150, 150, 0)]
         self._extents_all = self._load_object_extents()
 
         self._width = 640
@@ -87,15 +88,46 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
         self._num_classes_other = len(self._classes_other)
 
         # 3D model paths
-        self.model_mesh_paths = ['{}/models/{}/textured_simple.obj'.format(self._ycb_self_supervision_path, cls) for cls in self._classes_all[1:]]
         self.model_sdf_paths = ['{}/models/{}/textured_simple_low_res.pth'.format(self._ycb_self_supervision_path, cls) for cls in self._classes_all[1:]]
-        self.model_texture_paths = ['{}/models/{}/texture_map.png'.format(self._ycb_self_supervision_path, cls) for cls in self._classes_all[1:]]
         self.model_colors = [np.array(self._class_colors_all[i]) / 255.0 for i in range(1, len(self._classes_all))]
 
-        self.model_mesh_paths_target = ['{}/models/{}/textured_simple.obj'.format(self._ycb_self_supervision_path, cls) for cls in self._classes[1:]]
-        self.model_sdf_paths_target = ['{}/models/{}/textured_simple.sdf'.format(self._ycb_self_supervision_path, cls) for cls in self._classes[1:]]
-        self.model_texture_paths_target = ['{}/models/{}/texture_map.png'.format(self._ycb_self_supervision_path, cls) for cls in self._classes[1:]]
+        self.model_mesh_paths = []
+        for cls in self._classes_all[1:]:
+            filename = '{}/models/{}/textured_simple.obj'.format(self._ycb_self_supervision_path, cls)
+            if osp.exists(filename):
+                self.model_mesh_paths.append(filename)
+                continue
+            filename = '{}/models/{}/textured_simple.ply'.format(self._ycb_self_supervision_path, cls)
+            if osp.exists(filename):
+                self.model_mesh_paths.append(filename)
+
+        self.model_texture_paths = []
+        for cls in self._classes_all[1:]:
+            filename = '{}/models/{}/texture_map.png'.format(self._ycb_self_supervision_path, cls)
+            if osp.exists(filename):
+                self.model_texture_paths.append(filename)
+            else:
+                self.model_texture_paths.append('')
+
+        # target meshes
         self.model_colors_target = [np.array(self._class_colors_all[i]) / 255.0 for i in cfg.TRAIN.CLASSES[1:]]
+        self.model_mesh_paths_target = []
+        for cls in self._classes[1:]:
+            filename = '{}/models/{}/textured_simple.obj'.format(self._ycb_self_supervision_path, cls)
+            if osp.exists(filename):
+                self.model_mesh_paths_target.append(filename)
+                continue
+            filename = '{}/models/{}/textured_simple.ply'.format(self._ycb_self_supervision_path, cls)
+            if osp.exists(filename):
+                self.model_mesh_paths_target.append(filename)
+
+        self.model_texture_paths_target = []
+        for cls in self._classes[1:]:
+            filename = '{}/models/{}/texture_map.png'.format(self._ycb_self_supervision_path, cls)
+            if osp.exists(filename):
+                self.model_texture_paths_target.append(filename)
+            else:
+                self.model_texture_paths_target.append('')
 
         self._class_to_ind = dict(zip(self._classes, xrange(self._num_classes)))
         self._image_ext = '.png'
