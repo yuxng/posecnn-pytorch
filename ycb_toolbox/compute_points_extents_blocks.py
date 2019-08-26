@@ -5,10 +5,10 @@ import numpy as np
 
 this_dir = osp.dirname(__file__)
 root_path = osp.join(this_dir, '..', 'data', 'YCB_Object')
-classes = ('block_red', 'block_green', 'block_blue', 'block_yellow')
+classes = ('block_red_small', 'block_green_small', 'block_blue_small', 'block_yellow_small')
 
 # extent file
-filename = osp.join(root_path, 'models', 'extents_blocks.txt')
+filename = osp.join(root_path, 'models', 'extents_blocks_small.txt')
 fext = open(filename, "w")
 
 for i in range(len(classes)):

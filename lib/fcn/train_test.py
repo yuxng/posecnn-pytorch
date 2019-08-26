@@ -740,7 +740,7 @@ def test_image(network, pose_rbpf, dataset, im_color, im_depth=None):
            
             # optimize depths
             if cfg.TEST.POSE_REFINE and im_depth is not None:
-                poses = refine_pose(labels, im_depth, rois, poses, dataset)
+                poses = refine_pose(im_color, labels, im_depth, rois, poses, dataset)
             else:
                 poses_tmp, poses = optimize_depths(rois, poses, dataset._points_all, dataset._intrinsic_matrix)
 
@@ -773,7 +773,7 @@ def test_image(network, pose_rbpf, dataset, im_color, im_depth=None):
             # optimize depths
             if cfg.TEST.POSE_REFINE and im_depth is not None:
                 labels_out = out_label.detach().cpu().numpy()[0]
-                poses, poses_refined = refine_pose(labels_out, im_depth, rois, poses, dataset)
+                poses, poses_refined, cls_render_ids = refine_pose(im_color, labels_out, im_depth, rois, poses, dataset)
                 if pose_rbpf is not None:
                     sims, depth_errors, vis_ratios, pose_scores = eval_poses(pose_rbpf, poses_refined, rois, im_rgb, im_depth, meta_data)
             else:
@@ -812,12 +812,12 @@ def test_image(network, pose_rbpf, dataset, im_color, im_depth=None):
         poses = np.zeros((0, 7), dtype=np.float32)
 
     if cfg.TEST.POSE_REFINE and im_depth is not None:
-        im_pose, im_label = render_image(dataset, im_color, rois, poses_refined, labels)
+        im_pose, im_label = render_image(dataset, im_color, rois, poses_refined, labels, cls_render_ids)
     else:
         im_pose, im_label = render_image(dataset, im_color, rois, poses, labels)
 
     if cfg.TEST.VISUALIZE:
-        vis_test(dataset, im, labels, out_vertex, rois, poses, poses_refined, im_pose)
+        vis_test(dataset, im, im_depth, labels, out_vertex, rois, poses, poses_refined, im_pose)
 
     return im_pose, im_label, rois, poses
 
@@ -1227,7 +1227,7 @@ def backproject(depth_cv, intrinsic_matrix):
     return np.array(X).transpose()
 
 
-def refine_pose(im_label, im_depth, rois, poses, dataset):
+def refine_pose(im_color, im_label, im_depth, rois, poses, dataset):
 
     # backprojection
     intrinsic_matrix = dataset._intrinsic_matrix
@@ -1254,6 +1254,7 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
     pcloud_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
 
     # refine pose
+    cls_render_ids = []
     for i in range(num):
         cls_indexes = []
         cls = int(rois[i, 1])
@@ -1297,6 +1298,7 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
 
         if len(index) > 10:
             T = np.mean(dpoints[index, :] - pcloud[index, :], axis=0)
+            print(T)
             poses_refined[i, 6] += T[2]
             poses_refined[i, 4] *= poses_refined[i, 6]
             poses_refined[i, 5] *= poses_refined[i, 6]
@@ -1307,6 +1309,17 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
 
         poses[i, 4] *= poses[i, 6]
         poses[i, 5] *= poses[i, 6]
+
+        # check if object with different size
+        if T[2] < -0.1:
+           cls_name = dataset._classes_all[cfg.TEST.CLASSES[cls_render]] + '_small'
+           for j in range(len(dataset._classes_all)):
+               if cls_name == dataset._classes_all[j]:
+                   print(j, 'small object ' + cls_name)
+                   cls_render = cfg.TEST.CLASSES.index(j)
+                   break
+
+        cls_render_ids.append(cls_render)
 
         # run SDF optimization
         if len(index) > 10:
@@ -1372,7 +1385,8 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
                     ax.set_zlim(sdf_optim.zmin, sdf_optim.zmax)
 
                     ax = fig.add_subplot(2, 2, 2)
-                    plt.imshow(mask_label)
+                    label_image = dataset.labels_to_image(np.multiply(im_label, mask_label))
+                    plt.imshow(label_image)
                     ax.set_title('mask label')
 
                     # ax = fig.add_subplot(3, 3, 3)
@@ -1388,8 +1402,8 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
                     # ax.set_title('mask_depth_vis')
 
                     ax = fig.add_subplot(2, 2, 3)
-                    plt.imshow(mask)
-                    ax.set_title('mask')
+                    plt.imshow(im_color[:, :, (2, 1, 0)])
+                    ax.set_title('color input')
 
                     ax = fig.add_subplot(2, 2, 4)
                     plt.imshow(depth_meas_roi)
@@ -1401,7 +1415,7 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
 
                     plt.show()
 
-    return poses, poses_refined
+    return poses, poses_refined, cls_render_ids
 
 
 # only render rois and segmentation masks
@@ -1438,7 +1452,7 @@ def render_image_detection(dataset, im, rois, labels):
     return im_label
 
 
-def render_image(dataset, im, rois, poses, labels):
+def render_image(dataset, im, rois, poses, labels, cls_render_ids=None):
 
     # label image
     label_image = dataset.labels_to_image(labels)
@@ -1453,10 +1467,13 @@ def render_image(dataset, im, rois, poses, labels):
     cls_indexes = []
     poses_all = []
     for i in range(num):
-        if cfg.MODE == 'TEST':
-            cls_index = int(rois[i, 1]) - 1
+        if cls_render_ids is not None:
+            cls_index = cls_render_ids[i]
         else:
-            cls_index = cfg.TRAIN.CLASSES[int(rois[i, 1])] - 1
+            if cfg.MODE == 'TEST':
+                cls_index = int(rois[i, 1]) - 1
+            else:
+                cls_index = cfg.TRAIN.CLASSES[int(rois[i, 1])] - 1
 
         if cls_index < 0:
             continue
@@ -2107,7 +2124,7 @@ def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, poses_refined,
 
 
 
-def vis_test(dataset, im, label, out_vertex, rois, poses, poses_refined, im_pose):
+def vis_test(dataset, im, im_depth, label, out_vertex, rois, poses, poses_refined, im_pose):
 
     """Visualize a testing results."""
     import matplotlib.pyplot as plt
@@ -2184,6 +2201,12 @@ def vis_test(dataset, im, label, out_vertex, rois, poses, poses_refined, im_pose
                     x2d[0, :] = np.divide(x2d[0, :], x2d[2, :])
                     x2d[1, :] = np.divide(x2d[1, :], x2d[2, :])
                     plt.plot(x2d[0, :], x2d[1, :], '.', color=np.divide(class_colors[cls], 255.0), alpha=0.5)
+
+        elif im_depth is not None:
+            im = im_depth.copy()
+            ax = fig.add_subplot(2, 4, 4)
+            plt.imshow(im)
+            ax.set_title('input depth') 
 
         # show predicted vertex targets
         vertex_target = vertex_pred[0, :, :, :]

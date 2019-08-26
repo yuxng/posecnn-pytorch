@@ -52,7 +52,7 @@ for i in range(len(classes)):
         f.write('export CUDA_VISIBLE_DEVICES=$1\n\n')
         f.write('./tools/test_net.py --gpu $1 \\\n')
         f.write('  --network autoencoder \\\n')
-        f.write('  --pretrained output/ycb_object/ycb_encoder_train/encoder_ycb_object_' + cls + '_epoch_20.checkpoint.pth \\\n')
+        f.write('  --pretrained output/ycb_object/ycb_encoder_train/encoder_ycb_object_' + cls + '_epoch_200.checkpoint.pth \\\n')
         f.write('  --dataset ycb_encoder_test \\\n')
         f.write('  --cfg experiments/cfgs/ycb_encoder_' + cls + '.yml \\\n')
     f.close()
