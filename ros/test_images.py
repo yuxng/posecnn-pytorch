@@ -87,7 +87,7 @@ if __name__ == '__main__':
 
     # device
     cfg.device = torch.device('cuda:{:d}'.format(0))
-    print 'GPU device {:d}'.format(args.gpu_id)
+    print('GPU device {:d}'.format(args.gpu_id))
     cfg.gpu_id = args.gpu_id
     cfg.instance_id = args.instance_id
 

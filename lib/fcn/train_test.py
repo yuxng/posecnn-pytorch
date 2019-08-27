@@ -229,12 +229,13 @@ def train(train_loader, background_loader, network, optimizer, epoch):
 
 def test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset):
 
-    n_init_samples = 100
+    n_init_samples = cfg.TEST.NUM_SAMPLES_POSERBPF
     num = rois.shape[0]
     uv_init = np.zeros((2, ), dtype=np.float32)
     pixel_mean = torch.tensor(cfg.PIXEL_MEANS / 255.0).cuda().float()
     rois_return = rois.copy()
     poses_return = poses.copy()
+    image = None
 
     for i in range(num):
         ind = int(rois[i, 0])
@@ -491,7 +492,7 @@ def test(test_loader, background_loader, network, pose_rbpf, output_dir):
                 im_depth = sample['im_depth'].numpy()[0]
                 if cfg.TEST.POSE_REFINE:
                     labels_out = out_label.detach().cpu().numpy()[0]
-                    poses, poses_refined = refine_pose(labels_out, im_depth, rois, poses, test_loader.dataset)
+                    poses, poses_refined, cls_render_ids = refine_pose(labels_out, im_depth, rois, poses, test_loader.dataset)
                     if pose_rbpf is not None:
                         sims, depth_errors, vis_ratios, pose_scores = eval_poses(pose_rbpf, poses_refined, rois, im_rgb, im_depth, sample['meta_data'])
                 else:
@@ -740,7 +741,7 @@ def test_image(network, pose_rbpf, dataset, im_color, im_depth=None):
            
             # optimize depths
             if cfg.TEST.POSE_REFINE and im_depth is not None:
-                poses = refine_pose(im_color, labels, im_depth, rois, poses, dataset)
+                poses = refine_pose(labels, im_depth, rois, poses, dataset)
             else:
                 poses_tmp, poses = optimize_depths(rois, poses, dataset._points_all, dataset._intrinsic_matrix)
 
@@ -771,9 +772,10 @@ def test_image(network, pose_rbpf, dataset, im_color, im_depth=None):
                 rois, poses, im_rgb = test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset)
 
             # optimize depths
+            cls_render_ids = None
             if cfg.TEST.POSE_REFINE and im_depth is not None:
                 labels_out = out_label.detach().cpu().numpy()[0]
-                poses, poses_refined, cls_render_ids = refine_pose(im_color, labels_out, im_depth, rois, poses, dataset)
+                poses, poses_refined, cls_render_ids = refine_pose(labels_out, im_depth, rois, poses, dataset)
                 if pose_rbpf is not None:
                     sims, depth_errors, vis_ratios, pose_scores = eval_poses(pose_rbpf, poses_refined, rois, im_rgb, im_depth, meta_data)
             else:
@@ -1227,7 +1229,7 @@ def backproject(depth_cv, intrinsic_matrix):
     return np.array(X).transpose()
 
 
-def refine_pose(im_color, im_label, im_depth, rois, poses, dataset):
+def refine_pose(im_label, im_depth, rois, poses, dataset):
 
     # backprojection
     intrinsic_matrix = dataset._intrinsic_matrix
@@ -1311,7 +1313,8 @@ def refine_pose(im_color, im_label, im_depth, rois, poses, dataset):
         poses[i, 5] *= poses[i, 6]
 
         # check if object with different size
-        if T[2] < -0.1:
+        threshold = -0.1
+        if cfg.TEST.CHECK_SIZE and T[2] < threshold:
            cls_name = dataset._classes_all[cfg.TEST.CLASSES[cls_render]] + '_small'
            for j in range(len(dataset._classes_all)):
                if cls_name == dataset._classes_all[j]:
@@ -1322,7 +1325,7 @@ def refine_pose(im_color, im_label, im_depth, rois, poses, dataset):
         cls_render_ids.append(cls_render)
 
         # run SDF optimization
-        if len(index) > 10:
+        if cfg.TEST.POSE_SDF and len(index) > 10:
             sdf_optim = cfg.sdf_optimizers[cls_render]
 
             # re-render
@@ -1359,8 +1362,8 @@ def refine_pose(im_color, im_label, im_depth, rois, poses, dataset):
                 poses_refined[i, :4] = mat2quat(RT_opt[:3, :3])
                 poses_refined[i, 4:] = RT_opt[:3, 3]
 
-                # if 0:
-                if cfg.TEST.VISUALIZE:
+                if 0:
+                # if cfg.TEST.VISUALIZE:
                     import matplotlib.pyplot as plt
                     fig = plt.figure()
                     ax = fig.add_subplot(2, 2, 1, projection='3d')
@@ -1402,8 +1405,8 @@ def refine_pose(im_color, im_label, im_depth, rois, poses, dataset):
                     # ax.set_title('mask_depth_vis')
 
                     ax = fig.add_subplot(2, 2, 3)
-                    plt.imshow(im_color[:, :, (2, 1, 0)])
-                    ax.set_title('color input')
+                    plt.imshow(mask)
+                    ax.set_title('mask')
 
                     ax = fig.add_subplot(2, 2, 4)
                     plt.imshow(depth_meas_roi)
@@ -1467,7 +1470,7 @@ def render_image(dataset, im, rois, poses, labels, cls_render_ids=None):
     cls_indexes = []
     poses_all = []
     for i in range(num):
-        if cls_render_ids is not None:
+        if cls_render_ids is not None and len(cls_render_ids) == num:
             cls_index = cls_render_ids[i]
         else:
             if cfg.MODE == 'TEST':
@@ -2145,24 +2148,24 @@ def vis_test(dataset, im, im_depth, label, out_vertex, rois, poses, poses_refine
     im += cfg.PIXEL_MEANS
     im = im[:, :, (2, 1, 0)]
     im = im.astype(np.uint8)
-    ax = fig.add_subplot(2, 4, 1)
+    ax = fig.add_subplot(3, 3, 1)
     plt.imshow(im)
     ax.set_title('input image') 
 
     # show predicted label
     im_label = dataset.labels_to_image(label)
-    ax = fig.add_subplot(2, 4, 2)
+    ax = fig.add_subplot(3, 3, 2)
     plt.imshow(im_label)
     ax.set_title('predicted labels')
 
-    ax = fig.add_subplot(2, 4, 8)
+    ax = fig.add_subplot(3, 3, 8)
     plt.imshow(im_pose)
     ax.set_title('rendered image')
 
     if cfg.TRAIN.VERTEX_REG or cfg.TRAIN.VERTEX_REG_DELTA:
 
         # show predicted boxes
-        ax = fig.add_subplot(2, 4, 3)
+        ax = fig.add_subplot(3, 3, 3)
         plt.imshow(im)
         ax.set_title('predicted boxes')
         for j in range(rois.shape[0]):
@@ -2180,7 +2183,7 @@ def vis_test(dataset, im, im_depth, label, out_vertex, rois, poses, poses_refine
 
         # show predicted poses
         if cfg.TRAIN.POSE_REG:
-            ax = fig.add_subplot(2, 4, 4)
+            ax = fig.add_subplot(3, 3, 4)
             ax.set_title('predicted poses')
             plt.imshow(im)
             for j in xrange(rois.shape[0]):
@@ -2204,7 +2207,7 @@ def vis_test(dataset, im, im_depth, label, out_vertex, rois, poses, poses_refine
 
         elif im_depth is not None:
             im = im_depth.copy()
-            ax = fig.add_subplot(2, 4, 4)
+            ax = fig.add_subplot(3, 3, 4)
             plt.imshow(im)
             ax.set_title('input depth') 
 
@@ -2219,15 +2222,15 @@ def vis_test(dataset, im, im_depth, label, out_vertex, rois, poses, poses_refine
                 center[1, index[0], index[1]] = vertex_target[3*j+1, index[0], index[1]]
                 center[2, index[0], index[1]] = np.exp(vertex_target[3*j+2, index[0], index[1]])
 
-        ax = fig.add_subplot(2, 4, 5)
+        ax = fig.add_subplot(3, 3, 5)
         plt.imshow(center[0,:,:])
         ax.set_title('predicted center x') 
 
-        ax = fig.add_subplot(2, 4, 6)
+        ax = fig.add_subplot(3, 3, 6)
         plt.imshow(center[1,:,:])
         ax.set_title('predicted center y')
 
-        ax = fig.add_subplot(2, 4, 7)
+        ax = fig.add_subplot(3, 3, 7)
         plt.imshow(center[2,:,:])
         ax.set_title('predicted z')
 

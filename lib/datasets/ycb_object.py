@@ -45,8 +45,8 @@ class YCBObject(data.Dataset, datasets.imdb):
                               (150, 0, 0), (0, 150, 0), (0, 0, 150), (150, 150, 0), (75, 0, 0), (0, 75, 0), (0, 0, 75), (75, 75, 0)]
         self._extents_all = self._load_object_extents()
 
-        self._width = 640
-        self._height = 480
+        self._width = cfg.TRAIN.SYN_WIDTH
+        self._height = cfg.TRAIN.SYN_HEIGHT
         self._intrinsic_matrix = np.array([[524.7917885754071, 0, 332.5213232846151],
                                           [0, 489.3563960810721, 281.2339855172282],
                                           [0, 0, 1]])

@@ -51,14 +51,17 @@ from ycb_renderer import YCBRenderer
 from utils.se3 import *
 from utils.nms import *
 from Queue import Queue
+from fcn.pose_rbpf import PoseRBPF
+from sdf.sdf_optimizer import sdf_optimizer
 
 lock = threading.Lock()
 
 class ImageListener:
 
-    def __init__(self, network, dataset):
+    def __init__(self, network, pose_rbpf, dataset):
 
         self.net = network
+        self.pose_rbpf = pose_rbpf
         self.dataset = dataset
         self.cv_bridge = CvBridge()
         self.renders = dict()
@@ -147,7 +150,7 @@ class ImageListener:
             fusion_type = '_rgbd_'
 
         start_time = time.time()
-        im_pose, im_label, rois, poses = test_image(self.net, self.dataset, im, depth_cv)
+        im_pose, im_label, rois, poses = test_image(self.net, self.pose_rbpf, self.dataset, im, depth_cv)
         print("--- %s seconds ---" % (time.time() - start_time))
 
         # publish
@@ -278,7 +281,7 @@ if __name__ == '__main__':
 
     # device
     cfg.device = torch.device('cuda:{:d}'.format(0))
-    print 'GPU device {:d}'.format(args.gpu_id)
+    print('GPU device {:d}'.format(args.gpu_id))
     cfg.gpu_id = args.gpu_id
     cfg.instance_id = args.instance_id
 
@@ -299,16 +302,38 @@ if __name__ == '__main__':
     network = torch.nn.DataParallel(network, device_ids=[0]).cuda(device=cfg.device)
     cudnn.benchmark = True
 
-    print 'loading 3D models'
-    cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, gpu_id=cfg.gpu_id, render_marker=False)
-    cfg.renderer.load_objects(dataset.model_mesh_paths, dataset.model_texture_paths, dataset.model_colors)
+    #'''
+    print('loading 3D models')
+    cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, gpu_id=args.gpu_id, render_marker=False)
+    if cfg.TEST.SYNTHESIZE:
+        cfg.renderer.load_objects(dataset.model_mesh_paths, dataset.model_texture_paths, dataset.model_colors)
+    else:
+        model_mesh_paths = [dataset.model_mesh_paths[i-1] for i in cfg.TEST.CLASSES]
+        model_texture_paths = [dataset.model_texture_paths[i-1] for i in cfg.TEST.CLASSES]
+        model_colors = [dataset.model_colors[i-1] for i in cfg.TEST.CLASSES]
+        cfg.renderer.load_objects(model_mesh_paths, model_texture_paths, model_colors)
     cfg.renderer.set_camera_default()
+    print(dataset.model_mesh_paths)
+    #'''
+
+    # load sdfs
+    if cfg.TEST.POSE_REFINE:
+        print('loading SDFs')
+        cfg.sdf_optimizers = []
+        for i in cfg.TEST.CLASSES:
+            cfg.sdf_optimizers.append(sdf_optimizer(dataset.model_sdf_paths[i-1]))
+
+    # prepare autoencoder and codebook
+    if cfg.TRAIN.VERTEX_REG:
+        pose_rbpf = PoseRBPF(dataset)
+    else:
+        pose_rbpf = None
 
     #rospy.init_node('posecnn_image_listener')
 
     # image listener
     network.eval()
-    listener = ImageListener(network, dataset)
+    listener = ImageListener(network, pose_rbpf, dataset)
 
     while not rospy.is_shutdown():       
        listener.run_network()
