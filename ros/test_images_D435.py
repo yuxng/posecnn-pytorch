@@ -100,18 +100,22 @@ class ImageListener:
             # use RealSense D435
             rgb_sub = message_filters.Subscriber('/camera/color/image_raw', Image, queue_size=10)
             depth_sub = message_filters.Subscriber('/camera/aligned_depth_to_color/image_raw', Image, queue_size=10)
-
-            # update camera intrinsics
             msg = rospy.wait_for_message('/camera/color/camera_info', CameraInfo)
+        else:
+            # use kinect
+            rgb_sub = message_filters.Subscriber('/%s/rgb/image_color' % (cfg.TEST.ROS_CAMERA), Image, queue_size=2)
+            depth_sub = message_filters.Subscriber('/%s/depth_registered/image' % (cfg.TEST.ROS_CAMERA), Image, queue_size=2)
+            msg = rospy.wait_for_message('/%s/rgb/camera_info' % (cfg.TEST.ROS_CAMERA), CameraInfo)
 
-            K = np.array(msg.K).reshape(3, 3)
-            dataset._intrinsic_matrix = K
-            print(dataset._intrinsic_matrix)
+        # update camera intrinsics
+        K = np.array(msg.K).reshape(3, 3)
+        dataset._intrinsic_matrix = K
+        print(dataset._intrinsic_matrix)
 
-            queue_size = 1
-            slop_seconds = 0.1
-            ts = message_filters.ApproximateTimeSynchronizer([rgb_sub, depth_sub], queue_size, slop_seconds)
-            ts.registerCallback(self.callback_rgbd)
+        queue_size = 1
+        slop_seconds = 0.1
+        ts = message_filters.ApproximateTimeSynchronizer([rgb_sub, depth_sub], queue_size, slop_seconds)
+        ts.registerCallback(self.callback_rgbd)
 
     def callback_rgbd(self, rgb, depth):
 
