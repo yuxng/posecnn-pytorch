@@ -8,7 +8,7 @@ export CUDA_VISIBLE_DEVICES=0,1
 
 ./tools/train_net_self_supervision.py \
   --network posecnn \
-  --pretrained output/ycb_self_supervision/ycb_self_supervision_train/vgg16_ycb_object_slim_epoch_16.checkpoint.pth \
+  --pretrained data/checkpoints/vgg16_ycb_object_slim_epoch_16.checkpoint.pth \
   --dataset ycb_self_supervision_train \
   --cfg experiments/cfgs/ycb_object_self_supervision.yml \
   --solver sgd \

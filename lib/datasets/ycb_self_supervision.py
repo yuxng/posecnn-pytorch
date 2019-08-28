@@ -146,6 +146,10 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
             self._perm = np.arange(len(self._roidb))
         self._cur = 0
         self._build_uniform_poses()
+        self.lb_shift = -0.2
+        self.ub_shift = 0.2
+        self.lb_scale = 0.8
+        self.ub_scale = 3.0
 
         assert os.path.exists(self._ycb_self_supervision_path), \
                 'ycb_self_supervision path does not exist: {}'.format(self._ycb_self_supervision_path)
@@ -417,6 +421,29 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
             sample['vertex_targets'] = vertex_targets
             sample['vertex_weights'] = vertex_weights
 
+        # affine transformation
+        if cfg.TRAIN.AFFINE:
+            shift = np.float32([np.random.uniform(self.lb_shift, self.ub_shift), np.random.uniform(self.lb_shift, self.ub_shift)])
+            scale = np.random.uniform(self.lb_scale, self.ub_scale)
+            affine_matrix = np.float32([[scale, 0, shift[0]], [0, scale, shift[1]]])
+
+            affine_1 = np.eye(3, dtype=np.float32)
+            affine_1[0, 2] = -0.5 * self._width
+            affine_1[1, 2] = -0.5 * self._height
+
+            affine_2 = np.eye(3, dtype=np.float32)
+            affine_2[0, 0] = 1.0 / scale
+            affine_2[0, 2] = -shift[0] * 0.5 * self._width / scale
+            affine_2[1, 1] = 1.0 / scale
+            affine_2[1, 2] = -shift[1] * 0.5 * self._height / scale
+
+            affine_3 = np.matmul(affine_2, affine_1)
+            affine_4 = np.matmul(np.linalg.inv(affine_1), affine_3)
+            affine_matrix_coordinate = affine_4[:3, :]
+
+            sample['affine_matrix'] = torch.from_numpy(affine_matrix).cuda()
+            sample['affine_matrix_coordinate'] = torch.from_numpy(affine_matrix_coordinate).cuda()
+
         return sample
 
 
@@ -462,6 +489,29 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
         if cfg.TRAIN.VERTEX_REG:
             sample['vertex_targets'] = vertex_targets
             sample['vertex_weights'] = vertex_weights
+
+        # affine transformation
+        if cfg.TRAIN.AFFINE:
+            shift = np.float32([np.random.uniform(self.lb_shift, self.ub_shift), np.random.uniform(self.lb_shift, self.ub_shift)])
+            scale = np.random.uniform(self.lb_scale, self.ub_scale)
+            affine_matrix = np.float32([[scale, 0, shift[0]], [0, scale, shift[1]]])
+
+            affine_1 = np.eye(3, dtype=np.float32)
+            affine_1[0, 2] = -0.5 * self._width
+            affine_1[1, 2] = -0.5 * self._height
+
+            affine_2 = np.eye(3, dtype=np.float32)
+            affine_2[0, 0] = 1.0 / scale
+            affine_2[0, 2] = -shift[0] * 0.5 * self._width / scale
+            affine_2[1, 1] = 1.0 / scale
+            affine_2[1, 2] = -shift[1] * 0.5 * self._height / scale
+
+            affine_3 = np.matmul(affine_2, affine_1)
+            affine_4 = np.matmul(np.linalg.inv(affine_1), affine_3)
+            affine_matrix_coordinate = affine_4[:3, :]
+
+            sample['affine_matrix'] = torch.from_numpy(affine_matrix).cuda()
+            sample['affine_matrix_coordinate'] = torch.from_numpy(affine_matrix_coordinate).cuda()
 
         return sample
 

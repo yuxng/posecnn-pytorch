@@ -31,11 +31,12 @@ TRAIN:
   VERTEX_REG: True
   POSE_REG: False       # no rotation regression
   SLIM: True
+  AFFINE: True
   MAX_ITERS_PER_EPOCH: 20000
   # synthetic data
   SYNTHESIZE: True
   SYNNUM: 40000
-  SYN_RATIO: 5
+  SYN_RATIO: 2
   SYN_BACKGROUND_SPECIFIC: True
   SYN_BACKGROUND_SUBTRACT_MEAN: True
   SYN_SAMPLE_OBJECT: True
