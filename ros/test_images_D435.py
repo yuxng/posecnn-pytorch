@@ -75,7 +75,7 @@ class ImageListener:
         self.suffix = suffix
         self.prefix = prefix
 
-        fusion_type = '_rgb_'
+        fusion_type = ''
         if cfg.TRAIN.VERTEX_REG_DELTA:
             fusion_type = '_rgbd_'
 
@@ -149,7 +149,7 @@ class ImageListener:
           depth_cv = self.depth.copy()
           rgb_frame_id = self.rgb_frame_id
 
-        fusion_type = '_rgb_'
+        fusion_type = ''
         if cfg.TRAIN.VERTEX_REG_DELTA:
             fusion_type = '_rgbd_'
 
@@ -207,23 +207,22 @@ class ImageListener:
                 now = rospy.Time.now()
                 self.br.sendTransform([n, now.secs, 0], [x1, y1, x2, y2], now, tf_name + '_roi', frame)
 
-                if cfg.TRAIN.POSE_REG:
-                    quat = [poses[i, 1], poses[i, 2], poses[i, 3], poses[i, 0]]
-                    self.br.sendTransform(poses[i, 4:7], quat, rospy.Time.now(), tf_name, frame)
+                quat = [poses[i, 1], poses[i, 2], poses[i, 3], poses[i, 0]]
+                self.br.sendTransform(poses[i, 4:7], quat, rospy.Time.now(), tf_name, frame)
 
-                    # create pose msg
-                    msg = PoseStamped()
-                    msg.header.stamp = rospy.Time.now()
-                    msg.header.frame_id = frame
-                    msg.pose.orientation.x = poses[i, 1]
-                    msg.pose.orientation.y = poses[i, 2]
-                    msg.pose.orientation.z = poses[i, 3]
-                    msg.pose.orientation.w = poses[i, 0]
-                    msg.pose.position.x = poses[i, 4]
-                    msg.pose.position.y = poses[i, 5]
-                    msg.pose.position.z = poses[i, 6]
-                    pub = self.pubs[cls - 1]
-                    pub.publish(msg)
+                # create pose msg
+                msg = PoseStamped()
+                msg.header.stamp = rospy.Time.now()
+                msg.header.frame_id = frame
+                msg.pose.orientation.x = poses[i, 1]
+                msg.pose.orientation.y = poses[i, 2]
+                msg.pose.orientation.z = poses[i, 3]
+                msg.pose.orientation.w = poses[i, 0]
+                msg.pose.position.x = poses[i, 4]
+                msg.pose.position.y = poses[i, 5]
+                msg.pose.position.z = poses[i, 6]
+                pub = self.pubs[cls - 1]
+                pub.publish(msg)
 
 
 def parse_args():
@@ -286,7 +285,7 @@ if __name__ == '__main__':
     # device
     cfg.device = torch.device('cuda:{:d}'.format(0))
     print('GPU device {:d}'.format(args.gpu_id))
-    cfg.gpu_id = args.gpu_id
+    cfg.gpu_id = 1-args.gpu_id
     cfg.instance_id = args.instance_id
 
     # dataset
@@ -308,7 +307,7 @@ if __name__ == '__main__':
 
     #'''
     print('loading 3D models')
-    cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, gpu_id=args.gpu_id, render_marker=False)
+    cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, gpu_id=1-args.gpu_id, render_marker=False)
     if cfg.TEST.SYNTHESIZE:
         cfg.renderer.load_objects(dataset.model_mesh_paths, dataset.model_texture_paths, dataset.model_colors)
     else:

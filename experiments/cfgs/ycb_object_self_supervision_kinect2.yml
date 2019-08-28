@@ -54,7 +54,7 @@ TEST:
   IMS_PER_BATCH: 1
   HOUGH_SKIP_PIXELS: 10
   NUM_SAMPLES_POSERBPF: 20
-  DET_THRESHOLD: 0.5
+  DET_THRESHOLD: 0.3
   SCALES_BASE: !!python/tuple [1.0]
   VISUALIZE: False
   SYNTHESIZE: False
@@ -62,4 +62,4 @@ TEST:
   POSE_SDF: False
   CHECK_SIZE: False
   ROS_CAMERA: kinect2
-  CLASSES: !!python/tuple [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 21]
+  CLASSES: !!python/tuple [2, 3, 4, 5, 9, 13]

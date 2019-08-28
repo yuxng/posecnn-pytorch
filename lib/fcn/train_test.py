@@ -1270,6 +1270,7 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
             cls_label = cls
 
         if cls_id not in cfg.TEST.CLASSES:
+            cls_render_ids.append(-1)
             continue
 
         cls_render = cfg.TEST.CLASSES.index(cls_id)
