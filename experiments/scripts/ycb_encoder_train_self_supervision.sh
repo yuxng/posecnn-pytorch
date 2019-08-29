@@ -3,7 +3,7 @@
 set -x
 set -e
 export PYTHONUNBUFFERED="True"
-#export PYTHON_EGG_CACHE=/nfs
+export PYTHON_EGG_CACHE=/nfs
 
 ./tools/train_encoders_self_supervision.py \
   --network autoencoder \
