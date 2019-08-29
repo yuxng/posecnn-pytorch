@@ -12,6 +12,7 @@ import numpy as np
 import numpy.random as npr
 import datasets
 import scipy
+import cPickle
 from fcn.config import cfg
 from transforms3d.quaternions import *
 from transforms3d.euler import *
@@ -185,15 +186,18 @@ class YCBEncoderSelfSupervision(data.Dataset, datasets.imdb):
             self._size = size * (cfg.TRAIN.SYN_RATIO+1)
 
         self._roidb = self.gt_roidb()
+        self._perm = [[] for i in range(self._num_classes)]
         if cfg.MODE == 'TRAIN' or cfg.TEST.VISUALIZE:
-            self._perm = np.random.permutation(np.arange(len(self._roidb)))
+            for i in range(self._num_classes):
+                self._perm[i] = np.random.permutation(np.arange(len(self._roidb[i])))
         else:
-            self._perm = np.arange(len(self._roidb))
-        self._cur = 0
+            for i in range(self._num_classes):
+                self._perm[i] = np.arange(len(self._roidb[i]))
+        self._cur = np.zeros((self._num_classes, ), dtype=np.int32)
 
         self._class_to_ind = dict(zip(self._classes, xrange(self._num_classes)))
         self._build_uniform_poses()
-        self._losses_pose = torch.cuda.FloatTensor(cfg.TRAIN.SYNNUM).detach()
+        self._losses_pose = np.zeros((self._num_classes, cfg.TRAIN.SYNNUM), dtype=np.float32)
 
         assert os.path.exists(self._ycb_object_path), \
                 'ycb_object path does not exist: {}'.format(self._ycb_object_path)
@@ -201,16 +205,39 @@ class YCBEncoderSelfSupervision(data.Dataset, datasets.imdb):
         # compute the canonical distance to render
         self.render_depths = np.zeros((self._extents.shape[0], ), dtype=np.float32)
         margin = 20
-        for i in range(self._extents.shape[0]):
-            points = get_bb3D(np.transpose(self._points[i]))
-            self.render_depths[i] = optimize_depths(self._width - margin, self._height - margin, points, self._intrinsic_matrix)
-        print('depth for rendering:')
-        print(self.render_depths)
-
+        self.render_depths = self.compute_render_depths(margin)
         self.lb_shift = -margin
         self.ub_shift = margin
         self.lb_scale = 0.8
         self.ub_scale = 1.2
+        self.cls_target = 0
+
+
+    def compute_render_depths(self, margin):
+
+        prefix = '_class'
+        for i in range(len(cfg.TRAIN.CLASSES)):
+            prefix += '_%d' % cfg.TRAIN.CLASSES[i]
+        cache_file = os.path.join(self.cache_path, self.name + prefix + '_render_depths.pkl')
+        if os.path.exists(cache_file):
+            with open(cache_file, 'rb') as fid:
+                render_depths = cPickle.load(fid)
+            print('{} render_depths loaded from {}'.format(self.name, cache_file))
+            print(render_depths)
+            return render_depths
+
+        print('computing canonical depths')
+        render_depths = np.zeros((self._extents.shape[0], ), dtype=np.float32)
+        for i in range(self._extents.shape[0]):
+            points = get_bb3D(np.transpose(self._points[i]))
+            render_depths[i] = optimize_depths(self._width - margin, self._height - margin, points, self._intrinsic_matrix)
+            print(self._classes[i], render_depths[i])
+
+        with open(cache_file, 'wb') as fid:
+            cPickle.dump(render_depths, fid, cPickle.HIGHEST_PROTOCOL)
+        print 'wrote render_depths to {}'.format(cache_file)
+
+        return render_depths
 
 
     def _render_item(self, sample_index):
@@ -236,7 +263,7 @@ class YCBEncoderSelfSupervision(data.Dataset, datasets.imdb):
 
         # sample target object (train one object only)
         cls_indexes = []
-        cls_target = 0
+        cls_target = self.cls_target
         cls_indexes.append(cfg.TRAIN.CLASSES[cls_target]-1)
 
         # sample target pose
@@ -250,8 +277,7 @@ class YCBEncoderSelfSupervision(data.Dataset, datasets.imdb):
 
         # use hard pose
         if (sample_index + 1) % cfg.TRAIN.IMS_PER_BATCH == 0:
-            loss, index_euler = torch.max(self._losses_pose, 0)
-            index_euler = index_euler.cpu().detach().numpy()
+            index_euler = np.argmax(self._losses_pose[cls_target, :])
 
         yaw = self.eulers[index_euler][0] + interval * np.random.randn()
         pitch = self.eulers[index_euler][1] + interval * np.random.randn()
@@ -268,14 +294,17 @@ class YCBEncoderSelfSupervision(data.Dataset, datasets.imdb):
         poses_all.append(qt.copy())
         cfg.renderer.set_poses(poses_all)
         cfg.renderer.set_light_pos([0, 0, 0])
-        cfg.renderer.set_light_color([1.0, 1.0, 1.0])
+        cfg.renderer.set_light_color([2.0, 2.0, 2.0])
         cfg.renderer.render(cls_indexes, image_target_tensor, seg_target_tensor)
         image_target_tensor = image_target_tensor.flip(0)
         image_target_tensor = image_target_tensor[:, :, (2, 1, 0)]
         seg_target_tensor = seg_target_tensor.flip(0)
         image_target_tensor = torch.clamp(image_target_tensor, min=0.0, max=1.0)
         seg_target = seg_target_tensor[:,:,2] + 256*seg_target_tensor[:,:,1] + 256*256*seg_target_tensor[:,:,0]
-        image_target_tensor[seg_target == 0] = 0.5
+
+        # set background color here
+        # image_target_tensor[seg_target == 0] = 0.5
+
         mask_target = (seg_target != 0).unsqueeze(0).repeat((3, 1, 1)).float()
         seg_target = seg_target.cpu().numpy()
 
@@ -283,45 +312,42 @@ class YCBEncoderSelfSupervision(data.Dataset, datasets.imdb):
         if cfg.MODE == 'TRAIN' or cfg.TEST.BUILD_CODEBOOK == False:
 
             while 1:
-                # sample an occluder
+                # sample occluders
                 if np.random.rand(1) < 0.8:
+                    num_occluder = 3
 
                     if len(cls_indexes) == 1:
-                        cls_indexes.append(0)
-                        poses_all.append(np.zeros((7, ), dtype=np.float32))
+                        for i in range(num_occluder):
+                            cls_indexes.append(0)
+                            poses_all.append(np.zeros((7, ), dtype=np.float32))
 
-                    ind = np.random.randint(self._num_classes_other, size=1)[0]
-                    cls_occ = self._classes_other[ind]
-                    cls_indexes[1] = cls_occ - 1
+                    for i in range(num_occluder):
+                        while 1:
+                            cls_occ = np.random.randint(1, self._num_classes_all, size=1)[0]
+                            if cls_occ != cfg.TRAIN.CLASSES[cls_target]:
+                                cls_indexes[i + 1] = cls_occ - 1
+                                break
 
-                    # sample poses
-                    cls = int(cls_indexes[1])
-                    if self.pose_indexes[cls] >= len(self.pose_lists[cls]):
-                        self.pose_indexes[cls] = 0
-                        self.pose_lists[cls] = np.random.permutation(np.arange(len(self.eulers)))
-                    yaw = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][0] + 5 * np.random.randn()
-                    pitch = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][1] + 5 * np.random.randn()
-                    roll = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][2] + 5 * np.random.randn()
-                    qt[3:] = euler2quat(roll * math.pi / 180.0, pitch * math.pi / 180.0, yaw * math.pi / 180.0, 'syxz')
-                    self.pose_indexes[cls] += 1
+                        # sample poses
+                        cls = int(cls_indexes[i + 1])
+                        if self.pose_indexes[cls] >= len(self.pose_lists[cls]):
+                            self.pose_indexes[cls] = 0
+                            self.pose_lists[cls] = np.random.permutation(np.arange(len(self.eulers)))
+                        yaw = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][0] + 5 * np.random.randn()
+                        pitch = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][1] + 5 * np.random.randn()
+                        roll = self.eulers[self.pose_lists[cls][self.pose_indexes[cls]]][2] + 5 * np.random.randn()
+                        qt[3:] = euler2quat(roll * math.pi / 180.0, pitch * math.pi / 180.0, yaw * math.pi / 180.0, 'syxz')
+                        self.pose_indexes[cls] += 1
 
-                    # translation, sample an object nearby
-                    object_id = 0
-                    extent = np.maximum(np.mean(self._extents_all[cls+1, :]), extent_target)
+                        # translation, sample an object nearby
+                        object_id = 0
+                        extent = np.mean(self._extents_all[cls+1, :])
+                        qt[0] = poses_all[object_id][0] + np.random.uniform(-0.1, 0.1)
+                        qt[1] = poses_all[object_id][1] + np.random.uniform(-0.1, 0.1)
+                        qt[2] = poses_all[object_id][2] - np.random.uniform(extent, extent+0.2)
 
-                    flag = np.random.randint(0, 2)
-                    if flag == 0:
-                        flag = -1
-                    qt[0] = poses_all[object_id][0] + flag * extent * np.random.uniform(0.25, 0.5)
-
-                    flag = np.random.randint(0, 2)
-                    if flag == 0:
-                        flag = -1
-                    qt[1] = poses_all[object_id][1] + flag * extent * np.random.uniform(0.25, 0.5)
-
-                    qt[2] = poses_all[object_id][2] - extent * np.random.uniform(1.0, 2.0)
-                    poses_all[1] = qt
-                    cfg.renderer.set_poses(poses_all)
+                        poses_all[i + 1] = qt.copy()
+                        cfg.renderer.set_poses(poses_all)
 
                 # rendering
                 # light pose
@@ -344,8 +370,11 @@ class YCBEncoderSelfSupervision(data.Dataset, datasets.imdb):
                 non_occluded = np.sum(np.logical_and(seg_target > 0, seg_target == seg_input)).astype(np.float)
                 occluded_ratio = 1 - non_occluded / np.sum(seg_target>0).astype(np.float)
 
-                if occluded_ratio < 0.95:
+                if occluded_ratio < 0.8:
                     break
+                else:
+                    cls_indexes = cls_indexes[:1]
+                    poses_all = poses_all[:1]
 
             # foreground mask
             mask = (seg != 0).unsqueeze(0).repeat((3, 1, 1)).float()
@@ -375,12 +404,14 @@ class YCBEncoderSelfSupervision(data.Dataset, datasets.imdb):
             sample = {'image_input': im_cuda.permute(2, 0, 1),
                   'image_target': image_target_tensor.permute(2, 0, 1),
                   'mask': mask,
+                  'cls_index': torch.from_numpy(np.array([cls_target]).astype(np.float32)),
                   'index_euler': torch.from_numpy(np.array([index_euler])),
                   'affine_matrix': torch.from_numpy(affine_matrix).cuda()}
         else:
             sample = {'image_input': image_target_tensor.permute(2, 0, 1),
                   'image_target': image_target_tensor.permute(2, 0, 1),
                   'mask': mask_target,
+                  'cls_index': torch.from_numpy(np.array([cls_target]).astype(np.float32)),
                   'pose_target': pose_target}
 
         return sample
@@ -389,18 +420,19 @@ class YCBEncoderSelfSupervision(data.Dataset, datasets.imdb):
     def __getitem__(self, index):
 
         is_syn = 0
-        if len(self._image_index) == 0 or index % (cfg.TRAIN.SYN_RATIO+1) != 0:
+        ind = self.cls_target
+        if len(self._image_index[ind]) == 0 or index % (cfg.TRAIN.SYN_RATIO+1) != 0:
             is_syn = 1
 
         if is_syn:
             return self._render_item(index)
 
-        if self._cur >= len(self._roidb):
-            self._perm = np.random.permutation(np.arange(len(self._roidb)))
-            self._cur = 0
-        db_ind = self._perm[self._cur]
-        roidb = self._roidb[db_ind]
-        self._cur += 1
+        if self._cur[ind] >= len(self._roidb[ind]):
+            self._perm[ind] = np.random.permutation(np.arange(len(self._roidb[ind])))
+            self._cur[ind] = 0
+        db_ind = self._perm[ind][self._cur[ind]]
+        roidb = self._roidb[ind][db_ind]
+        self._cur[ind] += 1
 
         random_scale_ind = npr.randint(0, high=len(cfg.TRAIN.SCALES_BASE))
         sample = self._get_image_item(roidb, random_scale_ind)
@@ -464,7 +496,7 @@ class YCBEncoderSelfSupervision(data.Dataset, datasets.imdb):
 
         # sample target object (train one object only)
         cls_indexes = []
-        cls_target = 0
+        cls_target = self.cls_target
         cls_indexes.append(cfg.TRAIN.CLASSES[cls_target]-1)
 
         # render poses to get the target image
@@ -482,7 +514,7 @@ class YCBEncoderSelfSupervision(data.Dataset, datasets.imdb):
         # rendering
         cfg.renderer.set_poses(poses_all)
         cfg.renderer.set_light_pos([0, 0, 0])
-        cfg.renderer.set_light_color([1.0, 1.0, 1.0])
+        cfg.renderer.set_light_color([2.0, 2.0, 2.0])
         image_target_tensor = torch.cuda.FloatTensor(self._height, self._width, 4).detach()
         seg_target_tensor = torch.cuda.FloatTensor(self._height, self._width, 4).detach()
         cfg.renderer.render(cls_indexes, image_target_tensor, seg_target_tensor)
@@ -491,7 +523,6 @@ class YCBEncoderSelfSupervision(data.Dataset, datasets.imdb):
         seg_target_tensor = seg_target_tensor.flip(0)
         image_target_tensor = torch.clamp(image_target_tensor, min=0.0, max=1.0)
         seg_target = seg_target_tensor[:,:,2] + 256*seg_target_tensor[:,:,1] + 256*256*seg_target_tensor[:,:,0]
-        image_target_tensor[seg_target == 0] = 0.5
         mask_target = (seg_target != 0).unsqueeze(0).repeat((3, 1, 1)).float()
         mask_target[:, :, :] = 1.0
         seg_target = seg_target.cpu().numpy()
@@ -502,7 +533,7 @@ class YCBEncoderSelfSupervision(data.Dataset, datasets.imdb):
         uv[0, 1] = fy_data * RT[1, 3] / RT[2, 3] + py_data
         uv[0, 2] = 1
         z = np.zeros((1, 1), dtype=np.float32)
-        z[0, 0] = qt[2]
+        z[0, 0] = RT[2, 3]
         render_dist = self.render_depths[cls_target]
 
         # crop the rois from input image
@@ -517,12 +548,14 @@ class YCBEncoderSelfSupervision(data.Dataset, datasets.imdb):
             sample = {'image_input': im_roi_cuda[0],
                   'image_target': image_target_tensor.permute(2, 0, 1),
                   'mask': mask_target,
+                  'cls_index': torch.from_numpy(np.array([cls_target]).astype(np.float32)),
                   'index_euler': torch.from_numpy(np.array([-1])),
                   'affine_matrix': torch.from_numpy(affine_matrix).cuda()}
         else:
             sample = {'image_input': im_roi_cuda[0],
                   'image_target': image_target_tensor.permute(2, 0, 1),
                   'mask': mask_target,
+                  'cls_index': torch.from_numpy(np.array([cls_target]).astype(np.float32)),
                   'pose_target': pose_target}
 
         return sample
@@ -633,7 +666,7 @@ class YCBEncoderSelfSupervision(data.Dataset, datasets.imdb):
         points = [[] for _ in xrange(len(self._classes))]
         for i in xrange(len(self._classes)):
             point_file = os.path.join(self._ycb_object_path, 'models', self._classes[i], 'points.xyz')
-            print point_file
+            print(point_file)
             assert os.path.exists(point_file), 'Path does not exist: {}'.format(point_file)
             points[i] = np.loadtxt(point_file)
 

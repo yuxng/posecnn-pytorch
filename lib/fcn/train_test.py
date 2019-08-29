@@ -888,10 +888,8 @@ def train_autoencoder(train_loader, background_loader, network, optimizer, optim
     batch_time = AverageMeter()
     epoch_size = len(train_loader)
     enum_background = enumerate(background_loader)
-    if train_loader.dataset.num_classes == 1:
-        cls = train_loader.dataset.classes[0]
-    else:
-        cls = '%d classes' % (train_loader.dataset.num_classes)
+    cls_target = train_loader.dataset.cls_target
+    cls = train_loader.dataset.classes[cls_target]
 
     # switch to train mode
     network.train()
@@ -970,7 +968,10 @@ def train_autoencoder(train_loader, background_loader, network, optimizer, optim
 
         # record the losses for each euler pose
         index_euler = torch.flatten(sample['index_euler'])
-        train_loader.dataset._losses_pose[index_euler] = losses_euler.detach().cpu().numpy()
+        losses_euler_numpy = losses_euler.detach().cpu().numpy()
+        for j in range(len(index_euler)):
+            if index_euler[j] >= 0:
+                train_loader.dataset._losses_pose[cls_target, index_euler[j]] = losses_euler_numpy[j]
 
         if cfg.TRAIN.VISUALIZE:
             _vis_minibatch_autoencoder(inputs, background_color, mask, sample, out_images)

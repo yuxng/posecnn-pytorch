@@ -1,4 +1,4 @@
-EXP_DIR: ycb_object
+EXP_DIR: ycb_encoder
 INPUT: COLOR
 TRAIN:
   TRAINABLE: True
@@ -13,7 +13,7 @@ TRAIN:
   NUM_UNITS: 128
   CLASSES: !!python/tuple [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 21]
   SNAPSHOT_INFIX: ycb_object_self_supervision
-  SNAPSHOT_EPOCHS: 20
+  SNAPSHOT_EPOCHS: 10
   SNAPSHOT_PREFIX: encoder
   USE_FLIPPED: False
   CHROMATIC: True
@@ -24,7 +24,7 @@ TRAIN:
   UNIFORM_POSE_INTERVAL: 5
   SYNTHESIZE: True
   SYNNUM: 186624
-  SYN_RATIO: 5
+  SYN_RATIO: 3
   SYN_BACKGROUND_SPECIFIC: False
   SYN_SAMPLE_OBJECT: False
   SYN_SAMPLE_POSE: False

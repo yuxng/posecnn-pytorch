@@ -126,8 +126,8 @@ if __name__ == '__main__':
         cls = dataset._classes_all[ind]
         filename = args.pretrained.replace('cls', cls)
         autoencoder_data = torch.load(filename)
-        autoencoders[i] = networks.__dict__['autoencoder'](1, 128, autoencoder_data).cuda(device=cfg.device)
-        autoencoders[i] = torch.nn.DataParallel(autoencoders[i], device_ids=[cfg.gpu_id]).cuda(device=cfg.device)
+        autoencoders[i] = networks.__dict__['autoencoder'](1, 128, autoencoder_data).cuda()
+        autoencoders[i] = torch.nn.DataParallel(autoencoders[i]).cuda()
         print(filename)
 
     if torch.cuda.device_count() > 1:
@@ -184,15 +184,17 @@ if __name__ == '__main__':
         # for each class
         for i in range(len(cfg.TRAIN.CLASSES)):
 
-            scheduler[i].step()
-            scheduler_discriminator[i].step()
-            train_autoencoder(dataloader, background_loader, autoencoders[i], optimizers[i], optimizer_discriminators[i], epoch)
+            schedulers[i].step()
+            schedulers_discriminator[i].step()
+            dataloader.dataset.cls_target = i
+            train_autoencoder(dataloader, background_loader, autoencoders[i], optimizers[i], optimizers_discriminator[i], epoch)
 
             # save checkpoint
             if (epoch+1) % cfg.TRAIN.SNAPSHOT_EPOCHS == 0 or epoch == args.epochs - 1:
-                state = network.module.state_dict()
+                state = autoencoders[i].module.state_dict()
                 infix = ('_' + cfg.TRAIN.SNAPSHOT_INFIX if cfg.TRAIN.SNAPSHOT_INFIX != '' else '')
-                filename = (cfg.TRAIN.SNAPSHOT_PREFIX + infix + '_epoch_{:d}'.format(epoch+1) + '.checkpoint.pth')
+                cls = dataloader.dataset.classes[i]
+                filename = (cfg.TRAIN.SNAPSHOT_PREFIX + infix + '_' + cls + '_epoch_{:d}'.format(epoch+1) + '.checkpoint.pth')
                 torch.save(state, os.path.join(output_dir, filename))
                 print(filename)
 

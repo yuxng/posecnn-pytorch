@@ -177,7 +177,7 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         self._class_to_ind = dict(zip(self._classes, xrange(self._num_classes)))
         self._size = cfg.TRAIN.SYNNUM
         self._build_uniform_poses()
-        self._losses_pose = np.zeros((self._size), dtype=np.float32)
+        self._losses_pose = np.zeros((self._num_classes, self._size), dtype=np.float32)
 
         assert os.path.exists(self._ycb_object_path), \
                 'ycb_object path does not exist: {}'.format(self._ycb_object_path)
@@ -189,6 +189,7 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         self.ub_shift = margin
         self.lb_scale = 0.8
         self.ub_scale = 1.2
+        self.cls_target = 0
 
 
     def compute_render_depths(self, margin):
@@ -255,7 +256,7 @@ class YCBEncoder(data.Dataset, datasets.imdb):
 
         # use hard pose
         if (sample_index + 1) % cfg.TRAIN.IMS_PER_BATCH == 0:
-            index_euler = np.argmax(self._losses_pose)
+            index_euler = np.argmax(self._losses_pose[cls_target, :])
 
         yaw = self.eulers[index_euler][0] + interval * np.random.randn()
         pitch = self.eulers[index_euler][1] + interval * np.random.randn()
@@ -426,7 +427,7 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         points = [[] for _ in xrange(len(self._classes))]
         for i in xrange(len(self._classes)):
             point_file = os.path.join(self._ycb_object_path, 'models', self._classes[i], 'points.xyz')
-            print point_file
+            print(point_file)
             assert os.path.exists(point_file), 'Path does not exist: {}'.format(point_file)
             points[i] = np.loadtxt(point_file)
 
