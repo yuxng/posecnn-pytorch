@@ -11,8 +11,8 @@ exec &> >(tee -a "$LOG")
 echo Logging output to "$LOG"
 
 time ./tools/test_images.py --gpu $1 \
-  --imgdir data/Images/blocks_Azure \
+  --imgdir data/Images/kitchen2 \
   --network posecnn \
-  --pretrained output/ycb_self_supervision/ycb_self_supervision_train/vgg16_ycb_object_blocks_self_supervision_epoch_8.checkpoint.pth \
-  --dataset ycb_object_test \
-  --cfg experiments/cfgs/ycb_object_blocks_azure.yml
+  --pretrained output/ycb_self_supervision/ycb_self_supervision_train/vgg16_ycb_object_self_supervision_epoch_8.checkpoint.pth \
+  --dataset ycb_self_supervision_test \
+  --cfg experiments/cfgs/ycb_object_self_supervision.yml

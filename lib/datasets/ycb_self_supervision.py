@@ -149,12 +149,32 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
         self.lb_shift = -0.2
         self.ub_shift = 0.2
         self.lb_scale = 0.8
-        self.ub_scale = 3.0
+        self.ub_scale = 2.0
 
         assert os.path.exists(self._ycb_self_supervision_path), \
                 'ycb_self_supervision path does not exist: {}'.format(self._ycb_self_supervision_path)
         assert os.path.exists(self._data_path), \
                 'Data path does not exist: {}'.format(self._data_path)
+
+        # construct fake inputs
+        label_blob = np.zeros((1, self._num_classes, self._height, self._width), dtype=np.float32)
+        pose_blob = np.zeros((1, self._num_classes, 9), dtype=np.float32)
+        gt_boxes = np.zeros((1, self._num_classes, 5), dtype=np.float32)
+
+        # construct the meta data
+        K = self._intrinsic_matrix
+        Kinv = np.linalg.pinv(K)
+        meta_data_blob = np.zeros((1, 18), dtype=np.float32)
+        meta_data_blob[0, 0:9] = K.flatten()
+        meta_data_blob[0, 9:18] = Kinv.flatten()
+
+        self.input_labels = torch.from_numpy(label_blob).cuda()
+        self.input_meta_data = torch.from_numpy(meta_data_blob).cuda()
+        self.input_extents = torch.from_numpy(self._extents).cuda()
+        self.input_gt_boxes = torch.from_numpy(gt_boxes).cuda()
+        self.input_poses = torch.from_numpy(pose_blob).cuda()
+        self.input_points = torch.from_numpy(self._point_blob).cuda()
+        self.input_symmetry = torch.from_numpy(self._symmetry).cuda()
 
 
     def _render_item(self):

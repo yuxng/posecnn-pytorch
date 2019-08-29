@@ -99,12 +99,13 @@ class YCBEncoderSelfSupervision(data.Dataset, datasets.imdb):
                          '007_tuna_fish_can', '008_pudding_box', '009_gelatin_box', '010_potted_meat_can', '011_banana', '019_pitcher_base', \
                          '021_bleach_cleanser', '024_bowl', '025_mug', '035_power_drill', '036_wood_block', '037_scissors', '040_large_marker', \
                          '051_large_clamp', '052_extra_large_clamp', '061_foam_brick', 'holiday_cup1', 'holiday_cup2', 'sanning_mug', \
-                         '001_chips_can')
+                         '001_chips_can', 'block_red', 'block_green', 'block_blue', 'block_yellow')
         self._num_classes_all = len(self._classes_all)
         self._class_colors_all = [(255, 255, 255), (255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (255, 0, 255), (0, 255, 255), \
                               (0, 0, 128), (0, 128, 0), (128, 0, 0), (128, 128, 0), (128, 0, 128), (0, 128, 128), \
-                              (0, 64, 0), (64, 0, 0), (0, 0, 64), (64, 64, 0), (64, 0, 64), (0, 64, 64), 
-                              (192, 0, 0), (0, 192, 0), (0, 0, 192), (192, 192, 0), (192, 0, 192), (0, 192, 192), (32, 0, 0)]
+                              (0, 64, 0), (64, 0, 0), (0, 0, 64), (64, 64, 0), (64, 0, 64), (0, 64, 64), \
+                              (192, 0, 0), (0, 192, 0), (0, 0, 192), (192, 192, 0), (192, 0, 192), (0, 192, 192), (32, 0, 0), \
+                              (150, 0, 0), (0, 150, 0), (0, 0, 150), (150, 150, 0)]
         self._extents_all = self._load_object_extents()
 
         self._width = 128
@@ -133,22 +134,55 @@ class YCBEncoderSelfSupervision(data.Dataset, datasets.imdb):
         self._num_classes_other = len(self._classes_other)
 
         # 3D model paths
-        self.model_mesh_paths = ['{}/models/{}/textured_simple.obj'.format(self._ycb_object_path, cls) for cls in self._classes_all[1:]]
-        self.model_texture_paths = ['{}/models/{}/texture_map.png'.format(self._ycb_object_path, cls) for cls in self._classes_all[1:]]
+        self.model_sdf_paths = ['{}/models/{}/textured_simple_low_res.pth'.format(self._ycb_object_path, cls) for cls in self._classes_all[1:22]]
         self.model_colors = [np.array(self._class_colors_all[i]) / 255.0 for i in range(1, len(self._classes_all))]
 
-        self.model_mesh_paths_target = ['{}/models/{}/textured_simple.obj'.format(self._ycb_object_path, cls) for cls in self._classes]
-        self.model_texture_paths_target = ['{}/models/{}/texture_map.png'.format(self._ycb_object_path, cls) for cls in self._classes]
-        self.model_colors_target = [np.array(self._class_colors_all[i]) / 255.0 for i in cfg.TRAIN.CLASSES]
+        self.model_mesh_paths = []
+        for cls in self._classes_all[1:]:
+            filename = '{}/models/{}/textured_simple.obj'.format(self._ycb_object_path, cls)
+            if os.path.exists(filename):
+                self.model_mesh_paths.append(filename)
+                continue
+            filename = '{}/models/{}/textured_simple.ply'.format(self._ycb_object_path, cls)
+            if os.path.exists(filename):
+                self.model_mesh_paths.append(filename)
+
+        self.model_texture_paths = []
+        for cls in self._classes_all[1:]:
+            filename = '{}/models/{}/texture_map.png'.format(self._ycb_object_path, cls)
+            if os.path.exists(filename):
+                self.model_texture_paths.append(filename)
+            else:
+                self.model_texture_paths.append('')
+
+        # target meshes
+        self.model_colors_target = [np.array(self._class_colors_all[i]) / 255.0 for i in cfg.TRAIN.CLASSES[1:]]
+        self.model_mesh_paths_target = []
+        for cls in self._classes[1:]:
+            filename = '{}/models/{}/textured_simple.obj'.format(self._ycb_object_path, cls)
+            if os.path.exists(filename):
+                self.model_mesh_paths_target.append(filename)
+                continue
+            filename = '{}/models/{}/textured_simple.ply'.format(self._ycb_object_path, cls)
+            if os.path.exists(filename):
+                self.model_mesh_paths_target.append(filename)
+
+        self.model_texture_paths_target = []
+        for cls in self._classes[1:]:
+            filename = '{}/models/{}/texture_map.png'.format(self._ycb_object_path, cls)
+            if os.path.exists(filename):
+                self.model_texture_paths_target.append(filename)
+            else:
+                self.model_texture_paths_target.append('')
 
         self._class_to_ind = dict(zip(self._classes, xrange(self._num_classes)))
         self._image_ext = '.png'
-        self._image_index = self._load_image_set_index(image_set)
+        self._image_index, size = self._load_image_set_index(image_set)
 
-        if len(self._image_index) == 0:
+        if size == 0:
             self._size = cfg.TRAIN.SYNNUM
         else:
-            self._size = len(self._image_index) * (cfg.TRAIN.SYN_RATIO+1)
+            self._size = size * (cfg.TRAIN.SYN_RATIO+1)
 
         self._roidb = self.gt_roidb()
         if cfg.MODE == 'TRAIN' or cfg.TEST.VISUALIZE:
@@ -550,8 +584,9 @@ class YCBEncoderSelfSupervision(data.Dataset, datasets.imdb):
         """
         Load the indexes of images in the data folder
         """
+        # each class has a index list
+        image_index = [[] for i in range(len(cfg.TRAIN.CLASSES))]
 
-        image_index = []
         subdirs = os.listdir(self._data_path)
         for i in xrange(len(subdirs)):
             subdir = subdirs[i]
@@ -559,26 +594,26 @@ class YCBEncoderSelfSupervision(data.Dataset, datasets.imdb):
             files = glob.glob(filename)
             for j in range(len(files)):
                 filename = files[j]
+                head, name = os.path.split(filename)
+                index = subdir + '/' + name[:-9]
 
                 # load the annotation to see if the target object is in the image
                 meta_data = scipy.io.loadmat(filename)
                 cls_indexes = meta_data['cls_indexes'].flatten()
-                flag = 0
                 for k in range(len(cls_indexes)):
                     cls_index = int(cls_indexes[k])
                     ind = np.where(np.array(cfg.TRAIN.CLASSES) == cls_index)[0]
                     if len(ind) > 0:
-                        flag = 1
-
-                if flag:
-                    head, name = os.path.split(filename)
-                    index = subdir + '/' + name[:-9]
-                    image_index.append(index)
+                        image_index[ind[0]].append(index)
 
         print('=======================================================')
-        print('%d image in %s' % (len(image_index), self._data_path))
+        size = 0
+        for i in range(len(cfg.TRAIN.CLASSES)):
+            size = max(size, len(image_index[i]))
+            print('%s: %d image' % (self._classes[i], len(image_index[i])))
+        print('in %s' % (self._data_path))
         print('=======================================================')
-        return image_index
+        return image_index, size
 
 
     def _load_object_extents(self):
@@ -660,8 +695,10 @@ class YCBEncoderSelfSupervision(data.Dataset, datasets.imdb):
         This function loads/saves from/to a cache file to speed up future calls.
         """
 
-        gt_roidb = [self._load_ycb_encoder_self_supervision_annotation(index)
-                    for index in self._image_index]
+        gt_roidb = [[] for i in range(len(cfg.TRAIN.CLASSES))]
+        for i in range(len(cfg.TRAIN.CLASSES)):
+            gt_roidb[i] = [self._load_ycb_encoder_self_supervision_annotation(index)
+                for index in self._image_index[i]]
 
         return gt_roidb
 
