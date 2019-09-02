@@ -168,10 +168,8 @@ class ImageListener:
 
     def callback_rgbd(self, rgb, depth):
 
+        # Tbr = get_relative_pose_from_tf(self.listener, 'measured/camera_link', 'measured/base_link')
         Tbr = get_relative_pose_from_tf(self.listener, 'measured/camera_link', 'measured/base_link')
-
-        self.q_br = mat2quat(Tbr[:3, :3])
-        self.t_br = Tbr[:3, 3]
 
         if depth.encoding == '32FC1':
             depth_cv = self.cv_bridge.imgmsg_to_cv2(depth)
@@ -195,6 +193,8 @@ class ImageListener:
             self.depth = depth_cv.copy()
             self.rgb_frame_id = rgb.header.frame_id
             self.rgb_frame_stamp = rgb.header.stamp
+            self.q_br = mat2quat(Tbr[:3, :3]).copy()
+            self.t_br = Tbr[:3, 3].copy()
 
     def run_network(self):
 
@@ -205,6 +205,8 @@ class ImageListener:
             depth_cv = self.depth.copy()
             rgb_frame_id = self.rgb_frame_id
             rgb_frame_stamp = self.rgb_frame_stamp
+            q_br = self.q_br.copy()
+            t_br = self.t_br.copy()
 
         fusion_type = '_rgb_'
         if cfg.TRAIN.VERTEX_REG_DELTA:
@@ -213,6 +215,7 @@ class ImageListener:
         if self.net_compare is not None:
             self.run_posecnn_flag = True
 
+        self.run_posecnn_flag = True
         if self.run_posecnn_flag:
             rois, seg_im, poses, im_label = test_image_simple(self.net, self.dataset, im, depth_cv)
             self.run_posecnn_flag = False
@@ -252,7 +255,7 @@ class ImageListener:
         self.depth_pub.publish(depth_msg)
 
         # forward kinematics
-        self.br.sendTransform(self.t_br, [self.q_br[1], self.q_br[2], self.q_br[3], self.q_br[0]],
+        self.br.sendTransform(t_br, [q_br[1], q_br[2], q_br[3], q_br[0]],
                               rgb_frame_stamp, 'posecnn_camera_link', 'measured/base_link')
 
         indexes = np.zeros((self.dataset.num_classes, ), dtype=np.int32)
