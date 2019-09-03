@@ -185,10 +185,10 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         # compute the canonical distance to render
         margin = 20
         self.render_depths = self.compute_render_depths(margin)
-        self.lb_shift = -margin
-        self.ub_shift = margin
-        self.lb_scale = 0.8
-        self.ub_scale = 1.2
+        self.lb_shift = -margin / 2
+        self.ub_shift = margin / 2
+        self.lb_scale = 0.9
+        self.ub_scale = 1.1
         self.cls_target = 0
 
 
@@ -292,7 +292,7 @@ class YCBEncoder(data.Dataset, datasets.imdb):
 
             while 1:
                 # sample occluders
-                if np.random.rand(1) < 0.8:
+                if np.random.rand(1) < 0.5:
                     num_occluder = 3
 
                     if len(cls_indexes) == 1:

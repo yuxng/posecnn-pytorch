@@ -152,9 +152,7 @@ if __name__ == '__main__':
     elif args.solver == 'sgd':
         optimizer = torch.optim.SGD(param_groups, cfg.TRAIN.LEARNING_RATE,
                                     momentum=cfg.TRAIN.MOMENTUM)
-
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, \
-        milestones=[m - args.startepoch for m in cfg.TRAIN.MILESTONES], gamma=cfg.TRAIN.GAMMA)
+        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[m - args.startepoch for m in cfg.TRAIN.MILESTONES], gamma=cfg.TRAIN.GAMMA)
     cfg.epochs = args.epochs
 
     # optimizer for discriminator
@@ -163,14 +161,12 @@ if __name__ == '__main__':
                                       {'params': network.module.weight_parameters_discriminator(), 'weight_decay': cfg.TRAIN.WEIGHT_DECAY}]
         optimizer_discriminator = torch.optim.Adam(param_groups_discriminator, cfg.TRAIN.LEARNING_RATE,
                                      betas=(cfg.TRAIN.MOMENTUM, cfg.TRAIN.BETA))
-        scheduler_discriminator = torch.optim.lr_scheduler.MultiStepLR(optimizer_discriminator, \
-            milestones=[m - args.startepoch for m in cfg.TRAIN.MILESTONES], gamma=cfg.TRAIN.GAMMA)
 
     for epoch in range(args.startepoch, args.epochs):
-        scheduler.step()
+        if args.solver == 'sgd':
+            scheduler.step()
         
         if args.network_name == 'autoencoder':
-            scheduler_discriminator.step()
             train_autoencoder(dataloader, background_loader, network, optimizer, optimizer_discriminator, epoch)
         else:
             train(dataloader, background_loader, network, optimizer, epoch)
