@@ -179,16 +179,23 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         self._build_uniform_poses()
         self._losses_pose = np.zeros((self._num_classes, self._size), dtype=np.float32)
 
+        # load poserbpf poses
+        if cfg.MODE == 'TEST' and cfg.TEST.BUILD_CODEBOOK:
+            filename = os.path.join(self._ycb_object_path, 'pose_list.pth')
+            poses_rbpf = torch.load(filename)
+            self.poses_rbpf = poses_rbpf.cpu().numpy()
+            self._size = self.poses_rbpf.shape[0]
+
         assert os.path.exists(self._ycb_object_path), \
                 'ycb_object path does not exist: {}'.format(self._ycb_object_path)
 
         # compute the canonical distance to render
         margin = 20
         self.render_depths = self.compute_render_depths(margin)
-        self.lb_shift = -margin / 2
-        self.ub_shift = margin / 2
-        self.lb_scale = 0.9
-        self.ub_scale = 1.1
+        self.lb_shift = -margin
+        self.ub_shift = margin
+        self.lb_scale = 0.8
+        self.ub_scale = 1.2
         self.cls_target = 0
 
 
@@ -249,20 +256,24 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         poses_all = []
         cls = int(cls_indexes[0])
         extent_target = np.mean(self._extents_all[cls+1, :])
-        if self.pose_indexes[cls] >= len(self.pose_lists[cls]):
-            self.pose_indexes[cls] = 0
-            self.pose_lists[cls] = np.random.permutation(np.arange(len(self.eulers)))
-        index_euler = self.pose_lists[cls][self.pose_indexes[cls]]
 
-        # use hard pose
-        if (sample_index + 1) % cfg.TRAIN.IMS_PER_BATCH == 0:
-            index_euler = np.argmax(self._losses_pose[cls_target, :])
+        if cfg.MODE == 'TEST' and cfg.TEST.BUILD_CODEBOOK:
+            qt[3:] = self.poses_rbpf[sample_index, 3:]
+        else:
+            if self.pose_indexes[cls] >= len(self.pose_lists[cls]):
+                self.pose_indexes[cls] = 0
+                self.pose_lists[cls] = np.random.permutation(np.arange(len(self.eulers)))
+            index_euler = self.pose_lists[cls][self.pose_indexes[cls]]
 
-        yaw = self.eulers[index_euler][0] + interval * np.random.randn()
-        pitch = self.eulers[index_euler][1] + interval * np.random.randn()
-        roll = self.eulers[index_euler][2] + interval * np.random.randn()
-        qt[3:] = euler2quat(roll * math.pi / 180.0, pitch * math.pi / 180.0, yaw * math.pi / 180.0, 'syxz')
-        self.pose_indexes[cls] += 1
+            # use hard pose
+            if (sample_index + 1) % cfg.TRAIN.IMS_PER_BATCH == 0:
+                index_euler = np.argmax(self._losses_pose[cls_target, :])
+
+            yaw = self.eulers[index_euler][0] + interval * np.random.randn()
+            pitch = self.eulers[index_euler][1] + interval * np.random.randn()
+            roll = self.eulers[index_euler][2] + interval * np.random.randn()
+            qt[3:] = euler2quat(roll * math.pi / 180.0, pitch * math.pi / 180.0, yaw * math.pi / 180.0, 'syxz')
+            self.pose_indexes[cls] += 1
 
         qt[0] = 0
         qt[1] = 0
@@ -292,7 +303,7 @@ class YCBEncoder(data.Dataset, datasets.imdb):
 
             while 1:
                 # sample occluders
-                if np.random.rand(1) < 0.5:
+                if np.random.rand(1) < 0.8:
                     num_occluder = 3
 
                     if len(cls_indexes) == 1:

@@ -1106,9 +1106,13 @@ def test_autoencoder(test_loader, background_loader, network, output_dir):
     cls = test_loader.dataset.classes[0]
 
     if cfg.TEST.BUILD_CODEBOOK:
-        num = len(test_loader.dataset.eulers)
+        num = test_loader.dataset._size
         codes = np.zeros((num, cfg.TRAIN.NUM_UNITS), dtype=np.float32)
         poses = np.zeros((num, 7), dtype=np.float32)
+        codebook_cpt_poserbpf = torch.zeros(num, cfg.TRAIN.NUM_UNITS).cuda().detach()
+        codepose_cpt_poserbpf = torch.zeros(num, 7).cuda().detach()
+        codebook_poserbpf = torch.zeros(1, num, cfg.TRAIN.NUM_UNITS).cuda().detach()
+        codepose_poserbpf = torch.zeros(1, num,  7).cuda().detach()
         count = 0
     else:
         # check if codebook exists
@@ -1143,12 +1147,13 @@ def test_autoencoder(test_loader, background_loader, network, output_dir):
             enum_background = enumerate(background_loader)
             _, background = next(enum_background)
 
-        if image.size(0) != background['background_color'].size(0):
+        num = image.size(0)
+        if background['background_color'].size(0) < num:
             enum_background = enumerate(background_loader)
             _, background = next(enum_background)
 
         background_color = background['background_color'].cuda()
-        inputs = mask * image + (1 - mask) * background_color
+        inputs = mask * image + (1 - mask) * background_color[:num]
         inputs = torch.clamp(inputs, min=0.0, max=1.0)
 
         # compute output
@@ -1160,8 +1165,10 @@ def test_autoencoder(test_loader, background_loader, network, output_dir):
         im_render = None
         if cfg.TEST.BUILD_CODEBOOK:
             num = embeddings.shape[0]
-            codes[count:count+num] = embeddings.cpu().detach().numpy()
-            poses[count:count+num] = sample['pose_target']
+            codes[count:count+num, :] = embeddings.cpu().detach().numpy()
+            poses[count:count+num, :] = sample['pose_target']
+            codebook_cpt_poserbpf[count:count+num, :] = embeddings.detach()
+            codepose_cpt_poserbpf[count:count+num, :] = sample['pose_target'].cuda()
             count += num
         elif codebook is not None:
             # codebook matching
@@ -1193,6 +1200,12 @@ def test_autoencoder(test_loader, background_loader, network, output_dir):
         filename = os.path.join(output_dir, 'codebook_%s.mat' % (test_loader.dataset.name + '_' + cls))
         print('save codebook to %s' % (filename))
         scipy.io.savemat(filename, codebook, do_compression=True)
+
+        codebook_poserbpf[0] = codebook_cpt_poserbpf
+        codepose_poserbpf[0] = codepose_cpt_poserbpf
+        filename = os.path.join(output_dir, 'codebook_%s.pth' % (test_loader.dataset.name + '_' + cls))
+        torch.save((codebook_poserbpf, codepose_poserbpf), filename)
+        print('code book is saved to {}'.format(filename))
 
 
 def optimize_depths(rois, poses, points, points_clamp, intrinsic_matrix):

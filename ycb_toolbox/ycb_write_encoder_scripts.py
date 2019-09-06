@@ -96,7 +96,7 @@ for i in range(len(classes)):
         f.write('  SYN_HEIGHT: 128\n')
         f.write('TEST:\n')
         f.write('  SCALES_BASE: !!python/tuple [1.0]\n')
-        f.write('  IMS_PER_BATCH: 256\n')
+        f.write('  IMS_PER_BATCH: 512\n')
         f.write('  VISUALIZE: False\n')
         f.write('  SYNTHESIZE: True\n')
         f.write('  BUILD_CODEBOOK: True\n')

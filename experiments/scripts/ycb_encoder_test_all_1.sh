@@ -19,4 +19,5 @@ do
 
     # copy codebook
     cp output/ycb_object/ycb_encoder_test/ycb_object_"$i"/codebook_ycb_encoder_test_"$i".mat data/codebooks
+    cp output/ycb_object/ycb_encoder_test/ycb_object_"$i"/codebook_ycb_encoder_test_"$i".pth data/codebooks
 done
