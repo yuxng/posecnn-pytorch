@@ -137,6 +137,9 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
             self._size = len(self._image_index) * (cfg.TRAIN.SYN_RATIO+1)
         else:
             self._size = len(self._image_index)
+
+        self._size = 10
+
         if self._size > cfg.TRAIN.MAX_ITERS_PER_EPOCH * cfg.TRAIN.IMS_PER_BATCH:
             self._size = cfg.TRAIN.MAX_ITERS_PER_EPOCH * cfg.TRAIN.IMS_PER_BATCH
         self._roidb = self.gt_roidb()
@@ -504,7 +507,8 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
                   'points': self._point_blob,
                   'symmetry': self._symmetry,
                   'gt_boxes': gt_boxes,
-                  'im_info': im_info}
+                  'im_info': im_info,
+                  'meta_data_path': roidb['meta_data']}
 
         if cfg.TRAIN.VERTEX_REG:
             sample['vertex_targets'] = vertex_targets
@@ -772,13 +776,21 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
         subdirs = os.listdir(self._data_path)
         for i in xrange(len(subdirs)):
             subdir = subdirs[i]
-            filename = os.path.join(self._data_path, subdir, '*.mat')
-            files = glob.glob(filename)
-            for j in range(len(files)):
-                filename = files[j]
-                head, name = os.path.split(filename)
-                index = subdir + '/' + name[:-9]
-                image_index.append(index)
+            path_sub = osp.join(self._data_path, subdir)
+
+            # list subsubdirs
+            subsubdirs = os.listdir(path_sub)
+            for j in range(len(subsubdirs)):
+                subsubdir = subsubdirs[j]
+                folder = osp.join(self._data_path, subdir, subsubdir)
+                if osp.isdir(folder):
+                    filename = os.path.join(folder, '*.mat')
+                    files = glob.glob(filename)
+                    for k in range(len(files)):
+                        filename = files[k]
+                        head, name = os.path.split(filename)
+                        index = subdir + '/' + subsubdir + '/' + name[:-9]
+                        image_index.append(index)
 
         print('=======================================================')
         print('%d image in %s' % (len(image_index), self._data_path))
@@ -951,6 +963,99 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
         return labels, labels_all
 
 
+    def render_gt_pose(self, meta_data):
+
+        width = self._width
+        height = self._height
+        meta_data['cls_indexes'] = meta_data['cls_indexes'].flatten()
+        classes = np.array(cfg.TRAIN.CLASSES)
+        classes_test = np.array(cfg.TEST.CLASSES).flatten()
+
+        intrinsic_matrix = np.matrix(meta_data['intrinsic_matrix'])
+        fx = intrinsic_matrix[0, 0]
+        fy = intrinsic_matrix[1, 1]
+        px = intrinsic_matrix[0, 2]
+        py = intrinsic_matrix[1, 2]
+        zfar = 6.0
+        znear = 0.01
+
+        # poses
+        poses = meta_data['poses']
+        if len(poses.shape) == 2:
+            poses = np.reshape(poses, (3, 4, 1))
+        num = poses.shape[2]
+
+        # render poses to get the label image
+        cls_indexes = []
+        poses_all = []
+        qt = np.zeros((7, ), dtype=np.float32)
+        for i in range(num):
+            RT = poses[:, :, i]
+            qt[:3] = RT[:, 3]
+            qt[3:] = mat2quat(RT[:, :3])
+            if cfg.MODE == 'TEST':
+                index = np.where(classes_test == meta_data['cls_indexes'][i])[0]
+                cls_indexes.append(index[0])
+            else:
+                cls_indexes.append(meta_data['cls_indexes'][i] - 1)
+            poses_all.append(qt.copy())
+            
+        # rendering
+        cfg.renderer.set_poses(poses_all)
+        cfg.renderer.set_light_pos([0, 0, 0])
+        cfg.renderer.set_light_color([1, 1, 1])
+        cfg.renderer.set_projection_matrix(width, height, fx, fy, px, py, znear, zfar)
+        image_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
+        seg_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
+        cfg.renderer.render(cls_indexes, image_tensor, seg_tensor)
+        image_tensor = image_tensor.flip(0)
+        seg_tensor = seg_tensor.flip(0)
+
+        # semantic labels
+        im_label = seg_tensor.cpu().numpy()
+        im_label = im_label[:, :, (2, 1, 0)] * 255
+        im_label = np.round(im_label).astype(np.uint8)
+        im_label = np.clip(im_label, 0, 255)
+        im_label, im_label_all = self.process_label_image(im_label)
+
+        # foreground mask
+        seg = torch.from_numpy((im_label != 0).astype(np.float32))
+        mask = seg.unsqueeze(0).repeat((3, 1, 1)).float().cuda()
+
+        # gt boxes
+        gt_boxes = np.zeros((self._num_classes, 5), dtype=np.float32)
+        count = 0
+        for i in xrange(num):
+            cls = int(meta_data['cls_indexes'][i])
+            ind = np.where(classes == cls)[0]
+            if len(ind) > 0:
+                R = poses[:, :3, i]
+                T = poses[:, 3, i]
+
+                # compute box
+                x3d = np.ones((4, self._points_all.shape[1]), dtype=np.float32)
+                x3d[0, :] = self._points_all[ind,:,0]
+                x3d[1, :] = self._points_all[ind,:,1]
+                x3d[2, :] = self._points_all[ind,:,2]
+                RT = np.zeros((3, 4), dtype=np.float32)
+                RT[:3, :3] = R
+                RT[:, 3] = T
+                x2d = np.matmul(meta_data['intrinsic_matrix'], np.matmul(RT, x3d))
+                x2d[0, :] = np.divide(x2d[0, :], x2d[2, :])
+                x2d[1, :] = np.divide(x2d[1, :], x2d[2, :])
+        
+                gt_boxes[count, 0] = np.min(x2d[0, :])
+                gt_boxes[count, 1] = np.min(x2d[1, :])
+                gt_boxes[count, 2] = np.max(x2d[0, :])
+                gt_boxes[count, 3] = np.max(x2d[1, :])
+                gt_boxes[count, 4] = ind
+                count += 1
+
+        meta_data['im_label'] = im_label
+        meta_data['box'] = gt_boxes[:count, :4]
+        return meta_data
+
+
     def evaluation(self, output_dir):
 
         filename = os.path.join(output_dir, 'results_posecnn.mat')
@@ -962,7 +1067,6 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
             distances_non = results_all['distances_non']
             errors_rotation = results_all['errors_rotation']
             errors_translation = results_all['errors_translation']
-            results_seq_id = results_all['results_seq_id'].flatten()
             results_frame_id = results_all['results_frame_id'].flatten()
             results_object_id = results_all['results_object_id'].flatten()
             results_cls_id = results_all['results_cls_id'].flatten()
@@ -974,28 +1078,49 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
             distances_non = np.zeros((num_max, num_results), dtype=np.float32)
             errors_rotation = np.zeros((num_max, num_results), dtype=np.float32)
             errors_translation = np.zeros((num_max, num_results), dtype=np.float32)
-            results_seq_id = np.zeros((num_max, ), dtype=np.float32)
             results_frame_id = np.zeros((num_max, ), dtype=np.float32)
             results_object_id = np.zeros((num_max, ), dtype=np.float32)
             results_cls_id = np.zeros((num_max, ), dtype=np.float32)
 
             # for each image
             count = -1
-            for i in range(len(self._roidb)):
-    
-                # parse keyframe name
-                seq_id = int(self._roidb[i]['video_id'])
-                frame_id = int(self._roidb[i]['image_id'])
+            filename = os.path.join(output_dir, '*.mat')
+            files = glob.glob(filename)
+            for i in range(len(files)):
 
                 # load result
-                filename = os.path.join(output_dir, '%04d_%06d.mat' % (seq_id, frame_id))
+                filename = files[i]
                 print(filename)
                 result_posecnn = scipy.io.loadmat(filename)
 
                 # load gt poses
-                filename = osp.join(self._data_path, '%04d/%06d-meta.mat' % (seq_id, frame_id))
+                filename = result_posecnn['meta_data_path'][0]
                 print(filename)
                 gt = scipy.io.loadmat(filename)
+
+                # render gt poses
+                gt = self.render_gt_pose(gt)
+
+                '''
+                import matplotlib.pyplot as plt
+                fig = plt.figure()
+                im_file = filename.replace('_meta.mat', '_color.png')
+                im = cv2.imread(im_file)
+                ax = fig.add_subplot(2, 2, 1)
+                plt.imshow(im[:, :, (2, 1, 0)])
+                for i in range(gt['box'].shape[0]):
+                    x1 = gt['box'][i, 0]
+                    y1 = gt['box'][i, 1]
+                    x2 = gt['box'][i, 2]
+                    y2 = gt['box'][i, 3]
+                    plt.gca().add_patch(plt.Rectangle((x1, y1), x2-x1, y2-y1, fill=False, edgecolor='g', linewidth=3))
+                ax = fig.add_subplot(2, 2, 2)
+                plt.imshow(gt['im_label'])
+                ax = fig.add_subplot(2, 2, 3)
+                print(result_posecnn['labels'])
+                plt.imshow(result_posecnn['labels'].astype(np.int32))
+                plt.show()
+                #'''
 
                 # for each gt poses
                 cls_indexes = gt['cls_indexes'].flatten()
@@ -1004,8 +1129,7 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
                     cls_index = cls_indexes[j]
                     RT_gt = gt['poses'][:, :, j]
 
-                    results_seq_id[count] = seq_id
-                    results_frame_id[count] = frame_id
+                    results_frame_id[count] = i
                     results_object_id[count] = j
                     results_cls_id[count] = cls_index
 
@@ -1015,10 +1139,7 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
                     if len(result['rois']) > 0:     
                         for k in range(result['rois'].shape[0]):
                             ind = int(result['rois'][k, 1])
-                            if ind == -1:
-                                cls = 19
-                            else:
-                                cls = cfg.TRAIN.CLASSES[ind]
+                            cls = cfg.TRAIN.CLASSES[ind]
                             if cls == cls_index:
                                 roi_index.append(k)                   
 
@@ -1074,7 +1195,6 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
             distances_non = distances_non[:count+1, :]
             errors_rotation = errors_rotation[:count+1, :]
             errors_translation = errors_translation[:count+1, :]
-            results_seq_id = results_seq_id[:count+1]
             results_frame_id = results_frame_id[:count+1]
             results_object_id = results_object_id[:count+1]
             results_cls_id = results_cls_id[:count+1]
@@ -1083,7 +1203,6 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
                        'distances_non': distances_non,
                        'errors_rotation': errors_rotation,
                        'errors_translation': errors_translation,
-                       'results_seq_id': results_seq_id,
                        'results_frame_id': results_frame_id,
                        'results_object_id': results_object_id,
                        'results_cls_id': results_cls_id }
@@ -1097,7 +1216,7 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
         max_distance = 0.1
         index_plot = [0, 1]
         color = ['r', 'b']
-        leng = ['PoseCNN', 'PoseCNN refined']
+        leng = ['PoseCNN', 'refined']
         num = len(leng)
         ADD = np.zeros((self._num_classes_all, num), dtype=np.float32)
         ADDS = np.zeros((self._num_classes_all, num), dtype=np.float32)

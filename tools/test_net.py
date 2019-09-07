@@ -121,7 +121,8 @@ if __name__ == '__main__':
         print(dataset._intrinsic_matrix)
 
     output_dir = get_output_dir(dataset, None)
-    output_dir = osp.join(output_dir, cfg.TRAIN.SNAPSHOT_INFIX)
+    head, name = osp.split(args.pretrained)
+    output_dir = osp.join(output_dir, name[:-15])
     print('Output will be saved to `{:s}`'.format(output_dir))
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)

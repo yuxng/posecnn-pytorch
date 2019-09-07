@@ -543,8 +543,8 @@ def test(test_loader, background_loader, network, pose_rbpf, output_dir):
                 im_depth = sample['im_depth'].numpy()[0]
                 if cfg.TEST.POSE_REFINE:
                     labels_out = out_label.detach().cpu().numpy()[0]
-                    poses, poses_refined, cls_render_ids = refine_pose(labels_out, im_depth, rois, poses, test_loader.dataset)
-                    if pose_rbpf is not None:
+                    poses, poses_refined, cls_render_ids = refine_pose(labels_out, im_depth, rois, poses, sample['meta_data'], test_loader.dataset)
+                    if pose_rbpf is not None and cfg.TEST.VISUALIZE:
                         sims, depth_errors, vis_ratios, pose_scores = eval_poses(pose_rbpf, poses_refined, rois, im_rgb, im_depth, sample['meta_data'])
                 else:
                     num = rois.shape[0]
@@ -625,10 +625,12 @@ def test(test_loader, background_loader, network, pose_rbpf, output_dir):
         batch_time.update(time.time() - end)
 
         if not cfg.TEST.VISUALIZE:
-            result = {'labels': out_label, 'rois': rois, 'poses': poses, 'poses_refined': poses_refined}
+            result = {'labels': labels_out, 'rois': rois, 'poses': poses, 'poses_refined': poses_refined}
             if 'video_id' in sample and 'image_id' in sample:
                 filename = os.path.join(output_dir, sample['video_id'][0] + '_' + sample['image_id'][0] + '.mat')
             else:
+                result['meta_data_path'] = sample['meta_data_path']
+                print(result['meta_data_path'])
                 filename = os.path.join(output_dir, '%06d.mat' % i)
             print(filename)
             scipy.io.savemat(filename, result, do_compression=True)
@@ -1294,10 +1296,10 @@ def backproject(depth_cv, intrinsic_matrix):
     return np.array(X).transpose()
 
 
-def refine_pose(im_label, im_depth, rois, poses, dataset):
+def refine_pose(im_label, im_depth, rois, poses, meta_data, dataset):
 
     # backprojection
-    intrinsic_matrix = dataset._intrinsic_matrix
+    intrinsic_matrix = meta_data[0, :9].cpu().numpy().reshape((3, 3))
     poses_refined = poses.copy()
     dpoints = backproject(im_depth, intrinsic_matrix)
     width = im_depth.shape[1]
@@ -1366,7 +1368,6 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
 
         if len(index) > 10:
             T = np.mean(dpoints[index, :] - pcloud[index, :], axis=0)
-            print(T)
             poses_refined[i, 6] += T[2]
             poses_refined[i, 4] *= poses_refined[i, 6]
             poses_refined[i, 5] *= poses_refined[i, 6]
@@ -1423,7 +1424,7 @@ def refine_pose(im_label, im_depth, rois, poses, dataset):
                 RT[:3, 3] = T
                 RT[3, 3] = 1.0
                 T_co_init = RT
-                T_co_opt, sdf_values = sdf_optim.refine_pose_layer(T_co_init, points.cuda(), steps=200)
+                T_co_opt, sdf_values = sdf_optim.refine_pose_layer(T_co_init, points.cuda(), steps=cfg.TEST.NUM_SDF_ITERATIONS)
                 RT_opt = T_co_opt
                 poses_refined[i, :4] = mat2quat(RT_opt[:3, :3])
                 poses_refined[i, 4:] = RT_opt[:3, 3]
