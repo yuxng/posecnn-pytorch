@@ -205,6 +205,7 @@ def train(train_loader, background_loader, network, optimizer, epoch):
                     inputs[j,6] = mask[j,0] * inputs[j,6] + (1 - mask[j,0]) * background_mask[j]
 
         if cfg.TRAIN.VISUALIZE:
+            # print(sample['meta_data_path'])
             _vis_minibatch(inputs, background, labels, vertex_targets, sample, train_loader.dataset.class_colors)
 
         # compute output

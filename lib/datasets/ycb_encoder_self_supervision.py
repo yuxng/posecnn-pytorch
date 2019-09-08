@@ -435,8 +435,11 @@ class YCBEncoderSelfSupervision(data.Dataset, datasets.imdb):
         self._cur[ind] += 1
 
         random_scale_ind = npr.randint(0, high=len(cfg.TRAIN.SCALES_BASE))
-        sample = self._get_image_item(roidb, random_scale_ind)
-        return sample
+        sample, flag_bad = self._get_image_item(roidb, random_scale_ind)
+        if flag_bad:
+            return self._render_item(index)
+        else:
+            return sample
 
 
     def _get_image_item(self, roidb, scale_ind):
@@ -538,6 +541,10 @@ class YCBEncoderSelfSupervision(data.Dataset, datasets.imdb):
 
         # crop the rois from input image
         im_roi_cuda, scale_roi = self.trans_zoom_uvz_cuda(im_cuda, uv, z, fx_data, fy_data, render_dist)
+        if torch.sum(im_roi_cuda) == 0:
+            flag_bad = 1
+        else:
+            flag_bad = 0
 
         # affine transformation
         shift = np.float32([np.random.uniform(self.lb_shift, self.ub_shift), np.random.uniform(self.lb_shift, self.ub_shift)])
@@ -558,7 +565,7 @@ class YCBEncoderSelfSupervision(data.Dataset, datasets.imdb):
                   'cls_index': torch.from_numpy(np.array([cls_target]).astype(np.float32)),
                   'pose_target': pose_target}
 
-        return sample
+        return sample, flag_bad
 
 
     def trans_zoom_uvz_cuda(self, image, uvs, zs, pf_fu, pf_fv, target_distance=2.5, out_size=128):
@@ -617,11 +624,20 @@ class YCBEncoderSelfSupervision(data.Dataset, datasets.imdb):
         """
         Load the indexes of images in the data folder
         """
+
+        image_set_file = os.path.join(self._ycb_object_path, image_set + '.txt')
+        assert os.path.exists(image_set_file), \
+                'Path does not exist: {}'.format(image_set_file)
+
+        subdirs = []
+        with open(image_set_file) as f:
+            for x in f.readlines():
+                subdirs.append(x.rstrip('\n'))
+
         # each class has a index list
         image_index = [[] for i in range(len(cfg.TRAIN.CLASSES))]
 
-        subdirs = os.listdir(self._data_path)
-        for i in xrange(len(subdirs)):
+        for i in range(len(subdirs)):
             subdir = subdirs[i]
             filename = os.path.join(self._data_path, subdir, '*.mat')
             files = glob.glob(filename)

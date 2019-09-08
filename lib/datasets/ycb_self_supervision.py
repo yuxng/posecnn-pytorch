@@ -138,8 +138,6 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
         else:
             self._size = len(self._image_index)
 
-        self._size = 10
-
         if self._size > cfg.TRAIN.MAX_ITERS_PER_EPOCH * cfg.TRAIN.IMS_PER_BATCH:
             self._size = cfg.TRAIN.MAX_ITERS_PER_EPOCH * cfg.TRAIN.IMS_PER_BATCH
         self._roidb = self.gt_roidb()
@@ -370,19 +368,15 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
         # poses and boxes
         pose_blob = np.zeros((self.num_classes, 9), dtype=np.float32)
         gt_boxes = np.zeros((self.num_classes, 5), dtype=np.float32)
+        count = 0
         for i in xrange(num_target):
             cls = int(indexes_target[i])
-            pose_blob[i, 0] = 1
-            pose_blob[i, 1] = cls
             T = poses_all[i][:3]
             qt = poses_all[i][3:]
 
-            # egocentric to allocentric
-            qt_allocentric = egocentric2allocentric(qt, T)
-            if qt_allocentric[0] < 0:
-                qt_allocentric = -1 * qt_allocentric
-            pose_blob[i, 2:6] = qt_allocentric
-            pose_blob[i, 6:] = T
+            I = np.where(im_label == cls)
+            if len(I[0]) == 0:
+                continue
 
             # compute box
             x3d = np.ones((4, self._points_all.shape[1]), dtype=np.float32)
@@ -395,12 +389,29 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
             x2d = np.matmul(self._intrinsic_matrix, np.matmul(RT, x3d))
             x2d[0, :] = np.divide(x2d[0, :], x2d[2, :])
             x2d[1, :] = np.divide(x2d[1, :], x2d[2, :])
-        
-            gt_boxes[i, 0] = np.min(x2d[0, :])
-            gt_boxes[i, 1] = np.min(x2d[1, :])
-            gt_boxes[i, 2] = np.max(x2d[0, :])
-            gt_boxes[i, 3] = np.max(x2d[1, :])
-            gt_boxes[i, 4] = cls
+
+            x1 = np.min(x2d[0, :])
+            y1 = np.min(x2d[1, :])
+            x2 = np.max(x2d[0, :])
+            y2 = np.max(x2d[1, :])
+            if x1 > width or y1 > height or x2 < 0 or y2 < 0:
+                continue
+
+            gt_boxes[count, 0] = x1
+            gt_boxes[count, 1] = y1
+            gt_boxes[count, 2] = x2
+            gt_boxes[count, 3] = y2
+            gt_boxes[count, 4] = cls
+
+            pose_blob[count, 0] = 1
+            pose_blob[count, 1] = cls
+            # egocentric to allocentric
+            qt_allocentric = egocentric2allocentric(qt, T)
+            if qt_allocentric[0] < 0:
+                qt_allocentric = -1 * qt_allocentric
+            pose_blob[count, 2:6] = qt_allocentric
+            pose_blob[count, 6:] = T
+            count += 1
 
 
         # construct the meta data
@@ -438,7 +449,8 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
                   'points': self._point_blob,
                   'symmetry': self._symmetry,
                   'gt_boxes': gt_boxes,
-                  'im_info': im_info}
+                  'im_info': im_info,
+                  'meta_data_path': ''}
 
         if cfg.TRAIN.VERTEX_REG or cfg.TRAIN.VERTEX_REG_DELTA:
             sample['vertex_targets'] = vertex_targets
@@ -664,8 +676,39 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
             cls = int(meta_data['cls_indexes'][i])
             ind = np.where(classes == cls)[0]
             if len(ind) > 0:
+
+                I = np.where(im_label == ind[0])
+                if len(I[0]) == 0:
+                    continue
+
                 R = poses[:, :3, i]
                 T = poses[:, 3, i]
+
+                # compute box
+                x3d = np.ones((4, self._points_all.shape[1]), dtype=np.float32)
+                x3d[0, :] = self._points_all[ind,:,0]
+                x3d[1, :] = self._points_all[ind,:,1]
+                x3d[2, :] = self._points_all[ind,:,2]
+                RT = np.zeros((3, 4), dtype=np.float32)
+                RT[:3, :3] = R
+                RT[:, 3] = T
+                x2d = np.matmul(meta_data['intrinsic_matrix'], np.matmul(RT, x3d))
+                x2d[0, :] = np.divide(x2d[0, :], x2d[2, :])
+                x2d[1, :] = np.divide(x2d[1, :], x2d[2, :])
+
+                x1 = np.min(x2d[0, :]) * im_scale
+                y1 = np.min(x2d[1, :]) * im_scale
+                x2 = np.max(x2d[0, :]) * im_scale
+                y2 = np.max(x2d[1, :]) * im_scale
+                if x1 > width or y1 > height or x2 < 0 or y2 < 0:
+                    continue
+                gt_boxes[count, 0] = x1
+                gt_boxes[count, 1] = y1
+                gt_boxes[count, 2] = x2
+                gt_boxes[count, 3] = y2
+                gt_boxes[count, 4] = ind
+
+                # pose
                 pose_blob[count, 0] = 1
                 pose_blob[count, 1] = ind
                 qt = mat2quat(R)
@@ -676,24 +719,6 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
                    qt_allocentric = -1 * qt_allocentric
                 pose_blob[count, 2:6] = qt_allocentric
                 pose_blob[count, 6:] = T
-
-                # compute box
-                x3d = np.ones((4, self._points_all.shape[1]), dtype=np.float32)
-                x3d[0, :] = self._points_all[ind,:,0]
-                x3d[1, :] = self._points_all[ind,:,1]
-                x3d[2, :] = self._points_all[ind,:,2]
-                RT = np.zeros((3, 4), dtype=np.float32)
-                RT[:3, :3] = quat2mat(qt)
-                RT[:, 3] = T
-                x2d = np.matmul(meta_data['intrinsic_matrix'], np.matmul(RT, x3d))
-                x2d[0, :] = np.divide(x2d[0, :], x2d[2, :])
-                x2d[1, :] = np.divide(x2d[1, :], x2d[2, :])
-        
-                gt_boxes[count, 0] = np.min(x2d[0, :]) * im_scale
-                gt_boxes[count, 1] = np.min(x2d[1, :]) * im_scale
-                gt_boxes[count, 2] = np.max(x2d[0, :]) * im_scale
-                gt_boxes[count, 3] = np.max(x2d[1, :]) * im_scale
-                gt_boxes[count, 4] = ind
                 count += 1
 
         # construct the meta data
@@ -772,25 +797,26 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
         Load the indexes of images in the data folder
         """
 
-        image_index = []
-        subdirs = os.listdir(self._data_path)
-        for i in xrange(len(subdirs)):
-            subdir = subdirs[i]
-            path_sub = osp.join(self._data_path, subdir)
+        image_set_file = os.path.join(self._ycb_self_supervision_path, image_set + '.txt')
+        assert os.path.exists(image_set_file), \
+                'Path does not exist: {}'.format(image_set_file)
 
-            # list subsubdirs
-            subsubdirs = os.listdir(path_sub)
-            for j in range(len(subsubdirs)):
-                subsubdir = subsubdirs[j]
-                folder = osp.join(self._data_path, subdir, subsubdir)
-                if osp.isdir(folder):
-                    filename = os.path.join(folder, '*.mat')
-                    files = glob.glob(filename)
-                    for k in range(len(files)):
-                        filename = files[k]
-                        head, name = os.path.split(filename)
-                        index = subdir + '/' + subsubdir + '/' + name[:-9]
-                        image_index.append(index)
+        subdirs = []
+        with open(image_set_file) as f:
+            for x in f.readlines():
+                subdirs.append(x.rstrip('\n'))
+
+        image_index = []
+        for i in range(len(subdirs)):
+            subdir = subdirs[i]
+            folder = osp.join(self._data_path, subdir)
+            filename = os.path.join(folder, '*.mat')
+            files = glob.glob(filename)
+            for k in range(len(files)):
+                filename = files[k]
+                head, name = os.path.split(filename)
+                index = subdir + '/' + name[:-9]
+                image_index.append(index)
 
         print('=======================================================')
         print('%d image in %s' % (len(image_index), self._data_path))
