@@ -27,12 +27,15 @@ class PoseRBPF:
 
             # load autoencoder
             # filename = os.path.join('data', 'checkpoints', 'encoder_ycb_object_' + cls + '_epoch_200.checkpoint.pth')
-            filename = os.path.join('data', 'checkpoints', 'encoder_ycb_object_self_supervision_' + cls + '_epoch_100.checkpoint.pth')
+            # filename = os.path.join('data', 'checkpoints', 'encoder_ycb_object_self_supervision_' + cls + '_epoch_100.checkpoint.pth')
+            filename = os.path.join('output/ycb_encoder/ycb_encoder_train_3/', 'encoder_ycb_object_self_supervision_train_3_' + cls + '_epoch_20.checkpoint.pth')
             if os.path.exists(filename):
                 autoencoder_data = torch.load(filename)
                 autoencoders[i] = networks.__dict__['autoencoder'](1, 128, autoencoder_data).cuda(device=cfg.device)
                 autoencoders[i] = torch.nn.DataParallel(autoencoders[i], device_ids=[cfg.gpu_id]).cuda(device=cfg.device)
                 print(filename)
+            else:
+                print('file not exists %s' % (filename))
 
             filename = os.path.join('data', 'codebooks', 'codebook_ycb_encoder_test_' + cls + '.mat')
             if os.path.exists(filename):

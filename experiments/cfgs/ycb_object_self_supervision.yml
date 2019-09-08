@@ -58,7 +58,7 @@ TEST:
   NUM_SDF_ITERATIONS: 50
   DET_THRESHOLD: 0.2
   SCALES_BASE: !!python/tuple [1.0]
-  VISUALIZE: True
+  VISUALIZE: False
   SYNTHESIZE: False
   POSE_REFINE: True
   POSE_SDF: True

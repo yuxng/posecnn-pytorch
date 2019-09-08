@@ -20,6 +20,7 @@ from transforms3d.quaternions import mat2quat, quat2mat
 from utils.se3 import *
 from utils.pose_error import *
 from utils.cython_bbox import bbox_overlaps
+from utils.segmentation_evaluation import multilabel_metrics
 
 def VOCap(rec, prec):
     index = np.where(np.isfinite(rec))[0]
@@ -1051,7 +1052,8 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
         # gt boxes
         gt_boxes = np.zeros((self._num_classes, 5), dtype=np.float32)
         count = 0
-        for i in xrange(num):
+        selected = []
+        for i in range(num):
             cls = int(meta_data['cls_indexes'][i])
             ind = np.where(classes == cls)[0]
             if len(ind) > 0:
@@ -1069,14 +1071,22 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
                 x2d = np.matmul(meta_data['intrinsic_matrix'], np.matmul(RT, x3d))
                 x2d[0, :] = np.divide(x2d[0, :], x2d[2, :])
                 x2d[1, :] = np.divide(x2d[1, :], x2d[2, :])
-        
-                gt_boxes[count, 0] = np.min(x2d[0, :])
-                gt_boxes[count, 1] = np.min(x2d[1, :])
-                gt_boxes[count, 2] = np.max(x2d[0, :])
-                gt_boxes[count, 3] = np.max(x2d[1, :])
-                gt_boxes[count, 4] = ind
+
+                x1 = np.min(x2d[0, :])
+                y1 = np.min(x2d[1, :])
+                x2 = np.max(x2d[0, :])
+                y2 = np.max(x2d[1, :])
+                if x1 > width or y1 > height or x2 < 0 or y2 < 0:
+                    continue
+                gt_boxes[count, 0] = x1
+                gt_boxes[count, 1] = y1
+                gt_boxes[count, 2] = x2
+                gt_boxes[count, 3] = y2
+                selected.append(i)
                 count += 1
 
+        meta_data['cls_indexes'] = meta_data['cls_indexes'][selected]
+        meta_data['poses'] = poses[:, :, selected]
         meta_data['im_label'] = im_label
         meta_data['box'] = gt_boxes[:count, :4]
         return meta_data
@@ -1096,6 +1106,10 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
             results_frame_id = results_all['results_frame_id'].flatten()
             results_object_id = results_all['results_object_id'].flatten()
             results_cls_id = results_all['results_cls_id'].flatten()
+            segmentation_precision = results_all['segmentation_precision']
+            segmentation_recall = results_all['segmentation_recall']
+            segmentation_f1 = results_all['segmentation_f1']
+            segmentation_count = results_all['segmentation_count']
         else:
             # save results
             num_max = 100000
@@ -1107,9 +1121,14 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
             results_frame_id = np.zeros((num_max, ), dtype=np.float32)
             results_object_id = np.zeros((num_max, ), dtype=np.float32)
             results_cls_id = np.zeros((num_max, ), dtype=np.float32)
+            segmentation_precision = np.zeros((num_max, self._num_classes), dtype=np.float32)
+            segmentation_recall = np.zeros((num_max, self._num_classes), dtype=np.float32)
+            segmentation_f1 = np.zeros((num_max, self._num_classes), dtype=np.float32)
+            segmentation_count = np.zeros((num_max, self._num_classes), dtype=np.float32)
 
             # for each image
             count = -1
+            count_file = -1
             filename = os.path.join(output_dir, '*.mat')
             files = glob.glob(filename)
             for i in range(len(files)):
@@ -1127,6 +1146,14 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
                 # render gt poses
                 gt = self.render_gt_pose(gt)
 
+                # compute segmentation metrics
+                metrics_dict = multilabel_metrics(result_posecnn['labels'].astype(np.int32), gt['im_label'].astype(np.int32), self._num_classes)
+                count_file += 1
+                segmentation_precision[count_file, :] = metrics_dict['Precision']
+                segmentation_recall[count_file, :] = metrics_dict['Recall']
+                segmentation_f1[count_file, :] = metrics_dict['F-measure']
+                segmentation_count[count_file, :] = metrics_dict['Count']
+
                 '''
                 import matplotlib.pyplot as plt
                 fig = plt.figure()
@@ -1143,7 +1170,6 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
                 ax = fig.add_subplot(2, 2, 2)
                 plt.imshow(gt['im_label'])
                 ax = fig.add_subplot(2, 2, 3)
-                print(result_posecnn['labels'])
                 plt.imshow(result_posecnn['labels'].astype(np.int32))
                 plt.show()
                 #'''
@@ -1224,6 +1250,10 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
             results_frame_id = results_frame_id[:count+1]
             results_object_id = results_object_id[:count+1]
             results_cls_id = results_cls_id[:count+1]
+            segmentation_precision = segmentation_precision[:count_file+1, :]
+            segmentation_recall = segmentation_recall[:count_file+1, :]
+            segmentation_f1 = segmentation_f1[:count_file+1, :]
+            segmentation_count = segmentation_count[:count_file+1, :]
 
             results_all = {'distances_sys': distances_sys,
                        'distances_non': distances_non,
@@ -1231,12 +1261,15 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
                        'errors_translation': errors_translation,
                        'results_frame_id': results_frame_id,
                        'results_object_id': results_object_id,
-                       'results_cls_id': results_cls_id }
+                       'results_cls_id': results_cls_id,
+                       'segmentation_precision': segmentation_precision, 
+                       'segmentation_recall': segmentation_recall,
+                       'segmentation_f1': segmentation_f1,
+                       'segmentation_count': segmentation_count}
 
             filename = os.path.join(output_dir, 'results_posecnn.mat')
             scipy.io.savemat(filename, results_all)
 
-        # print the results
         # for each class
         import matplotlib.pyplot as plt
         max_distance = 0.1
@@ -1377,4 +1410,58 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
             print('%f' % (ADDS[k+1, 1]))
         print('%f' % (ADDS[0, 1]))
         print(cfg.TRAIN.SNAPSHOT_INFIX)
+        print('===========================================')
+
+        # print segmentation precision
+        print('==================segmentation precision====================')
+        for i in range(self._num_classes):
+            count = np.sum(segmentation_count[:, i])
+            if count > 0:
+                precision = np.sum(segmentation_precision[:, i]) / count
+            else:
+                precision = 0
+            print('%s: %d objects, %f' % (self._classes[i], count, precision))
+        for i in range(self._num_classes):
+            count = np.sum(segmentation_count[:, i])
+            if count > 0:
+                precision = np.sum(segmentation_precision[:, i]) / count
+            else:
+                precision = 0
+            print('%f' % (precision))
+        print('===========================================')
+
+        # print segmentation recall
+        print('==================segmentation recall====================')
+        for i in range(self._num_classes):
+            count = np.sum(segmentation_count[:, i])
+            if count > 0:
+                recall = np.sum(segmentation_recall[:, i]) / count
+            else:
+                recall = 0
+            print('%s: %d objects, %f' % (self._classes[i], count, recall))
+        for i in range(self._num_classes):
+            count = np.sum(segmentation_count[:, i])
+            if count > 0:
+                recall = np.sum(segmentation_recall[:, i]) / count
+            else:
+                recall = 0
+            print('%f' % (recall))
+        print('===========================================')
+
+        # print segmentation f1
+        print('==================segmentation f1====================')
+        for i in range(self._num_classes):
+            count = np.sum(segmentation_count[:, i])
+            if count > 0:
+                f1 = np.sum(segmentation_f1[:, i]) / count
+            else:
+                f1 = 0
+            print('%s: %d objects, %f' % (self._classes[i], count, f1))
+        for i in range(self._num_classes):
+            count = np.sum(segmentation_count[:, i])
+            if count > 0:
+                f1 = np.sum(segmentation_f1[:, i]) / count
+            else:
+                f1 = 0
+            print('%f' % (f1))
         print('===========================================')
