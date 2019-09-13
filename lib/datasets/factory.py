@@ -33,7 +33,7 @@ for split in ['train', 'test']:
             datasets.YCBObject(split))
 
 # ycb self supervision dataset
-for split in ['train_1', 'train_2', 'train_3', 'train_4', 'train_5', 'test', 'all']:
+for split in ['train_1', 'train_2', 'train_3', 'train_4', 'train_5', 'test', 'all', 'debug']:
     name = 'ycb_self_supervision_{}'.format(split)
     print name
     __sets[name] = (lambda split=split:

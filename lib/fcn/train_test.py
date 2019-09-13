@@ -1365,7 +1365,8 @@ def refine_pose(im_label, im_depth, rois, poses, meta_data, dataset):
         labels[y1:y2, x1:x2] = im_label[y1:y2, x1:x2]
         mask_label = np.ma.getmaskarray(np.ma.masked_equal(labels, cls_label))
         labels = labels.reshape((width * height, ))
-        index = np.where((labels == cls_label) & np.isfinite(dpoints[:, 0]) & (dpoints[:, 0] != 0) & (pcloud[:, 0] != 0))[0]  
+        diff = np.abs(dpoints[:, 2] - pcloud[:, 2])
+        index = np.where((labels == cls_label) & np.isfinite(dpoints[:, 2]) & (dpoints[:, 2] > 0) & (pcloud[:, 2] > 0) & (diff < 0.5))[0]  
 
         if len(index) > 10:
             T = np.mean(dpoints[index, :] - pcloud[index, :], axis=0)
@@ -1430,11 +1431,11 @@ def refine_pose(im_label, im_depth, rois, poses, meta_data, dataset):
                 poses_refined[i, :4] = mat2quat(RT_opt[:3, :3])
                 poses_refined[i, 4:] = RT_opt[:3, 3]
 
-                if 0:
-                # if cfg.TEST.VISUALIZE:
+                # if 0:
+                if cfg.TEST.VISUALIZE:
                     import matplotlib.pyplot as plt
                     fig = plt.figure()
-                    ax = fig.add_subplot(2, 2, 1, projection='3d')
+                    ax = fig.add_subplot(3, 3, 1, projection='3d')
                     if cls == -1:
                         points_obj = dataset._points_clamp
                     else:
@@ -1455,34 +1456,38 @@ def refine_pose(im_label, im_depth, rois, poses, meta_data, dataset):
                     ax.set_ylim(sdf_optim.ymin, sdf_optim.ymax)
                     ax.set_zlim(sdf_optim.zmin, sdf_optim.zmax)
 
-                    ax = fig.add_subplot(2, 2, 2)
+                    ax = fig.add_subplot(3, 3, 2)
                     label_image = dataset.labels_to_image(np.multiply(im_label, mask_label))
                     plt.imshow(label_image)
                     ax.set_title('mask label')
 
-                    # ax = fig.add_subplot(3, 3, 3)
-                    # plt.imshow(mask_depth_meas)
-                    # ax.set_title('mask_depth_meas')
+                    ax = fig.add_subplot(3, 3, 3)
+                    plt.imshow(mask_depth_meas)
+                    ax.set_title('mask_depth_meas')
 
-                    # ax = fig.add_subplot(3, 3, 4)
-                    # plt.imshow(mask_depth_render)
-                    # ax.set_title('mask_depth_render')
+                    ax = fig.add_subplot(3, 3, 4)
+                    plt.imshow(mask_depth_render)
+                    ax.set_title('mask_depth_render')
 
-                    # ax = fig.add_subplot(3, 3, 5)
-                    # plt.imshow(mask_depth_vis)
-                    # ax.set_title('mask_depth_vis')
+                    ax = fig.add_subplot(3, 3, 5)
+                    plt.imshow(mask_depth_vis)
+                    ax.set_title('mask_depth_vis')
 
-                    ax = fig.add_subplot(2, 2, 3)
+                    ax = fig.add_subplot(3, 3, 6)
                     plt.imshow(mask)
                     ax.set_title('mask')
 
-                    ax = fig.add_subplot(2, 2, 4)
+                    ax = fig.add_subplot(3, 3, 7)
                     plt.imshow(depth_meas_roi)
                     ax.set_title('depth input')
 
-                    # ax = fig.add_subplot(3, 3, 8)
-                    # plt.imshow(depth_render_roi)
-                    # ax.set_title('depth render')
+                    ax = fig.add_subplot(3, 3, 8)
+                    plt.imshow(depth_render_roi)
+                    ax.set_title('depth render')
+
+                    ax = fig.add_subplot(3, 3, 9)
+                    plt.imshow(im_depth)
+                    ax.set_title('depth image')
 
                     plt.show()
 
