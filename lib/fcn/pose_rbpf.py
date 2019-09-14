@@ -101,7 +101,7 @@ class PoseRBPF:
         z_init = (128 - 40) * render_dist / roi_size * intrinsics[0, 0] / cfg.PF.FU
         z_init = z_init[0, 0]
 
-        if depth is not None:
+        if depth is not None and cfg.PF.USE_DEPTH:
             uv_h_int = uv_h.astype(int)
             uv_h_int[:, 0] = np.clip(uv_h_int[:, 0], 0, image.shape[1] - 1)
             uv_h_int[:, 1] = np.clip(uv_h_int[:, 1], 0, image.shape[0] - 1)
@@ -109,12 +109,12 @@ class PoseRBPF:
             z = np.expand_dims(z, axis=1)
             z[z > 0] += np.random.uniform(-0.3, 0.3, z[z > 0].shape)
             z[z == 0 | ~np.isfinite(z)] = np.random.uniform(0.9 * z_init, 1.1 * z_init, z[z == 0 | ~np.isfinite(z)].shape)
-        else:    
+        else:
             z = np.random.uniform(0.9 * z_init, 1.1 * z_init, (n_init_samples, 1))
 
         # evaluate
         distribution, max_sim_all, out_images, in_images = self.evaluate_particles(cls_id, autoencoder, codes_gpu, poses_cpu, image, intrinsics, \
-            uv_h, z, render_dist, cfg.PF.WT_RESHAPE_VAR, depth, mask, eval_depth=True, init_mode=True)
+            uv_h, z, render_dist, cfg.PF.WT_RESHAPE_VAR, depth, mask, eval_depth=cfg.PF.USE_DEPTH, init_mode=True)
 
         # find the max pdf from the distribution matrix
         index_star = self.arg_max_func(distribution)
@@ -130,12 +130,13 @@ class PoseRBPF:
         self.rbpf.uv_bar = uv_star
         self.rbpf.z_bar = z_star
         self.rbpf_init_max_sim = max_sim_all
+        self.rbpf.trans_bar = back_project(self.rbpf.uv_bar, intrinsics, self.rbpf.z_bar)
 
         # filtering on the same image
         for i in range(cfg.PF.N_INIT_FILTERING):
             self.process_poserbpf(cls_id, autoencoder, codes_gpu, poses_cpu, image,
                                   intrinsics, render_dist, depth, mask,
-                                  apply_motion_prior=False, eval_depth=True, init_mode=True)
+                                  apply_motion_prior=False, eval_depth=cfg.PF.USE_DEPTH, init_mode=True)
 
 
         # box and poses
