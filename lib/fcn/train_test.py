@@ -281,7 +281,7 @@ def train(train_loader, background_loader, network, optimizer, epoch):
 
 def test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset, im_depth=None, im_label=None):
 
-    n_init_samples = cfg.TEST.NUM_SAMPLES_POSERBPF
+    n_init_samples = cfg.PF.N_PROCESS
     num = rois.shape[0]
     uv_init = np.zeros((2, ), dtype=np.float32)
     pixel_mean = torch.tensor(cfg.PIXEL_MEANS / 255.0).cuda().float()
@@ -314,7 +314,7 @@ def test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset, im_depth=
             mask = np.zeros(im_label.shape, dtype=np.float32)
             mask[im_label == cls] = 1.0
 
-        pose = pose_rbpf.initialize(image, uv_init, n_init_samples, cfg.TRAIN.CLASSES[cls], roi_w, roi_h, im_depth, mask)
+        pose = pose_rbpf.initialize(image, uv_init, n_init_samples, cfg.TRAIN.CLASSES[cls], roi_w, roi_h, intrinsic_matrix, im_depth, mask)
         if dataset.classes[cls] == '052_extra_large_clamp' and 'ycb_video' in dataset.name:
             pose_extra = pose
             pose_render = poses_return[i,:].copy()

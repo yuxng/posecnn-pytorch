@@ -260,7 +260,6 @@ __C.TEST.DET_THRESHOLD = 0.5
 __C.TEST.BUILD_CODEBOOK = False
 __C.TEST.IMS_PER_BATCH = 2
 __C.TEST.MEAN_SHIFT = False
-__C.TEST.NUM_SAMPLES_POSERBPF = 100
 __C.TEST.CHECK_SIZE = False
 __C.TEST.NUM_SDF_ITERATIONS = 200
 
@@ -314,6 +313,49 @@ __C.EXP_DIR = 'default'
 
 # Default GPU device id
 __C.GPU_ID = 0
+
+
+# Deep particle filter setting
+__C.PF = edict()
+__C.PF.USE_TRANSNET = False
+__C.PF.USE_DEPTH = False
+__C.PF.RENDER_FULL = False
+__C.PF.INIT_GLOBALLY = False
+__C.PF.DEPTH_DELTA = 0.03
+__C.PF.DEPTH_TAU = 0.05
+__C.PF.DEPTH_STD = 0.15
+__C.PF.UV_NOISE = 5.0
+__C.PF.Z_NOISE = 0.05
+__C.PF.UV_NOISE_PRIOR = 5.0
+__C.PF.Z_NOISE_PRIOR = 0.05
+__C.PF.ROT_NOISE = 0.05
+__C.PF.INIT_UV_NOISE = 30
+__C.PF.INIT_Z_RANGE = [0.2, 3.0]
+__C.PF.INIT_ROT_WT_VAR = 0.05
+__C.PF.TRANS_WT_VAR = 0.05
+__C.PF.ROT_WT_VAR = 0.05
+__C.PF.N_INIT = 500
+__C.PF.N_PROCESS = 50
+__C.PF.N_INIT_FILTERING = 2
+__C.PF.FU = 1066.778
+__C.PF.FV = 1056.487
+__C.PF.U0 = 312.987
+__C.PF.V0 = 241.311
+__C.PF.W = 640.0
+__C.PF.H = 480.0
+__C.PF.VISUALIZE = True
+__C.PF.SAVE_DIR = './results/tmp/'
+__C.PF.TRACK_OBJ = ' '
+__C.PF.WT_RESHAPE_VAR = 0.1
+__C.PF.N_E_ROT = 100
+__C.PF.MOTION_T_FACTOR = 1.0
+__C.PF.MOTION_R_FACTOR = 0.5
+__C.PF.ROT_RANGE = 0.2
+__C.PF.ROT_GAUSSIAN_KERNEL_SZ = 5
+__C.PF.ROT_GAUSSIAN_KERNEL_STD = 1
+__C.PF.ROT_VAR = 0.05
+
+
 
 def get_output_dir(imdb, net):
     """Return the directory where experimental artifacts are placed.

@@ -207,9 +207,9 @@ def compensate_trans_R(translation, R):
 def trans_zoom_uvz_cuda(image, uvs, zs, pf_fu, pf_fv, target_distance=2.5, out_size=128):
     image = image.permute(2, 0, 1).float().unsqueeze(0).cuda()
 
-    bbox_u = target_distance * (1 / zs) / cfg.TRAIN.FU * pf_fu * out_size / image.size(3)
+    bbox_u = target_distance * (1 / zs) / cfg.PF.FU * pf_fu * out_size / image.size(3)
     bbox_u = torch.from_numpy(bbox_u).cuda().float().squeeze(1)
-    bbox_v = target_distance * (1 / zs) / cfg.TRAIN.FV * pf_fv * out_size / image.size(2)
+    bbox_v = target_distance * (1 / zs) / cfg.PF.FV * pf_fv * out_size / image.size(2)
     bbox_v = torch.from_numpy(bbox_v).cuda().float().squeeze(1)
 
     center_uvs = torch.from_numpy(uvs).cuda().float()
@@ -225,7 +225,20 @@ def trans_zoom_uvz_cuda(image, uvs, zs, pf_fu, pf_fv, target_distance=2.5, out_s
 
     out = CropAndResizeFunction(image, boxes)
 
-    uv_scale = target_distance * (1 / zs) / cfg.TRAIN.FU * pf_fu
+    uv_scale = target_distance * (1 / zs) / cfg.PF.FU * pf_fu
+
+    '''
+    for i in range(out.shape[0]):
+        roi = out[i].permute(1, 2, 0).cpu().numpy()
+        roi = np.clip(roi, 0, 1)
+        im = roi * 255
+        im = im.astype(np.uint8)
+        import matplotlib.pyplot as plt
+        fig = plt.figure()
+        ax = fig.add_subplot(1, 1, 1)
+        plt.imshow(im[:, :, (2, 1, 0)])
+        plt.show()
+    '''
 
     return out, uv_scale
 
