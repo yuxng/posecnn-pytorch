@@ -521,15 +521,26 @@ def test(test_loader, background_loader, network, pose_rbpf, output_dir):
                         T = poses[j, 4:]
                         poses[j, :4] = allocentric2egocentric(qt, T)
 
+                poses_refined = []
+                pose_scores = None
+
                 # optimize depths
-                poses, poses_refined = optimize_depths(rois, poses, test_loader.dataset._points_all, test_loader.dataset._intrinsic_matrix)
+                im_depth = sample['im_depth'].numpy()[0]
+                if cfg.TEST.POSE_REFINE:
+                    labels_out = out_label.detach().cpu().numpy()[0]
+                    poses, poses_refined, cls_render_ids = refine_pose(labels_out, im_depth, rois, poses, sample['meta_data'], test_loader.dataset)
+                else:
+                    num = rois.shape[0]
+                    for j in range(num):
+                        poses[j, 4] *= poses[j, 6] 
+                        poses[j, 5] *= poses[j, 6]
             else:
                 out_label, out_vertex, rois, out_pose = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
                 rois = rois.detach().cpu().numpy()
                 out_pose = out_pose.detach().cpu().numpy()
                 poses = out_pose.copy()
                 poses_refined = []
-                pose_scores = []
+                pose_scores = None
 
                 # non-maximum suppression within class
                 index = nms(rois, 0.5)
@@ -615,7 +626,7 @@ def test(test_loader, background_loader, network, pose_rbpf, output_dir):
             rois = []
             poses = []
             poses_refined = []
-            pose_scores = []
+            pose_scores = None
 
         if cfg.TEST.VISUALIZE:
             _vis_test(inputs, labels, out_label, out_vertex, rois, poses, poses_refined, sample, \
@@ -2104,7 +2115,7 @@ def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, poses_refined,
                         plt.plot(x2d[0, :], x2d[1, :], '.', color=np.divide(class_colors[cls], 255.0), alpha=0.5)
 
             # show pose estimation quality
-            if cfg.TEST.POSE_REFINE:
+            if cfg.TEST.POSE_REFINE and pose_scores is not None:
                 ax = fig.add_subplot(m, n, start)
                 start += 1
                 ax.set_title('pose score')

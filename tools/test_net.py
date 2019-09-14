@@ -167,7 +167,7 @@ if __name__ == '__main__':
     else:
         #'''
         # prepare autoencoder and codebook
-        if cfg.TRAIN.VERTEX_REG:
+        if cfg.TRAIN.VERTEX_REG and not cfg.TRAIN.POSE_REG:
             pose_rbpf = PoseRBPF(dataset)
         else:
             pose_rbpf = None

@@ -42,6 +42,8 @@ for i in range(len(subdirs)):
 
 print('num of scenes: %d' % (num_scenes))
 print('num of images: %d' % (num_images))
+print('num of objects: %d' % (np.sum(count)))
+print('avg objects per image: %f' % (float(np.sum(count)) / float(num_images)))
 print('==============================')
 for i in range(num_classes):
     if count[i] > 0:
