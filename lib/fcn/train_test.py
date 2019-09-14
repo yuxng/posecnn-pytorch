@@ -343,7 +343,10 @@ def test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset, im_depth=
 
         if pose[-1] > 0:
             # only update rotation from codebook matching
-            poses_return[i, :4] = pose[:4]
+            # poses_return[i, :4] = pose[:4]
+            poses_return[i, :] = pose
+            poses_return[i, 4] /= poses_return[i, 6]
+            poses_return[i, 5] /= poses_return[i, 6]
 
     return rois_return, poses_return, image
 

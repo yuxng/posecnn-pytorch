@@ -83,10 +83,10 @@ class PoseRBPF:
         uv_h = np.array([uv_init[0], uv_init[1], 1])
         uv_h = np.repeat(np.expand_dims(uv_h, axis=0), n_init_samples, axis=0)
 
-        bound = roi_w * 0.1
+        bound = roi_w * 0.01
         uv_h[:, 0] += np.random.uniform(-bound, bound, (n_init_samples, ))
 
-        bound = roi_h * 0.1
+        bound = roi_h * 0.01
         uv_h[:, 1] += np.random.uniform(-bound, bound, (n_init_samples, ))
 
         uv_h[:, 0] = np.clip(uv_h[:, 0], 0, image.shape[1])
@@ -103,7 +103,7 @@ class PoseRBPF:
             uv_h_int[:, 1] = np.clip(uv_h_int[:, 1], 0, image.shape[0] - 1)
             z = depth[uv_h_int[:, 1], uv_h_int[:, 0]]
             z = np.expand_dims(z, axis=1)
-            z[z > 0] += np.random.uniform(-0.3, 0.3, z[z > 0].shape)
+            z[z > 0] += np.random.uniform(-0.1, 0.1, z[z > 0].shape)
             z[z == 0 | ~np.isfinite(z)] = np.random.uniform(0.9 * z_init, 1.1 * z_init, z[z == 0 | ~np.isfinite(z)].shape)
         else:    
             z = np.random.uniform(0.9 * z_init, 1.1 * z_init, (n_init_samples, 1))
