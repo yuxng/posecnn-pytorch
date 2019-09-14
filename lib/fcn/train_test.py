@@ -279,7 +279,7 @@ def train(train_loader, background_loader, network, optimizer, epoch):
         cfg.TRAIN.ITERS += 1
 
 
-def test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset):
+def test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset, im_depth=None, im_label=None):
 
     n_init_samples = cfg.TEST.NUM_SAMPLES_POSERBPF
     num = rois.shape[0]
@@ -309,9 +309,12 @@ def test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset):
 
         roi_w = rois[i, 4] - rois[i, 2]
         roi_h = rois[i, 5] - rois[i, 3]
-        roi_s = max(roi_w, roi_h)
 
-        pose = pose_rbpf.initialize(image, uv_init, n_init_samples, cfg.TRAIN.CLASSES[cls], roi_w, roi_h)
+        if im_label is not None:
+            mask = np.zeros(im_label.shape, dtype=np.float32)
+            mask[im_label == cls] = 1.0
+
+        pose = pose_rbpf.initialize(image, uv_init, n_init_samples, cfg.TRAIN.CLASSES[cls], roi_w, roi_h, im_depth, mask)
         if dataset.classes[cls] == '052_extra_large_clamp' and 'ycb_video' in dataset.name:
             pose_extra = pose
             pose_render = poses_return[i,:].copy()
@@ -330,6 +333,7 @@ def test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset):
             pose_render[3:] = pose_large[:4]
             im_large, size_large = render_one(dataset, 19, pose_render)
 
+            roi_s = max(roi_w, roi_h)
             if abs(size_extra - roi_s) < abs(size_large - roi_s):
                 print('it is extra large clamp')
             else:
@@ -548,13 +552,13 @@ def test(test_loader, background_loader, network, pose_rbpf, output_dir):
                 poses = poses[index, :]
 
                 # run poseRBPF for codebook matching to compute the rotations
+                im_depth = sample['im_depth'].numpy()[0]
+                labels_out = out_label.detach().cpu().numpy()[0]
                 if pose_rbpf is not None:
-                    rois, poses, im_rgb = test_pose_rbpf(pose_rbpf, inputs, rois, poses, sample['meta_data'], test_loader.dataset)
+                    rois, poses, im_rgb = test_pose_rbpf(pose_rbpf, inputs, rois, poses, sample['meta_data'], test_loader.dataset, im_depth, labels_out)
 
                 # optimize depths
-                im_depth = sample['im_depth'].numpy()[0]
                 if cfg.TEST.POSE_REFINE:
-                    labels_out = out_label.detach().cpu().numpy()[0]
                     poses, poses_refined, cls_render_ids = refine_pose(labels_out, im_depth, rois, poses, sample['meta_data'], test_loader.dataset)
                     if pose_rbpf is not None and cfg.TEST.VISUALIZE:
                         sims, depth_errors, vis_ratios, pose_scores = eval_poses(pose_rbpf, poses_refined, rois, im_rgb, im_depth, sample['meta_data'])

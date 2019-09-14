@@ -19,6 +19,7 @@ class PoseRBPF:
         autoencoders = [[] for i in range(len(cfg.TEST.CLASSES))]
         codebooks = [[] for i in range(len(cfg.TEST.CLASSES))]
         codes_gpu = [[] for i in range(len(cfg.TEST.CLASSES))]
+        poses_gpu = [[] for i in range(len(cfg.TEST.CLASSES))]
         codebook_names = [[] for i in range(len(cfg.TEST.CLASSES))]
 
         for i in range(len(cfg.TEST.CLASSES)):
@@ -37,17 +38,21 @@ class PoseRBPF:
             else:
                 print('file not exists %s' % (filename))
 
-            filename = os.path.join('data', 'codebooks', 'codebook_ycb_encoder_test_' + cls + '.mat')
-            if os.path.exists(filename):
-                codebook_names[i] = filename
-                codebooks[i] = scipy.io.loadmat(filename)
-                codes_gpu[i] = torch.from_numpy(codebooks[i]['codes']).cuda()
-                print(filename)
+            filename_mat = os.path.join('data', 'codebooks', 'codebook_ycb_encoder_test_' + cls + '.mat')
+            filename_pth = os.path.join('data', 'codebooks', 'codebook_ycb_encoder_test_' + cls + '.pth')
+            if os.path.exists(filename_mat) and os.path.exists(filename_pth):
+                codebook_names[i] = filename_mat[:-4]
+                codebooks[i] = scipy.io.loadmat(filename_mat)
+                data = torch.load(filename_pth)
+                codes_gpu[i] = data[0][0, :, :]
+                poses_gpu[i] = data[1][0, :, :]
+                print(filename_mat, filename_pth)
 
         self.autoencoders = autoencoders
         self.codebooks = codebooks
         self.codebook_names = codebook_names
         self.codes_gpu = codes_gpu
+        self.poses_gpu = poses_gpu
         self.dataset = dataset
         self.cos_sim = nn.CosineSimilarity(dim=1, eps=1e-6)
 
@@ -55,7 +60,7 @@ class PoseRBPF:
     '''
     image (height, width, 3) with values (0, 1)
     '''
-    def initialize(self, image, uv_init, n_init_samples, cls, roi_w, roi_h):
+    def initialize(self, image, uv_init, n_init_samples, cls, roi_w, roi_h, depth=None, mask=None):
 
         cls_id = cfg.TEST.CLASSES.index(cls)
 
@@ -63,6 +68,7 @@ class PoseRBPF:
         autoencoder = self.autoencoders[cls_id]
         codebook = self.codebooks[cls_id]
         codes_gpu = self.codes_gpu[cls_id]
+        poses_gpu = self.poses_gpu[cls_id]
         pose = np.zeros((7,), dtype=np.float32)
         if not autoencoder or not codebook:
             return pose
@@ -89,11 +95,22 @@ class PoseRBPF:
         # sample around z
         roi_size = max(roi_w, roi_h)
         z_init = (128 - 40) * render_dist / roi_size * intrinsics[0, 0] / cfg.TRAIN.FU
-        z = np.random.uniform(0.9 * z_init, 1.1 * z_init, (n_init_samples, 1))
+        z_init = z_init[0, 0]
+
+        if depth is not None:
+            uv_h_int = uv_h.astype(int)
+            uv_h_int[:, 0] = np.clip(uv_h_int[:, 0], 0, image.shape[1] - 1)
+            uv_h_int[:, 1] = np.clip(uv_h_int[:, 1], 0, image.shape[0] - 1)
+            z = depth[uv_h_int[:, 1], uv_h_int[:, 0]]
+            z = np.expand_dims(z, axis=1)
+            z[z > 0] += np.random.uniform(-0.3, 0.3, z[z > 0].shape)
+            z[z == 0 | ~np.isfinite(z)] = np.random.uniform(0.9 * z_init, 1.1 * z_init, z[z == 0 | ~np.isfinite(z)].shape)
+        else:    
+            z = np.random.uniform(0.9 * z_init, 1.1 * z_init, (n_init_samples, 1))
 
         # evaluate translation
-        distribution, out_images, in_images = self.evaluate_particles(autoencoder, codebook, codes_gpu, image, cls_id, \
-            intrinsics, uv_h, z, render_dist, 0.1)
+        distribution, out_images, in_images = self.evaluate_particles(cls_id, autoencoder, codes_gpu, poses_gpu, image, intrinsics, \
+            uv_h, z, render_dist, 0.1, depth, mask, eval_depth=True, init_mode=True)
 
         # find the max pdf from the distribution matrix
         index_star = self.arg_max_func(distribution)
@@ -104,7 +121,7 @@ class PoseRBPF:
         box_size = 128 * render_dist / z_star * intrinsics[0, 0] / cfg.TRAIN.FU
 
         pose[4:] = self.back_project(uv_star, intrinsics, z_star)
-        pose[:4] = codebook['quaternions'][index_star[1], :]
+        pose[:4] = poses_gpu[index_star[1], 3:].cpu().numpy()
 
         # if 0:
         if cfg.TEST.VISUALIZE:
@@ -167,6 +184,13 @@ class PoseRBPF:
         pdf = coeff * torch.exp(- (distance_matrix - mean)**2 / (2 * std**2))
         return pdf
 
+    def mat2pdf_np(self, matrix, mean, std):
+        coeff = np.ones_like(matrix) * (1/(np.sqrt(2*np.pi) * std))
+        mean = np.ones_like(matrix) * mean
+        std = np.ones_like(matrix) * std
+        pdf = coeff * np.exp(- (matrix - mean)**2 / (2 * std**2))
+        return pdf
+
     def arg_max_func(self, input):
         index = (input == torch.max(input)).nonzero().detach()
         return index[0]
@@ -210,8 +234,12 @@ class PoseRBPF:
         return out, uv_scale
 
 
-    # evaluate particles according to the RGB images
-    def evaluate_particles(self, autoencoder, codebook, codes_gpu, image, cls_id, intrinsics, uv, z, render_dist, gaussian_std):
+    # evaluate particles according to the RGB(D) images
+    def evaluate_particles(self, cls_id, autoencoder, codes_gpu, codepose, image, intrinsics, uv, z, render_dist, gaussian_std,
+                           depth=None,
+                           mask=None,
+                           eval_depth=False,
+                           init_mode=False):
 
         # crop the rois from input image
         fu = intrinsics[0, 0]
@@ -227,13 +255,210 @@ class PoseRBPF:
         # get the maximum similarity for each particle
         v_sims, i_sims = torch.max(cosine_distance_matrix, dim=1)
 
+        # evaluate particles with depth images
+        depth_scores = np.ones_like(z)
+        if eval_depth and depth is not None:
+            depth_gpu = torch.from_numpy(depth).unsqueeze(2).cuda()
+            if mask is not None:
+                mask_gpu = torch.from_numpy(mask).unsqueeze(2).cuda()
+            else:
+                mask_gpu = None
+            if init_mode:
+                depth_scores = self.Evaluate_Depths_Init(cls_id,
+                                                         depth=depth_gpu, uv=uv, z=z,
+                                                         q_idx=i_sims.cpu().numpy(), intrinsics=intrinsics,
+                                                         render_dist=render_dist, codepose=codepose,
+                                                         delta=0.03,
+                                                         tau=0.05,
+                                                         mask=mask_gpu)
+            else:
+                depth_scores = self.Evaluate_Depths_Tracking(cls_id,
+                                                             depth=depth_gpu, uv=uv, z=z,
+                                                             q_idx=i_sims.cpu().numpy(), intrinsics=intrinsics,
+                                                             render_dist=render_dist, codepose=codepose,
+                                                             delta=0.03,
+                                                             tau=0.05,
+                                                             rbpf_ready=self.rbpf_ok)
+
+
+            # reshape the depth score
+            if np.max(depth_scores) > 0:
+                depth_scores = depth_scores / np.max(depth_scores)
+                depth_scores = self.mat2pdf_np(depth_scores, 1.0, 0.15)
+            else:
+                depth_scores = np.ones_like(depth_scores)
+                depth_scores /= np.sum(depth_scores)
+
         # compute distribution from similarity
         max_sim_all = torch.max(v_sims)
-
         # cosine_distance_matrix[cosine_distance_matrix > 0.95 * max_sim_all] = max_sim_all
-        pdf_matrix = self.mat2pdf(cosine_distance_matrix/max_sim_all, 1, gaussian_std)
+        pdf_matrix = mat2pdf(cosine_distance_matrix/max_sim_all, 1, gaussian_std)
+
+        # combine RGB and D
+        depth_score_torch = torch.from_numpy(depth_scores).float().cuda()
+        pdf_matrix = torch.mul(pdf_matrix, depth_score_torch)
 
         return pdf_matrix, out_images, images_roi_cuda
+
+
+
+    # evaluate particles according to depth measurements
+    def Evaluate_Depths_Init(self, cls_id, depth, uv, z, q_idx, intrinsics, render_dist, codepose, delta=0.03, tau=0.05, mask=None):
+
+        score = np.zeros_like(z)
+
+        # crop rois
+        depth_roi_cuda, _ = trans_zoom_uvz_cuda(depth.detach(), uv, z, intrinsics[0, 0], intrinsics[1, 1], render_dist)
+        depth_roi_np = depth_roi_cuda.cpu().numpy()
+
+        if mask is not None:
+            mask_roi_cuda, _ = trans_zoom_uvz_cuda(mask.detach(), uv, z, intrinsics[0, 0], intrinsics[1, 1], render_dist)
+            mask_roi_np = mask_roi_cuda.cpu().numpy()
+
+        # render
+        pose_v = np.zeros((7,))
+        height = self.dataset._height
+        width = self.dataset._width
+        frame_cuda = torch.cuda.FloatTensor(height, width, 4)
+        seg_cuda = torch.cuda.FloatTensor(height, width, 4)
+        pc_cuda = torch.cuda.FloatTensor(height, width, 4)
+
+        q_idx_unique, idx_inv = np.unique(q_idx, return_inverse=True)
+        pc_render_all = np.zeros((q_idx_unique.shape[0], 128, 128, 3), dtype=np.float32)
+        q_render = codepose[q_idx_unique, 3:].cpu().numpy()
+        for i in range(q_render.shape[0]):
+            pose_v[:3] = [0, 0, render_dist]
+            pose_v[3:] = q_render[i]
+            cfg.renderer.set_poses([pose_v])
+            cfg.renderer.render([cls_id], frame_cuda, seg_cuda, pc2_tensor=pc_cuda)
+            render_roi_cuda, _ = trans_zoom_uvz_cuda(pc_cuda.flip(0),
+                                                     np.array([[intrinsics[0, 2], intrinsics[1, 2], 1]]),
+                                                     np.array([[render_dist]]),
+                                                     intrinsics[0, 0], intrinsics[1, 1],
+                                                     render_dist)
+            pc_render_all[i] = render_roi_cuda[0, :3, :, :].permute(1, 2, 0).cpu().numpy()
+
+
+        # evaluate every particle
+        for i in range(uv.shape[0]):
+
+            pc_render = pc_render_all[idx_inv[i]].copy()
+            depth_mask = pc_render[:, :, 2] > 0
+            pc_render[depth_mask, 2] = pc_render[depth_mask, 2] - render_dist + z[i]
+
+            depth_render = pc_render[:, :, [2]]
+            depth_meas_np = depth_roi_np[i, 0, :, :]
+            depth_render_np = depth_render[:, :, 0]
+
+            # compute visibility mask
+            if mask is None:
+                visibility_mask = estimate_visib_mask_numba(depth_meas_np, depth_render_np, delta=delta)
+            else:
+                visibility_mask = np.logical_and((mask_roi_np[i, 0, :, :] > 0), np.logical_and(depth_meas_np>0, depth_render_np>0))
+
+            if np.sum(visibility_mask) == 0:
+                continue
+
+            # compute depth error
+            depth_error = np.abs(depth_meas_np[visibility_mask] - depth_render_np[visibility_mask])
+            depth_error /= tau
+            depth_error[depth_error > 1] = 1
+
+            # score computation
+            total_pixels = np.sum((depth_render_np > 0).astype(np.float32))
+            if total_pixels is not 0:
+                vis_ratio = np.sum(visibility_mask.astype(np.float32)) / total_pixels
+                score[i] = (1 - np.mean(depth_error)) * vis_ratio
+            else:
+                score[i] = 0
+
+        return score
+
+    # evaluate particles according to depth measurements
+    def Evaluate_Depths_Tracking(self, rbpf, cls_id, depth, uv, z, q_idx, intrinsics, render_dist, codepose, rbpf_ready,
+                        delta=0.03, tau=0.05):
+        score = np.zeros_like(z)
+
+        # crop rois
+        depth_roi_cuda, _ = trans_zoom_uvz_cuda(depth.detach(), uv, z, intrinsics[0, 0], intrinsics[1, 1],
+                                                 render_dist)
+        depth_roi_np = depth_roi_cuda.cpu().numpy()
+
+        # render
+        pose_v = np.zeros((7,))
+        frame_cuda = torch.cuda.FloatTensor(self.im_h, self.im_w, 4)
+        seg_cuda = torch.cuda.FloatTensor(self.im_h, self.im_w, 4)
+        pc_cuda = torch.cuda.FloatTensor(self.im_h, self.im_w, 4)
+
+        fast_rendering = False
+        if rbpf_ready and np.linalg.norm(rbpf.trans_bar) > 0:
+            pose_v[:3] = rbpf.trans_bar
+            pose_v[3:] = mat2quat(rbpf.rot_bar)
+            self.renderer.set_poses([pose_v])
+            self.renderer.render([cls_id], frame_cuda, seg_cuda, pc2_tensor=pc_cuda)
+            uv_crop = project(rbpf.trans_bar, intrinsics)
+            uv_crop = np.repeat(np.expand_dims(uv_crop, axis=0), uv.shape[0], axis=0)
+            z_crop = np.ones_like(z) * rbpf.trans_bar[2]
+            render_roi_cuda, _ = trans_zoom_uvz_cuda(pc_cuda.flip(0), uv_crop, z_crop,
+                                                      intrinsics[0, 0],
+                                                      intrinsics[1, 1],
+                                                      render_dist)
+            pc_render_all = render_roi_cuda[:, :3, :, :].permute(0, 2, 3, 1).cpu().numpy()
+            fast_rendering = True
+        else:
+            q_idx_unique, idx_inv = np.unique(q_idx, return_inverse=True)
+            pc_render_all = np.zeros((q_idx_unique.shape[0], 128, 128, 3), dtype=np.float32)
+            q_render = codepose[q_idx_unique][:, 3:]
+            for i in range(q_render.shape[0]):
+                pose_v[:3] = [0, 0, render_dist]
+                pose_v[3:] = q_render[i]
+                self.renderer.set_poses([pose_v])
+                self.renderer.render([cls_id], frame_cuda, seg_cuda, pc_cuda)
+                render_roi_cuda, _ = trans_zoom_uvz_cuda(pc_cuda.flip(0),
+                                                         np.array([[intrinsics[0, 2], intrinsics[1, 2], 1]]),
+                                                         np.array([[render_dist]]),
+                                                         intrinsics[0, 0], intrinsics[1, 1],
+                                                         render_dist)
+                pc_render_all[i] = render_roi_cuda[0, :3, :, :].permute(1, 2, 0).cpu().numpy()
+
+        # evaluate every particle
+        for i in range(uv.shape[0]):
+
+            if fast_rendering:
+                pc_render = pc_render_all[i].copy()
+                depth_mask = pc_render[:, :, 2] > 0
+                pc_render[:, :, 2][depth_mask] = pc_render[:, :, 2][depth_mask] - rbpf.trans_bar[2] + z[i]
+            else:
+                pc_render = pc_render_all[idx_inv[i]].copy()
+                depth_mask = pc_render[:, :, 2] > 0
+                pc_render[:, :, 2][depth_mask] = pc_render[:, :, 2][depth_mask] - render_dist + z[i]
+
+            depth_render = pc_render[:, :, [2]]
+
+            depth_meas_np = depth_roi_np[i, 0, :, :]
+            depth_render_np = depth_render[:, :, 0]
+
+            # compute visibility mask
+            visibility_mask = estimate_visib_mask_numba(depth_meas_np, depth_render_np, delta=delta)
+
+            if np.sum(visibility_mask) == 0:
+                continue
+
+            # compute depth error
+            depth_error = np.abs(depth_meas_np[visibility_mask] - depth_render_np[visibility_mask])
+            depth_error /= tau
+            depth_error[depth_error > 1] = 1
+
+            # score computation
+            total_pixels = np.sum((depth_render_np > 0).astype(np.float32))
+            if total_pixels is not 0:
+                vis_ratio = np.sum(visibility_mask.astype(np.float32)) / total_pixels
+                score[i] = (1 - np.mean(depth_error)) * vis_ratio
+            else:
+                score[i] = 0
+
+        return score
+
 
     # evaluate a single 6D pose of a certain object
     def evaluate_6d_pose(self, pose, cls, image_rgb, image_depth, intrinsics):
