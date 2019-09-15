@@ -122,7 +122,11 @@ if __name__ == '__main__':
 
     output_dir = get_output_dir(dataset, None)
     head, name = osp.split(args.pretrained)
-    output_dir = osp.join(output_dir, name[:-15])
+    if cfg.PF.USE_DEPTH:
+        suffix = '_depth' + '_particle_' + str(cfg.PF.N_PROCESS) + '_filter_' + str(cfg.PF.N_INIT_FILTERING)
+    else:
+        suffix = '_color' + '_particle_' + str(cfg.PF.N_PROCESS) + '_filter_' + str(cfg.PF.N_INIT_FILTERING)
+    output_dir = osp.join(output_dir, name[:-15] + suffix)
     print('Output will be saved to `{:s}`'.format(output_dir))
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
