@@ -885,12 +885,7 @@ def test_image(network, pose_rbpf, dataset, im_color, im_depth=None):
         rois = np.zeros((0, 7), dtype=np.float32)
         poses = np.zeros((0, 7), dtype=np.float32)
 
-    if cfg.TEST.POSE_REFINE and im_depth is not None:
-        im_pose, im_pose_refine, im_label = render_image(dataset, im_color, rois, poses, poses_refined, labels, cls_render_ids)
-    else:
-        im_pose, im_label = render_image(dataset, im_color, rois, poses, labels)
-        im_pose_refine = None
-
+    im_pose, im_pose_refine, im_label = render_image(dataset, im_color, rois, poses, poses_refined, labels, cls_render_ids)
     if cfg.TEST.VISUALIZE:
         vis_test(dataset, im, im_depth, labels, out_vertex, rois, poses, poses_refined, im_pose, im_pose_refine)
 
@@ -1401,7 +1396,7 @@ def refine_pose(im_label, im_depth, rois, poses, meta_data, dataset):
         poses[i, 5] *= poses[i, 6]
 
         # check if object with different size
-        threshold = -0.1
+        threshold = -0.2
         if cfg.TEST.CHECK_SIZE and T[2] < threshold:
            cls_name = dataset._classes_all[cfg.TEST.CLASSES[cls_render]] + '_small'
            for j in range(len(dataset._classes_all)):
@@ -1580,9 +1575,10 @@ def render_image(dataset, im, rois, poses, poses_refine, labels, cls_render_ids=
         qt[3:] = poses[i, :4]
         poses_all.append(qt.copy())
 
-        qt[:3] = poses_refine[i, 4:7]
-        qt[3:] = poses_refine[i, :4]
-        poses_refine_all.append(qt.copy())
+        if cfg.TEST.POSE_REFINE:
+            qt[:3] = poses_refine[i, 4:7]
+            qt[3:] = poses_refine[i, :4]
+            poses_refine_all.append(qt.copy())
 
         cls = int(rois[i, 1])
         print(classes[cls], rois[i, -1], cls_index)
@@ -1625,18 +1621,22 @@ def render_image(dataset, im, rois, poses, poses_refine, labels, cls_render_ids=
         im_output = 0.2 * im[:,:,(2, 1, 0)].astype(np.float32) + 0.8 * im_render.astype(np.float32)
 
         # pose refine
-        cfg.renderer.set_poses(poses_refine_all)
-        frame = cfg.renderer.render(cls_indexes, image_tensor, seg_tensor)
-        image_tensor = image_tensor.flip(0)
-        im_render = image_tensor.cpu().numpy()
-        im_render = np.clip(im_render, 0, 1)
-        im_render = im_render[:, :, :3] * 255
-        im_render = im_render.astype(np.uint8)
-        im_output_refine = 0.2 * im[:,:,(2, 1, 0)].astype(np.float32) + 0.8 * im_render.astype(np.float32)
+        if cfg.TEST.POSE_REFINE:
+             cfg.renderer.set_poses(poses_refine_all)
+             frame = cfg.renderer.render(cls_indexes, image_tensor, seg_tensor)
+             image_tensor = image_tensor.flip(0)
+             im_render = image_tensor.cpu().numpy()
+             im_render = np.clip(im_render, 0, 1)
+             im_render = im_render[:, :, :3] * 255
+             im_render = im_render.astype(np.uint8)
+             im_output_refine = 0.2 * im[:,:,(2, 1, 0)].astype(np.float32) + 0.8 * im_render.astype(np.float32)
+             im_output_refine = im_output_refine.astype(np.uint8)
+        else:
+             im_output_refine = None
     else:
         im_output = 0.4 * im[:,:,(2, 1, 0)]
 
-    return im_output.astype(np.uint8), im_output_refine.astype(np.uint8), im_label
+    return im_output.astype(np.uint8), im_output_refine, im_label
 
 
 def overlay_image(dataset, im, rois, poses, labels):
@@ -2267,9 +2267,10 @@ def vis_test(dataset, im, im_depth, label, out_vertex, rois, poses, poses_refine
     plt.imshow(im_pose)
     ax.set_title('rendered image')
 
-    ax = fig.add_subplot(3, 3, 9)
-    plt.imshow(im_pose_refine)
-    ax.set_title('rendered image refine')
+    if cfg.TEST.POSE_REFINE:
+        ax = fig.add_subplot(3, 3, 9)
+        plt.imshow(im_pose_refine)
+        ax.set_title('rendered image refine')
 
     if cfg.TRAIN.VERTEX_REG or cfg.TRAIN.VERTEX_REG_DELTA:
 

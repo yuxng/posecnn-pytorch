@@ -101,6 +101,10 @@ class ImageListener:
             rgb_sub = message_filters.Subscriber('/camera/color/image_raw', Image, queue_size=10)
             depth_sub = message_filters.Subscriber('/camera/aligned_depth_to_color/image_raw', Image, queue_size=10)
             msg = rospy.wait_for_message('/camera/color/camera_info', CameraInfo)
+        elif cfg.TEST.ROS_CAMERA == 'Azure':             
+            rgb_sub = message_filters.Subscriber('/rgb/image_raw', Image, queue_size=10)
+            depth_sub = message_filters.Subscriber('/depth_to_rgb/image_raw', Image, queue_size=10)
+            msg = rospy.wait_for_message('/rgb/camera_info', CameraInfo)
         else:
             # use kinect
             rgb_sub = message_filters.Subscriber('/%s/rgb/image_color' % (cfg.TEST.ROS_CAMERA), Image, queue_size=2)

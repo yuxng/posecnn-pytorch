@@ -28,9 +28,9 @@ class PoseRBPF:
             cls = dataset._classes_all[ind]
 
             # load autoencoder
-            # filename = os.path.join('data', 'checkpoints', 'encoder_ycb_object_' + cls + '_epoch_200.checkpoint.pth')
+            filename = os.path.join('data', 'checkpoints', 'encoder_ycb_object_' + cls + '_epoch_200.checkpoint.pth')
             # filename = os.path.join('data', 'checkpoints', 'encoder_ycb_object_self_supervision_' + cls + '_epoch_100.checkpoint.pth')
-            filename = os.path.join('output/ycb_encoder/ycb_encoder_train_5/', 'encoder_ycb_object_self_supervision_train_5_' + cls + '_epoch_60.checkpoint.pth')
+            # filename = os.path.join('output/ycb_encoder/ycb_encoder_train_5/', 'encoder_ycb_object_self_supervision_train_5_' + cls + '_epoch_60.checkpoint.pth')
             if os.path.exists(filename):
                 autoencoder_data = torch.load(filename)
                 autoencoders[i] = networks.__dict__['autoencoder'](1, 128, autoencoder_data).cuda(device=cfg.device)
@@ -145,8 +145,8 @@ class PoseRBPF:
         pose[4:] = self.rbpf.trans_bar
         pose[:4] = mat2quat(self.rbpf.rot_bar)
 
-        # if 0:
-        if cfg.TEST.VISUALIZE:
+        if 0:
+        # if cfg.TEST.VISUALIZE:
             if cfg.TEST.SYNTHESIZE:
                 cls_render = cls - 1
             else:

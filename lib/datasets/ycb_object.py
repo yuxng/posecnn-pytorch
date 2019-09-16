@@ -77,13 +77,14 @@ class YCBObject(data.Dataset, datasets.imdb):
 
         self.model_mesh_paths = []
         for cls in self._classes_all[1:]:
+            filename = '{}/models/{}/textured_simple.ply'.format(self._ycb_object_path, cls)
+            if osp.exists(filename):
+                self.model_mesh_paths.append(filename)
+                continue
             filename = '{}/models/{}/textured_simple.obj'.format(self._ycb_object_path, cls)
             if osp.exists(filename):
                 self.model_mesh_paths.append(filename)
                 continue
-            filename = '{}/models/{}/textured_simple.ply'.format(self._ycb_object_path, cls)
-            if osp.exists(filename):
-                self.model_mesh_paths.append(filename)
 
         self.model_texture_paths = []
         for cls in self._classes_all[1:]:
