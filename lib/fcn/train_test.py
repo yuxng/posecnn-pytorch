@@ -840,14 +840,14 @@ def test_image(network, pose_rbpf, dataset, im_color, im_depth=None):
             poses = poses[index, :]
 
             # run poseRBPF for codebook matching to compute the rotations
+            labels_out = out_label.detach().cpu().numpy()[0]
             if pose_rbpf is not None:
-                rois, poses, im_rgb = test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset)
+                rois, poses, im_rgb = test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset, im_depth, labels_out)
 
             # optimize depths
             cls_render_ids = None
             if cfg.TEST.POSE_REFINE and im_depth is not None:
-                labels_out = out_label.detach().cpu().numpy()[0]
-                poses, poses_refined, cls_render_ids = refine_pose(labels_out, im_depth, rois, poses, dataset)
+                poses, poses_refined, cls_render_ids = refine_pose(labels_out, im_depth, rois, poses, meta_data, dataset)
                 if pose_rbpf is not None:
                     sims, depth_errors, vis_ratios, pose_scores = eval_poses(pose_rbpf, poses_refined, rois, im_rgb, im_depth, meta_data)
             else:
@@ -886,12 +886,13 @@ def test_image(network, pose_rbpf, dataset, im_color, im_depth=None):
         poses = np.zeros((0, 7), dtype=np.float32)
 
     if cfg.TEST.POSE_REFINE and im_depth is not None:
-        im_pose, im_label = render_image(dataset, im_color, rois, poses_refined, labels, cls_render_ids)
+        im_pose, im_pose_refine, im_label = render_image(dataset, im_color, rois, poses, poses_refined, labels, cls_render_ids)
     else:
         im_pose, im_label = render_image(dataset, im_color, rois, poses, labels)
+        im_pose_refine = None
 
     if cfg.TEST.VISUALIZE:
-        vis_test(dataset, im, im_depth, labels, out_vertex, rois, poses, poses_refined, im_pose)
+        vis_test(dataset, im, im_depth, labels, out_vertex, rois, poses, poses_refined, im_pose, im_pose_refine)
 
     return im_pose, im_label, rois, poses
 
@@ -1546,7 +1547,7 @@ def render_image_detection(dataset, im, rois, labels):
     return im_label
 
 
-def render_image(dataset, im, rois, poses, labels, cls_render_ids=None):
+def render_image(dataset, im, rois, poses, poses_refine, labels, cls_render_ids=None):
 
     # label image
     label_image = dataset.labels_to_image(labels)
@@ -1560,6 +1561,7 @@ def render_image(dataset, im, rois, poses, labels, cls_render_ids=None):
 
     cls_indexes = []
     poses_all = []
+    poses_refine_all = []
     for i in range(num):
         if cls_render_ids is not None and len(cls_render_ids) == num:
             cls_index = cls_render_ids[i]
@@ -1576,7 +1578,11 @@ def render_image(dataset, im, rois, poses, labels, cls_render_ids=None):
         qt = np.zeros((7, ), dtype=np.float32)
         qt[:3] = poses[i, 4:7]
         qt[3:] = poses[i, :4]
-        poses_all.append(qt)
+        poses_all.append(qt.copy())
+
+        qt[:3] = poses_refine[i, 4:7]
+        qt[3:] = poses_refine[i, :4]
+        poses_refine_all.append(qt.copy())
 
         cls = int(rois[i, 1])
         print(classes[cls], rois[i, -1], cls_index)
@@ -1608,21 +1614,29 @@ def render_image(dataset, im, rois, poses, labels, cls_render_ids=None):
         cfg.renderer.set_light_color([1, 1, 1])
         cfg.renderer.set_projection_matrix(width, height, fx, fy, px, py, znear, zfar)
 
+        # pose
         cfg.renderer.set_poses(poses_all)
         frame = cfg.renderer.render(cls_indexes, image_tensor, seg_tensor)
         image_tensor = image_tensor.flip(0)
-        seg_tensor = seg_tensor.flip(0)
-
-        # RGB to BGR order
         im_render = image_tensor.cpu().numpy()
         im_render = np.clip(im_render, 0, 1)
         im_render = im_render[:, :, :3] * 255
         im_render = im_render.astype(np.uint8)
-        im_output = 0.4 * im[:,:,(2, 1, 0)].astype(np.float32) + 0.6 * im_render.astype(np.float32)
+        im_output = 0.2 * im[:,:,(2, 1, 0)].astype(np.float32) + 0.8 * im_render.astype(np.float32)
+
+        # pose refine
+        cfg.renderer.set_poses(poses_refine_all)
+        frame = cfg.renderer.render(cls_indexes, image_tensor, seg_tensor)
+        image_tensor = image_tensor.flip(0)
+        im_render = image_tensor.cpu().numpy()
+        im_render = np.clip(im_render, 0, 1)
+        im_render = im_render[:, :, :3] * 255
+        im_render = im_render.astype(np.uint8)
+        im_output_refine = 0.2 * im[:,:,(2, 1, 0)].astype(np.float32) + 0.8 * im_render.astype(np.float32)
     else:
         im_output = 0.4 * im[:,:,(2, 1, 0)]
 
-    return im_output.astype(np.uint8), im_label
+    return im_output.astype(np.uint8), im_output_refine.astype(np.uint8), im_label
 
 
 def overlay_image(dataset, im, rois, poses, labels):
@@ -2218,7 +2232,7 @@ def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, poses_refined,
 
 
 
-def vis_test(dataset, im, im_depth, label, out_vertex, rois, poses, poses_refined, im_pose):
+def vis_test(dataset, im, im_depth, label, out_vertex, rois, poses, poses_refined, im_pose, im_pose_refine):
 
     """Visualize a testing results."""
     import matplotlib.pyplot as plt
@@ -2253,6 +2267,10 @@ def vis_test(dataset, im, im_depth, label, out_vertex, rois, poses, poses_refine
     plt.imshow(im_pose)
     ax.set_title('rendered image')
 
+    ax = fig.add_subplot(3, 3, 9)
+    plt.imshow(im_pose_refine)
+    ax.set_title('rendered image refine')
+
     if cfg.TRAIN.VERTEX_REG or cfg.TRAIN.VERTEX_REG_DELTA:
 
         # show predicted boxes
@@ -2261,6 +2279,9 @@ def vis_test(dataset, im, im_depth, label, out_vertex, rois, poses, poses_refine
         ax.set_title('predicted boxes')
         for j in range(rois.shape[0]):
             cls = rois[j, 1]
+            if cfg.TRAIN.CLASSES[int(cls)] not in cfg.TEST.CLASSES:
+                continue
+
             x1 = rois[j, 2]
             y1 = rois[j, 3]
             x2 = rois[j, 4]

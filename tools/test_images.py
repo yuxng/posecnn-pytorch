@@ -169,6 +169,7 @@ if __name__ == '__main__':
 
     # run network
     for i in index_images:
+        print(files[i])
         im = pad_im(cv2.imread(images_color[i], cv2.IMREAD_COLOR), 16)
         if osp.exists(images_depth[i]):
             depth = pad_im(cv2.imread(images_depth[i], cv2.IMREAD_UNCHANGED), 16)
