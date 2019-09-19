@@ -59,6 +59,7 @@ TEST:
   VISUALIZE: False
   SYNTHESIZE: False
   POSE_REFINE: True
-  ROS_CAMERA: D415
+#  ROS_CAMERA: D415
+  ROS_CAMERA: ISAAC_SIM
   CLASSES: !!python/tuple [26, 27, 28, 29]
 #CLASSES: !!python/tuple [2, 3, 4, 5, 9, 13, 14, 17, 21] # dope objects for development

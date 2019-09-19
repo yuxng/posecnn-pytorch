@@ -314,7 +314,6 @@ class PoseRBPF:
                                                      render_dist)
             pc_render_all[i] = render_roi_cuda[0, :3, :, :].permute(1, 2, 0).cpu().numpy()
 
-
         # evaluate every particle
         for i in range(uv.shape[0]):
 

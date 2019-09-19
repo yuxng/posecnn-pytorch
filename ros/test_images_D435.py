@@ -168,15 +168,18 @@ class ImageListener:
         label_msg.encoding = 'rgb8'
         self.label_pub.publish(label_msg)
 
-        pose_msg = self.cv_bridge.cv2_to_imgmsg(im_pose)
-        pose_msg.header.stamp = rospy.Time.now()
-        pose_msg.header.frame_id = rgb_frame_id
-        pose_msg.encoding = 'rgb8'
-        self.pose_pub.publish(pose_msg)
+        if im_pose is not None:
+            pose_msg = self.cv_bridge.cv2_to_imgmsg(im_pose)
+            pose_msg.header.stamp = rospy.Time.now()
+            pose_msg.header.frame_id = rgb_frame_id
+            pose_msg.encoding = 'rgb8'
+            self.pose_pub.publish(pose_msg)
 
         # poses
         if cfg.TEST.ROS_CAMERA == 'D435':
             frame = 'camera_color_optical_frame'
+        elif cfg.TEST.ROS_CAMERA == 'Azure':
+            frame = 'rgb_camera_link'
         else:
             frame = '%s_depth_optical_frame' % (cfg.TEST.ROS_CAMERA)
 

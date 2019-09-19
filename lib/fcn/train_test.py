@@ -738,6 +738,14 @@ def test_image_simple(network, dataset, im_color, im_depth=None):
 
     im_label = render_image_detection(dataset, im_color, rois, labels)
 
+    if cfg.TEST.VISUALIZE:
+        plt.figure()
+        plt.subplot(1, 2, 1)
+        plt.imshow(im_label)
+        plt.subplot(1, 2, 2)
+        plt.imshow(labels)
+        plt.show()
+
     return rois, labels, poses, im_label
 
 
@@ -889,7 +897,10 @@ def test_image(network, pose_rbpf, dataset, im_color, im_depth=None):
     if cfg.TEST.VISUALIZE:
         vis_test(dataset, im, im_depth, labels, out_vertex, rois, poses, poses_refined, im_pose, im_pose_refine)
 
-    return im_pose, im_label, rois, poses
+    if cfg.TEST.POSE_REFINE and im_depth is not None:
+        return im_pose_refine, im_label, rois, poses_refined
+    else:
+        return im_pose, im_label, rois, poses
 
 
 #************************************#
@@ -1387,6 +1398,16 @@ def refine_pose(im_label, im_depth, rois, poses, meta_data, dataset):
             poses_refined[i, 6] += T[2]
             poses_refined[i, 4] *= poses_refined[i, 6]
             poses_refined[i, 5] *= poses_refined[i, 6]
+
+            # check if object with different size
+            threshold = -0.2
+            if cfg.TEST.CHECK_SIZE and T[2] < threshold:
+               cls_name = dataset._classes_all[cfg.TEST.CLASSES[cls_render]] + '_small'
+               for j in range(len(dataset._classes_all)):
+                   if cls_name == dataset._classes_all[j]:
+                       print(j, 'small object ' + cls_name)
+                       cls_render = cfg.TEST.CLASSES.index(j)
+                       break
         else:
             poses_refined[i, 4] *= poses_refined[i, 6]
             poses_refined[i, 5] *= poses_refined[i, 6]
@@ -1394,17 +1415,6 @@ def refine_pose(im_label, im_depth, rois, poses, meta_data, dataset):
 
         poses[i, 4] *= poses[i, 6]
         poses[i, 5] *= poses[i, 6]
-
-        # check if object with different size
-        threshold = -0.2
-        if cfg.TEST.CHECK_SIZE and T[2] < threshold:
-           cls_name = dataset._classes_all[cfg.TEST.CLASSES[cls_render]] + '_small'
-           for j in range(len(dataset._classes_all)):
-               if cls_name == dataset._classes_all[j]:
-                   print(j, 'small object ' + cls_name)
-                   cls_render = cfg.TEST.CLASSES.index(j)
-                   break
-
         cls_render_ids.append(cls_render)
 
         # run SDF optimization
@@ -1591,6 +1601,7 @@ def render_image(dataset, im, rois, poses, poses_refine, labels, cls_render_ids=
             cv2.rectangle(im_label, (x1, y1), (x2, y2), class_colors[cls], 2)
 
     # rendering
+    im_output_refine = None
     if len(cls_indexes) > 0:
 
         height = im.shape[0]
@@ -1631,8 +1642,6 @@ def render_image(dataset, im, rois, poses, poses_refine, labels, cls_render_ids=
              im_render = im_render.astype(np.uint8)
              im_output_refine = 0.2 * im[:,:,(2, 1, 0)].astype(np.float32) + 0.8 * im_render.astype(np.float32)
              im_output_refine = im_output_refine.astype(np.uint8)
-        else:
-             im_output_refine = None
     else:
         im_output = 0.4 * im[:,:,(2, 1, 0)]
 
