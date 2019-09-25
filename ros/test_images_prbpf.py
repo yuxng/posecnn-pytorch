@@ -136,11 +136,18 @@ class ImageListener:
             rgb_sub = message_filters.Subscriber('/sim/left_color_camera/image', Image, queue_size=10)
             depth_sub = message_filters.Subscriber('/sim/left_depth_camera/image', Image, queue_size=10)
             msg = rospy.wait_for_message('/sim/left_color_camera/camera_info', CameraInfo)
+            self.target_frame = 'measured/base_link'
         elif cfg.TEST.ROS_CAMERA == 'D415':
             # use RealSense D435
             rgb_sub = message_filters.Subscriber('/camera/color/image_raw', Image, queue_size=10)
             depth_sub = message_filters.Subscriber('/camera/aligned_depth_to_color/image_raw', Image, queue_size=10)
             msg = rospy.wait_for_message('/camera/color/camera_info', CameraInfo)
+            self.target_frame = 'measured/base_link'
+        elif cfg.TEST.ROS_CAMERA == 'Azure':             
+            rgb_sub = message_filters.Subscriber('/rgb/image_raw', Image, queue_size=10)
+            depth_sub = message_filters.Subscriber('/depth_to_rgb/image_raw', Image, queue_size=10)
+            msg = rospy.wait_for_message('/rgb/camera_info', CameraInfo)
+            self.target_frame = 'rgb_camera_link'
 
         # update camera intrinsics
         K = np.array(msg.K).reshape(3, 3)
@@ -163,7 +170,8 @@ class ImageListener:
 
     def callback_rgbd(self, rgb, depth):
 
-        Tbr = get_relative_pose_from_tf(self.listener, 'measured/camera_link', 'measured/base_link')
+        if cfg.TEST.ROS_CAMERA == 'D415':
+            Tbr = get_relative_pose_from_tf(self.listener, 'measured/camera_link', 'measured/base_link')
 
         if depth.encoding == '32FC1':
             depth_cv = self.cv_bridge.imgmsg_to_cv2(depth)
@@ -183,8 +191,9 @@ class ImageListener:
             self.depth = depth_cv.copy()
             self.rgb_frame_id = rgb.header.frame_id
             self.rgb_frame_stamp = rgb.header.stamp
-            self.q_br = mat2quat(Tbr[:3, :3]).copy()
-            self.t_br = Tbr[:3, 3].copy()
+            if cfg.TEST.ROS_CAMERA == 'D415':
+                self.q_br = mat2quat(Tbr[:3, :3]).copy()
+                self.t_br = Tbr[:3, 3].copy()
 
     def run_network(self):
 
@@ -195,8 +204,9 @@ class ImageListener:
             depth_cv = self.depth.copy()
             rgb_frame_id = self.rgb_frame_id
             rgb_frame_stamp = self.rgb_frame_stamp
-            q_br = self.q_br.copy()
-            t_br = self.t_br.copy()
+            if cfg.TEST.ROS_CAMERA == 'D415':
+                q_br = self.q_br.copy()
+                t_br = self.t_br.copy()
 
         rois, seg_im, poses, im_label = test_image_simple(self.net, self.dataset, im, depth_cv)
         self.run_posecnn_flag = False
@@ -213,7 +223,8 @@ class ImageListener:
         self.label_pub.publish(label_msg)
 
         # forward kinematics
-        self.br.sendTransform(t_br, [q_br[1], q_br[2], q_br[3], q_br[0]], rgb_frame_stamp, 'posecnn_camera_link', 'measured/base_link')
+        if cfg.TEST.ROS_CAMERA == 'D415':
+            self.br.sendTransform(t_br, [q_br[1], q_br[2], q_br[3], q_br[0]], rgb_frame_stamp, 'posecnn_camera_link', 'measured/base_link')
 
         if not rois.shape[0]:
             return
@@ -247,7 +258,7 @@ class ImageListener:
                 x2 = rois[i, 4] / n
                 y2 = rois[i, 5] / n
                 self.br.sendTransform([n, rgb_frame_stamp.secs, 0], [x1, y1, x2, y2], rgb_frame_stamp,
-                                      tf_name + '_roi', 'measured/base_link')
+                                      tf_name + '_roi', self.target_frame)
 
 def parse_args():
     """

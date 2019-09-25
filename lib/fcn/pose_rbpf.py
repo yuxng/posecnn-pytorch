@@ -193,9 +193,9 @@ class PoseRBPF:
             pose[:4] = mat2quat(self.rbpfs[i].rot_bar)
 
             # SDF refine
-            pose_refined, cls_render = self.refine_pose(im_label, im_depth, dpoints, self.rbpfs[i].roi, pose, intrinsics, self.dataset)
-            self.rbpfs[i].pose = pose_refined.flatten()
-            #self.rbpfs[i].pose = pose
+            # pose_refined, cls_render = self.refine_pose(im_label, im_depth, dpoints, self.rbpfs[i].roi, pose, intrinsics, self.dataset)
+            # self.rbpfs[i].pose = pose_refined.flatten()
+            self.rbpfs[i].pose = pose
 
             if cfg.TEST.SYNTHESIZE:
                 cls_render = cls - 1

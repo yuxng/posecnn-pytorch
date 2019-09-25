@@ -85,6 +85,7 @@ class ImageListener:
         rospy.init_node('poserbpf_image_listener')
         self.br = tf.TransformBroadcaster()
         self.listener = tf.TransformListener()
+        rospy.sleep(3.0)
         self.pose_pub = rospy.Publisher('poserbpf_image', ROS_Image, queue_size=1)
 
         # publish poserbpf states
@@ -94,29 +95,37 @@ class ImageListener:
         # target detection
         self.flag_detected = False
 
-        # forward kinematics (base to camera link transformation)
-        self.Tbr_now = np.eye(4, dtype=np.float32)
-        self.Tbr_prev = np.eye(4, dtype=np.float32)
-        self.Trc = np.load('./data/cameras/extrinsics_{}.npy'.format(self.camera_type))
-        self.Tbc_now = np.eye(4, dtype=np.float32)
-
         # subscriber for camera information
-        if cfg.TEST.ROS_CAMERA == 'D435':
+        if cfg.TEST.ROS_CAMERA == 'D415':
             rgb_sub = message_filters.Subscriber('/camera/color/image_raw', Image, queue_size=1)
             depth_sub = message_filters.Subscriber('/camera/aligned_depth_to_color/image_raw', Image, queue_size=1)
             msg = rospy.wait_for_message('/camera/color/camera_info', CameraInfo)
+            self.target_frame = 'measured/base_link'
+            self.forward_kinematics = True
         elif cfg.TEST.ROS_CAMERA == 'Azure':
             rgb_sub = message_filters.Subscriber('/rgb/image_raw', Image, queue_size=1)
             depth_sub = message_filters.Subscriber('/depth_to_rgb/image_raw', Image, queue_size=1)
             msg = rospy.wait_for_message('/rgb/camera_info', CameraInfo)
+            self.target_frame = 'rgb_camera_link'
+            self.forward_kinematics = False
         elif cfg.TEST.ROS_CAMERA == 'ISAAC_SIM':
-            rgb_sub = message_filters.Subscriber('/sim/left_color_camera/image', Image, queue_size=1)
-            depth_sub = message_filters.Subscriber('/sim/left_depth_camera/image', Image, queue_size=1)
+            rgb_sub = message_filters.Subscriber('/sim/left_color_camera/image', Image, queue_size=2)
+            depth_sub = message_filters.Subscriber('/sim/left_depth_camera/image', Image, queue_size=2)
             msg = rospy.wait_for_message('/sim/left_color_camera/camera_info', CameraInfo)
+            self.target_frame = 'measured/base_link'
+            self.forward_kinematics = True
         else:
             rgb_sub = message_filters.Subscriber('/%s/rgb/image_color' % (cfg.TEST.ROS_CAMERA), Image, queue_size=1)
             depth_sub = message_filters.Subscriber('/%s/depth_registered/image' % (cfg.TEST.ROS_CAMERA), Image, queue_size=1)
             msg = rospy.wait_for_message('/%s/rgb/camera_info' % (cfg.TEST.ROS_CAMERA), CameraInfo)
+            self.forward_kinematics = False
+
+        if self.forward_kinematics:
+            # forward kinematics (base to camera link transformation)
+            self.Tbr_now = np.eye(4, dtype=np.float32)
+            self.Tbr_prev = np.eye(4, dtype=np.float32)
+            self.Trc = np.load('./data/cameras/extrinsics_{}.npy'.format(self.camera_type))
+            self.Tbc_now = np.eye(4, dtype=np.float32)
 
         K = np.array(msg.K).reshape(3, 3)
         self.intrinsic_matrix = K
@@ -128,9 +137,9 @@ class ImageListener:
         self.is_keyframe = False
 
         # subscriber for posecnn label
-        label_sub = message_filters.Subscriber('/posecnn_label' + self.suffix, ROS_Image, queue_size=1)
+        label_sub = message_filters.Subscriber('/posecnn_label' + self.suffix, ROS_Image, queue_size=2)
         queue_size = 1
-        slop_seconds = 0.01
+        slop_seconds = 0.5
         ts = message_filters.ApproximateTimeSynchronizer([rgb_sub, depth_sub, label_sub], queue_size, slop_seconds)
         ts.registerCallback(self.callback)
 
@@ -178,32 +187,32 @@ class ImageListener:
             input_seg = self.input_seg.copy()
 
         # subscribe the transformation
-        try:
-            source_frame = 'measured/camera_color_optical_frame'
-            target_frame = 'measured/base_link'
-            trans, rot = self.listener.lookupTransform(target_frame, source_frame, rospy.Time(0))
-            Tbc = ros_qt_to_rt(rot, trans)
-            if self.camera_type == 'D415':
-                T_delta = np.array([[0.99911077, 0.04145749, -0.00767817, -0.003222],
-                                    [-0.04163608, 0.99882554, -0.02477858, -0.00289],
-                                    [0.0066419, 0.02507623, 0.99966348, 0.003118],
-                                    [0., 0., 0., 1.]], dtype=np.float32)
-                Tbc = Tbc.dot(T_delta)
-            self.Tbc_now = Tbc.copy()
-            self.Tbr_now = Tbc.dot(np.linalg.inv(self.Trc))
-            if np.linalg.norm(self.Tbr_prev[:3, 3]) == 0:
-                self.pose_rbpf.T_c1c0 = np.eye(4, dtype=np.float32)
-            else:
-                Tbc0 = np.matmul(self.Tbr_prev, self.Trc)
-                Tbc1 = np.matmul(self.Tbr_now, self.Trc)
-                self.pose_rbpf.T_c1c0 = np.matmul(np.linalg.inv(Tbc1), Tbc0)
-            self.Tbr_prev = self.Tbr_now.copy()
-        except:
-            print('missing forward kinematics info')
-            return
+        if self.forward_kinematics:
+            try:
+                source_frame = 'measured/camera_color_optical_frame'
+                target_frame = 'measured/base_link'
+                trans, rot = self.listener.lookupTransform(target_frame, source_frame, rospy.Time(0))
+                Tbc = ros_qt_to_rt(rot, trans)
+                if self.camera_type == 'D415':
+                    T_delta = np.array([[0.99911077, 0.04145749, -0.00767817, -0.003222],
+                                        [-0.04163608, 0.99882554, -0.02477858, -0.00289],
+                                        [0.0066419, 0.02507623, 0.99966348, 0.003118],
+                                        [0., 0., 0., 1.]], dtype=np.float32)
+                    Tbc = Tbc.dot(T_delta)
+                self.Tbc_now = Tbc.copy()
+                self.Tbr_now = Tbc.dot(np.linalg.inv(self.Trc))
+                if np.linalg.norm(self.Tbr_prev[:3, 3]) == 0:
+                    self.pose_rbpf.T_c1c0 = np.eye(4, dtype=np.float32)
+                else:
+                    Tbc0 = np.matmul(self.Tbr_prev, self.Trc)
+                    Tbc1 = np.matmul(self.Tbr_now, self.Trc)
+                    self.pose_rbpf.T_c1c0 = np.matmul(np.linalg.inv(Tbc1), Tbc0)
+                self.Tbr_prev = self.Tbr_now.copy()
+            except:
+                print('missing forward kinematics info')
+                return
 
         # detection information of the target object
-        target_frame = 'measured/base_link'
         rois_est = np.zeros((0, 6), dtype=np.float32)
         rois_name = []
         # TODO look for multiple object instances
@@ -219,11 +228,11 @@ class ImageListener:
 
             try:
                 # print('look for posecnn detection ' + source_frame)
-                trans, rot = self.listener.lookupTransform(target_frame, source_frame, rospy.Time(0))
+                trans, rot = self.listener.lookupTransform(self.target_frame, source_frame, rospy.Time(0))
                 n = trans[0]
                 secs = trans[1]
                 now = rospy.Time.now()
-                if abs(now.secs - secs) > 1:
+                if abs(now.secs - secs) > 2.0:
                     print 'posecnn pose for %s time out %d %d' % (source_frame, now.secs, secs)
                     continue
                 roi = np.zeros((1, 6), dtype=np.float32)
@@ -247,12 +256,15 @@ class ImageListener:
             Tco = np.eye(4, dtype=np.float32)
             Tco[:3, :3] = quat2mat(self.pose_rbpf.rbpfs[i].pose[:4])
             Tco[:3, 3] = self.pose_rbpf.rbpfs[i].pose[4:]
-            Tbo = self.Tbc_now.dot(Tco)
+            if self.forward_kinematics:
+                Tbo = self.Tbc_now.dot(Tco)
+            else:
+                Tbo = Tco.copy()
             # publish tf
             t_bo = Tbo[:3, 3]
             q_bo = mat2quat(Tbo[:3, :3])
             name = 'poserbpf/' + self.pose_rbpf.rbpfs[i].name
-            self.br.sendTransform(t_bo, [q_bo[1], q_bo[2], q_bo[3], q_bo[0]], rospy.Time.now(), name, target_frame)
+            self.br.sendTransform(t_bo, [q_bo[1], q_bo[2], q_bo[3], q_bo[0]], rospy.Time.now(), name, self.target_frame)
 
         # visualization
         image_disp = self.pose_rbpf.render_image_all(self.intrinsic_matrix)
