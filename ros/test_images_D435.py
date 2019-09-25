@@ -127,14 +127,12 @@ class ImageListener:
             depth_cv = self.cv_bridge.imgmsg_to_cv2(depth)
         elif depth.encoding == '16UC1':
             depth_cv = self.cv_bridge.imgmsg_to_cv2(depth)
+            depth_cv /= 1000.0
         else:
             rospy.logerr_throttle(
                 1, 'Unsupported depth type. Expected 16UC1 or 32FC1, got {}'.format(
                     depth.encoding))
             return
-
-        if cfg.TEST.ROS_CAMERA == 'D435':
-            depth_cv = depth_cv/1000.0
 
         im = self.cv_bridge.imgmsg_to_cv2(rgb, 'bgr8')
 

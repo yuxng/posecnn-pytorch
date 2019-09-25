@@ -355,6 +355,18 @@ def mat2pdf_np(matrix, mean, std):
     pdf = coeff * np.exp(- (matrix - mean)**2 / (2 * std**2))
     return pdf
 
+
+def rotm2viewpoint(Rco):
+    Roc = Rco.transpose()
+    z_axis = Roc[:3, 2]
+    elevation = np.arcsin(-z_axis[2])
+    azimuth = np.arctan2(-z_axis[1], -z_axis[0])
+    y_c = np.cross(z_axis, np.array([0, 0, 1], dtype=np.float32))
+    x_c = np.cross(y_c, z_axis)
+    bank = np.arctan2(np.dot(Roc[:3, 0], y_c), np.dot(Roc[:3, 0], x_c))
+    return np.array([elevation, azimuth, bank], dtype=np.float32)
+
+
 # numba functions
 @jit(nopython=True)
 def cross_numba(p, q):

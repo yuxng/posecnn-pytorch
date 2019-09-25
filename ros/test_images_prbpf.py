@@ -88,16 +88,12 @@ def get_relative_pose_from_tf(listener, source_frame, target_frame):
 
 class ImageListener:
 
-    def __init__(self, network, dataset, network_compare=None):
+    def __init__(self, network, dataset):
 
         self.net = network
         self.dataset = dataset
         self.cv_bridge = CvBridge()
         self.renders = dict()
-
-        self.net_compare = network_compare
-        if network_compare is not None:
-            self.posecnn_compare_pub = rospy.Publisher('posecnn_detection_comparison', Image, queue_size=10)
 
         self.im = None
         self.depth = None
@@ -111,7 +107,7 @@ class ImageListener:
         self.suffix = suffix
         self.prefix = prefix
 
-        fusion_type = '_rgb_'
+        fusion_type = ''
         if cfg.TRAIN.VERTEX_REG_DELTA:
             fusion_type = '_rgbd_'
 
@@ -139,18 +135,17 @@ class ImageListener:
             # ISAAC SIM
             rgb_sub = message_filters.Subscriber('/sim/left_color_camera/image', Image, queue_size=10)
             depth_sub = message_filters.Subscriber('/sim/left_depth_camera/image', Image, queue_size=10)
-            # update camera intrinsics
             msg = rospy.wait_for_message('/sim/left_color_camera/camera_info', CameraInfo)
-            K = np.array(msg.K).reshape(3, 3)
-            dataset._intrinsic_matrix = K
-            print(dataset._intrinsic_matrix)
         elif cfg.TEST.ROS_CAMERA == 'D415':
             # use RealSense D435
             rgb_sub = message_filters.Subscriber('/camera/color/image_raw', Image, queue_size=10)
             depth_sub = message_filters.Subscriber('/camera/aligned_depth_to_color/image_raw', Image, queue_size=10)
-            K = np.array([[616.3653, 0, 310.2588], [0., 616.2029, 236.5998], [0, 0, 1]], dtype=np.float32)
-            dataset._intrinsic_matrix = K
-            print(dataset._intrinsic_matrix)
+            msg = rospy.wait_for_message('/camera/color/camera_info', CameraInfo)
+
+        # update camera intrinsics
+        K = np.array(msg.K).reshape(3, 3)
+        dataset._intrinsic_matrix = K
+        print(dataset._intrinsic_matrix)
 
         queue_size = 1
         slop_seconds = 0.1
@@ -168,7 +163,6 @@ class ImageListener:
 
     def callback_rgbd(self, rgb, depth):
 
-        # Tbr = get_relative_pose_from_tf(self.listener, 'measured/camera_link', 'measured/base_link')
         Tbr = get_relative_pose_from_tf(self.listener, 'measured/camera_link', 'measured/base_link')
 
         if depth.encoding == '32FC1':
@@ -182,13 +176,9 @@ class ImageListener:
                     depth.encoding))
             return
 
-        if cfg.TEST.ROS_CAMERA == 'ISAAC_SIM':
-            depth_cv = depth_cv
-
         im = self.cv_bridge.imgmsg_to_cv2(rgb, 'bgr8')
 
         with lock:
-            #print 'writing objects'
             self.im = im.copy()
             self.depth = depth_cv.copy()
             self.rgb_frame_id = rgb.header.frame_id
@@ -208,61 +198,30 @@ class ImageListener:
             q_br = self.q_br.copy()
             t_br = self.t_br.copy()
 
-        fusion_type = '_rgb_'
-        if cfg.TRAIN.VERTEX_REG_DELTA:
-            fusion_type = '_rgbd_'
+        rois, seg_im, poses, im_label = test_image_simple(self.net, self.dataset, im, depth_cv)
+        self.run_posecnn_flag = False
+        rgb_msg = self.cv_bridge.cv2_to_imgmsg(im_label, 'rgb8')
+        rgb_msg.header.stamp = rgb_frame_stamp
+        rgb_msg.header.frame_id = rgb_frame_id
+        self.posecnn_pub.publish(rgb_msg)
 
-        if self.net_compare is not None:
-            self.run_posecnn_flag = True
-
-        self.run_posecnn_flag = True
-        if self.run_posecnn_flag:
-            rois, seg_im, poses, im_label = test_image_simple(self.net, self.dataset, im, depth_cv)
-            self.run_posecnn_flag = False
-            rgb_msg = self.cv_bridge.cv2_to_imgmsg(im_label, 'rgb8')
-            rgb_msg.header.stamp = rgb_frame_stamp
-            rgb_msg.header.frame_id = rgb_frame_id
-            self.posecnn_pub.publish(rgb_msg)
-
-            if self.net_compare is not None:
-                _, _, _, im_label_c = test_image_simple(self.net_compare, self.dataset, im, depth_cv)
-                rgb_msg = self.cv_bridge.cv2_to_imgmsg(im_label_c, 'rgb8')
-                rgb_msg.header.stamp = rgb_frame_stamp
-                rgb_msg.header.frame_id = rgb_frame_id
-                self.posecnn_compare_pub.publish(rgb_msg)
-
-        else:
-            rois = np.zeros((0, 6))
-            seg_im = np.zeros_like(depth_cv)
-            rospy.sleep(0.025)
-
-        # publish
         # publish segmentation mask
         label_msg = self.cv_bridge.cv2_to_imgmsg(seg_im.astype(np.uint8))
         label_msg.header.stamp = rgb_frame_stamp
         label_msg.header.frame_id = rgb_frame_id
         label_msg.encoding = 'mono8'
         self.label_pub.publish(label_msg)
-        # publish rgb
-        rgb_msg = self.cv_bridge.cv2_to_imgmsg(im, 'bgr8')
-        rgb_msg.header.stamp = rgb_frame_stamp
-        rgb_msg.header.frame_id = rgb_frame_id
-        self.rgb_pub.publish(rgb_msg)
-        # publish depth
-        depth_msg = self.cv_bridge.cv2_to_imgmsg(depth_cv, '32FC1')
-        depth_msg.header.stamp = rgb_frame_stamp
-        depth_msg.header.frame_id = rgb_frame_id
-        self.depth_pub.publish(depth_msg)
 
         # forward kinematics
-        self.br.sendTransform(t_br, [q_br[1], q_br[2], q_br[3], q_br[0]],
-                              rgb_frame_stamp, 'posecnn_camera_link', 'measured/base_link')
-
-        indexes = np.zeros((self.dataset.num_classes, ), dtype=np.int32)
+        self.br.sendTransform(t_br, [q_br[1], q_br[2], q_br[3], q_br[0]], rgb_frame_stamp, 'posecnn_camera_link', 'measured/base_link')
 
         if not rois.shape[0]:
             return
 
+        fusion_type = ''
+        if cfg.TRAIN.VERTEX_REG_DELTA:
+            fusion_type = '_rgbd_'
+        indexes = np.zeros((self.dataset.num_classes, ), dtype=np.int32)
         index = np.argsort(rois[:, 2])
         rois = rois[index, :]
         poses = poses[index, :]
@@ -272,14 +231,12 @@ class ImageListener:
                 if not np.any(poses[i, 4:]):
                     continue
 
-                quat = [poses[i, 1], poses[i, 2], poses[i, 3], poses[i, 0]]
                 if self.dataset.classes[cls][3] == '_':
                     name = self.prefix + self.dataset.classes[cls][4:]
                 else:
                     name = self.prefix + self.dataset.classes[cls]
                 name = name + fusion_type
                 indexes[cls] += 1
-
                 name = name + '_%02d' % (indexes[cls])
                 tf_name = os.path.join("posecnn", name)
 
@@ -354,17 +311,13 @@ if __name__ == '__main__':
 
     # device
     cfg.device = torch.device('cuda:{:d}'.format(0))
-    print 'GPU device {:d}'.format(args.gpu_id)
+    print('GPU device {:d}'.format(args.gpu_id))
     cfg.gpu_id = args.gpu_id
     cfg.instance_id = args.instance_id
 
     # dataset
     cfg.MODE = 'TEST'
     dataset = get_dataset(args.dataset_name)
-    dataset._intrinsic_matrix = np.array([[554.2562584220408, 0.0, 320.0],
-                                          [0.0, 554.2562584220408, 240.0],
-                                          [0.0, 0.0, 1.0]],
-                                         dtype=np.float32)
 
     # prepare network
     if args.pretrained:
@@ -375,33 +328,12 @@ if __name__ == '__main__':
         print("no pretrained network specified")
         sys.exit()
 
-    if args.pretrained_compare is not None:
-        network = copy.deepcopy(networks.__dict__[args.network_name](dataset.num_classes,
-                                                                     cfg.TRAIN.NUM_UNITS,
-                                                                     network_data).cuda(device=cfg.device))
-    else:
-        network = networks.__dict__[args.network_name](dataset.num_classes,
-                                                 cfg.TRAIN.NUM_UNITS,
-                                                 network_data).cuda(device=cfg.device)
+    network = networks.__dict__[args.network_name](dataset.num_classes, cfg.TRAIN.NUM_UNITS, network_data).cuda(device=cfg.device)
     network = torch.nn.DataParallel(network, device_ids=[0]).cuda(device=cfg.device)
     cudnn.benchmark = True
 
-    network_compare = None
-    if args.pretrained_compare is not None:
-        network_data_compare = torch.load(args.pretrained_compare)
-        print("=> using pre-trained network to compare '{}'".format(args.pretrained_compare))
-
-        network_compare = networks.__dict__[args.network_name](dataset.num_classes, cfg.TRAIN.NUM_UNITS, network_data_compare).cuda(
-            device=cfg.device)
-
-
-        # network_compare
-        network_compare = torch.nn.DataParallel(network_compare, device_ids=[0]).cuda(device=cfg.device)
-        network_compare.eval()
-
     # image listener
     network.eval()
-    listener = ImageListener(network, dataset, network_compare)
-
+    listener = ImageListener(network, dataset)
     while not rospy.is_shutdown():
        listener.run_network()
