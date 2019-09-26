@@ -713,8 +713,7 @@ def test_image_simple(network, dataset, im_color, im_depth=None):
     symmetry = torch.from_numpy(dataset._symmetry).cuda()
 
     cfg.TRAIN.POSE_REG = False
-    out_label, out_vertex, rois, out_pose = network(inputs, labels, meta_data, extents, gt_boxes, poses, points,
-                                                    symmetry)
+    out_label, out_vertex, rois, out_pose = network(inputs, labels, meta_data, extents, gt_boxes, poses, points, symmetry)
     labels = out_label.detach().cpu().numpy()[0]
 
     rois = rois.detach().cpu().numpy()

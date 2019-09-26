@@ -214,42 +214,43 @@ class ImageListener:
 
         # detection information of the target object
         rois_est = np.zeros((0, 6), dtype=np.float32)
-        rois_name = []
         # TODO look for multiple object instances
-        object_id = 1
-        suffix_frame = '_%02d_roi' % (object_id)
+        max_objects = 3
         for i in range(len(cfg.TEST.CLASSES)):
-            # check posecnn frame
-            ind = cfg.TEST.CLASSES[i]
-            if self.dataset._classes_all[ind][3] == '_':
-                source_frame = 'posecnn/' + self.prefix + self.dataset._classes_all[ind][4:] + suffix_frame
-            else:
-                source_frame = 'posecnn/' + self.prefix + self.dataset._classes_all[ind] + suffix_frame
 
-            try:
-                # print('look for posecnn detection ' + source_frame)
-                trans, rot = self.listener.lookupTransform(self.target_frame, source_frame, rospy.Time(0))
-                n = trans[0]
-                secs = trans[1]
-                now = rospy.Time.now()
-                if abs(now.secs - secs) > 2.0:
-                    print 'posecnn pose for %s time out %d %d' % (source_frame, now.secs, secs)
+            for object_id in range(max_objects):
+                suffix_frame = '_%02d_roi' % (object_id)
+
+                # check posecnn frame
+                ind = cfg.TEST.CLASSES[i]
+                if self.dataset._classes_all[ind][3] == '_':
+                    source_frame = 'posecnn/' + self.prefix + self.dataset._classes_all[ind][4:] + suffix_frame
+                else:
+                    source_frame = 'posecnn/' + self.prefix + self.dataset._classes_all[ind] + suffix_frame
+
+                try:
+                    # print('look for posecnn detection ' + source_frame)
+                    trans, rot = self.listener.lookupTransform(self.target_frame, source_frame, rospy.Time(0))
+                    n = trans[0]
+                    secs = trans[1]
+                    now = rospy.Time.now()
+                    if abs(now.secs - secs) > 2.0:
+                        print 'posecnn pose for %s time out %f %f' % (source_frame, now.secs, secs)
+                        continue
+                    roi = np.zeros((1, 6), dtype=np.float32)
+                    roi[0, 0] = 0
+                    roi[0, 1] = cfg.TRAIN.CLASSES.index(ind)
+                    roi[0, 2] = rot[0] * n
+                    roi[0, 3] = rot[1] * n
+                    roi[0, 4] = rot[2] * n
+                    roi[0, 5] = rot[3] * n
+                    rois_est = np.concatenate((rois_est, roi), axis=0)
+                    print('find posecnn detection ' + source_frame)
+                except:
                     continue
-                roi = np.zeros((1, 6), dtype=np.float32)
-                roi[0, 0] = 0
-                roi[0, 1] = cfg.TRAIN.CLASSES.index(ind)
-                roi[0, 2] = rot[0] * n
-                roi[0, 3] = rot[1] * n
-                roi[0, 4] = rot[2] * n
-                roi[0, 5] = rot[3] * n
-                rois_est = np.concatenate((rois_est, roi), axis=0)
-                rois_name.append(source_frame[8:])
-                print('find posecnn detection ' + source_frame)
-            except:
-                continue
 
         # call pose estimation function
-        save = self.process_image_multi_obj(input_rgb, input_depth, input_seg, rois_est, rois_name)
+        save = self.process_image_multi_obj(input_rgb, input_depth, input_seg, rois_est)
 
         # publish pose
         for i in range(self.pose_rbpf.num_rbpfs):
@@ -278,7 +279,7 @@ class ImageListener:
 
 
     # function for pose etimation and tracking
-    def process_image_multi_obj(self, rgb, depth, mask, rois, rois_name):
+    def process_image_multi_obj(self, rgb, depth, mask, rois):
         image_rgb = rgb.astype(np.float32) / 255.0
         image_bgr = image_rgb[:, :, (2, 1, 0)]
 
@@ -298,6 +299,13 @@ class ImageListener:
             assignment = overlaps.argmax(axis=1)
             overlaps_rbpf = overlaps.max(axis=1)
             overlaps_rois = overlaps.max(axis=0)
+
+            for i in range(num_rbpfs):
+                if overlaps_rbpf[i] > 0.5:
+                    self.pose_rbpf.rbpfs[i].roi_assign = rois[assignment[i]]
+                else:
+                    self.pose_rbpf.rbpfs[i].roi_assign = None
+
         elif num_rbpfs == 0 and num_rois == 0:
             return False
         elif num_rois > 0:
@@ -308,23 +316,25 @@ class ImageListener:
 
         # initialize new object
         for i in range(num_rois):
-            if overlaps_rois[i] > 0.5:
+            if overlaps_rois[i] > 0.2:
                 continue
             roi = rois[i]
-            name = rois_name[i]
             print('Initializing detection {} ... '.format(i))
             print(roi)
-            pose = self.pose_rbpf.Pose_Estimation_PRBPF(roi, name, self.intrinsic_matrix, image_bgr, depth, dpoints, mask)
+            pose = self.pose_rbpf.Pose_Estimation_PRBPF(roi, self.intrinsic_matrix, image_bgr, depth, dpoints, mask)
 
             # pose evaluation
             cls = cfg.TRAIN.CLASSES[int(roi[1])]
             sim, depth_error, vis_ratio = self.pose_rbpf.evaluate_6d_pose(pose, cls, torch.from_numpy(image_bgr), depth, self.intrinsic_matrix, mask)
             print('Initialization : Object: {}, Sim obs: {:.2}, Depth Err: {:.3}, Vis Ratio: {:.2}'.format(i, sim, depth_error, vis_ratio))
 
-            if sim < 0.6 or depth_error > 0.02 or vis_ratio < 0.3:
+            if sim < 0.4 or depth_error > 0.02 or vis_ratio < 0.3:
                 print('is NOT initialized!')
+                self.pose_rbpf.num_objects_per_class[self.pose_rbpf.rbpfs[-1].cls_test] -= 1
+                del self.pose_rbpf.rbpfs[-1]
             else:
                 print('is initialized!')
+                self.pose_rbpf.rbpfs[-1].roi_assign = roi
 
         # filter all the objects
         print('Filtering objects')

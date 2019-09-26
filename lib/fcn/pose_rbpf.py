@@ -58,6 +58,8 @@ class PoseRBPF:
         self.poses_cpu = poses_cpu
         self.dataset = dataset
         self.cos_sim = nn.CosineSimilarity(dim=1, eps=1e-6)
+        self.num_objects_per_class = np.zeros((len(cfg.TEST.CLASSES), ), dtype=np.int32)
+        self.prefix = '%02d_' % (cfg.instance_id)
 
         # motion model
         self.T_c1c0 = np.eye(4, dtype=np.float32)
@@ -81,7 +83,7 @@ class PoseRBPF:
     # pose estimation pipeline
     # roi: object detection from posecnn, shape (1, 6)
     # image_bgr: input bgr image, range (0, 1)
-    def Pose_Estimation_PRBPF(self, roi, name, intrinsic_matrix, image_bgr, im_depth, dpoints, im_label=None):
+    def Pose_Estimation_PRBPF(self, roi, intrinsic_matrix, image_bgr, im_depth, dpoints, im_label=None):
 
         n_init_samples = cfg.PF.N_PROCESS
         uv_init = np.zeros((2, ), dtype=np.float32)
@@ -100,8 +102,15 @@ class PoseRBPF:
             mask = np.zeros(im_label.shape, dtype=np.float32)
             mask[im_label == cls] = 1.0
 
+        cls_id = cfg.TRAIN.CLASSES[cls]
+        cls_test = cfg.TEST.CLASSES.index(cls_id)
+        self.num_objects_per_class[cls_test] += 1
+        object_id = self.num_objects_per_class[cls_test]
+        ind = cfg.TEST.CLASSES[cls_test]
+        name = self.prefix + self.dataset._classes_all[ind] + '_%02d' % (object_id)
         self.rbpfs.append(particle_filter(cfg.PF, n_particles=cfg.PF.N_PROCESS))
         self.rbpfs[-1].name = name
+        self.rbpfs[-1].cls_test = cls_test
         pose = self.initialize(self.num_rbpfs-1, image, uv_init, n_init_samples, cfg.TRAIN.CLASSES[cls], roi, intrinsic_matrix, im_depth, mask)
 
         # SDF refine
@@ -193,9 +202,10 @@ class PoseRBPF:
             pose[:4] = mat2quat(self.rbpfs[i].rot_bar)
 
             # SDF refine
-            # pose_refined, cls_render = self.refine_pose(im_label, im_depth, dpoints, self.rbpfs[i].roi, pose, intrinsics, self.dataset)
-            # self.rbpfs[i].pose = pose_refined.flatten()
-            self.rbpfs[i].pose = pose
+            pose_refined, cls_render = self.refine_pose(im_label, im_depth, dpoints, self.rbpfs[i].roi, pose, intrinsics, self.dataset)
+            self.rbpfs[i].pose = pose_refined.flatten()
+            #self.rbpfs[i].pose = pose
+            print(self.rbpfs[i].name)
 
             if cfg.TEST.SYNTHESIZE:
                 cls_render = cls - 1
@@ -257,6 +267,7 @@ class PoseRBPF:
             uv_h_int[:, 0] = np.clip(uv_h_int[:, 0], 0, image.shape[1] - 1)
             uv_h_int[:, 1] = np.clip(uv_h_int[:, 1], 0, image.shape[0] - 1)
             z = depth[uv_h_int[:, 1], uv_h_int[:, 0]]
+            z[np.isnan(z)] = 0
             z = np.expand_dims(z, axis=1)
             extent = np.mean(self.dataset._extents[int(roi[1]), :]) / 2
             z[z > 0] += np.random.uniform(-extent, extent, z[z > 0].shape)
@@ -346,6 +357,7 @@ class PoseRBPF:
             self.rbpfs[rind].uv[-n_gt_particles:, :2] += np.random.randn(n_gt_particles, 2) * cfg.PF.UV_NOISE_PRIOR
             self.rbpfs[rind].z[-n_gt_particles:] = np.ones((n_gt_particles, 1), dtype=np.float32) * pose[-1]
             self.rbpfs[rind].z[-n_gt_particles:] += np.random.randn(n_gt_particles, 1) * cfg.PF.Z_NOISE_PRIOR
+
 
         # compute pdf matrix for each particle
         est_pdf_matrix, max_sim_all, out_images, in_images = self.evaluate_particles(self.rbpfs[rind], cls_id, autoencoder, codes_gpu, \
@@ -456,8 +468,8 @@ class PoseRBPF:
     def Evaluate_Depths_Init(self, cls_id, depth, uv, z, q_idx, intrinsics, render_dist, codepose, delta=0.03, tau=0.05, mask=None):
 
         score = np.zeros_like(z)
-        height = self.dataset._height
-        width = self.dataset._width
+        height = cfg.TRAIN.SYN_HEIGHT
+        width = cfg.TRAIN.SYN_WIDTH
         fx = intrinsics[0, 0]
         fy = intrinsics[1, 1]
         px = intrinsics[0, 2]
@@ -535,8 +547,8 @@ class PoseRBPF:
     # evaluate particles according to depth measurements
     def Evaluate_Depths_Tracking(self, rbpf, cls_id, depth, uv, z, q_idx, intrinsics, render_dist, codepose, delta=0.03, tau=0.05):
         score = np.zeros_like(z)
-        height = self.dataset._height
-        width = self.dataset._width
+        height = cfg.TRAIN.SYN_HEIGHT
+        width = cfg.TRAIN.SYN_WIDTH
         fx = intrinsics[0, 0]
         fy = intrinsics[1, 1]
         px = intrinsics[0, 2]
@@ -879,8 +891,8 @@ class PoseRBPF:
 
     def render_image(self, dataset, intrinsic_matrix, cls, pose):
 
-        height = dataset._height
-        width = dataset._width
+        height = cfg.TRAIN.SYN_HEIGHT
+        width = cfg.TRAIN.SYN_WIDTH
         fx = intrinsic_matrix[0, 0]
         fy = intrinsic_matrix[1, 1]
         px = intrinsic_matrix[0, 2]
@@ -943,8 +955,8 @@ class PoseRBPF:
 
     def render_image_all(self, intrinsic_matrix):
 
-        height = self.dataset._height
-        width = self.dataset._width
+        height = cfg.TRAIN.SYN_HEIGHT
+        width = cfg.TRAIN.SYN_WIDTH
         fx = intrinsic_matrix[0, 0]
         fy = intrinsic_matrix[1, 1]
         px = intrinsic_matrix[0, 2]

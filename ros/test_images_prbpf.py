@@ -208,6 +208,7 @@ class ImageListener:
                 q_br = self.q_br.copy()
                 t_br = self.t_br.copy()
 
+        print('===========================================')
         rois, seg_im, poses, im_label = test_image_simple(self.net, self.dataset, im, depth_cv)
         self.run_posecnn_flag = False
         rgb_msg = self.cv_bridge.cv2_to_imgmsg(im_label, 'rgb8')
@@ -257,8 +258,8 @@ class ImageListener:
                 y1 = rois[i, 3] / n
                 x2 = rois[i, 4] / n
                 y2 = rois[i, 5] / n
-                self.br.sendTransform([n, rgb_frame_stamp.secs, 0], [x1, y1, x2, y2], rgb_frame_stamp,
-                                      tf_name + '_roi', self.target_frame)
+                now = rospy.Time.now()
+                self.br.sendTransform([n, now.secs, 0], [x1, y1, x2, y2], now, tf_name + '_roi', self.target_frame)
 
 def parse_args():
     """
