@@ -813,6 +813,7 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
             folder = osp.join(self._data_path, subdir)
             filename = os.path.join(folder, '*.mat')
             files = glob.glob(filename)
+            print(subdir, len(files))
             for k in range(len(files)):
                 filename = files[k]
                 head, name = os.path.split(filename)

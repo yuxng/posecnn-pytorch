@@ -33,14 +33,14 @@ for split in ['train', 'test']:
             datasets.YCBObject(split))
 
 # ycb self supervision dataset
-for split in ['train_1', 'train_2', 'train_3', 'train_4', 'train_5', 'test', 'all', 'debug']:
+for split in ['train_1', 'train_2', 'train_3', 'train_4', 'train_5', 'test', 'all', 'debug', 'train_block']:
     name = 'ycb_self_supervision_{}'.format(split)
     print name
     __sets[name] = (lambda split=split:
             datasets.YCBSelfSupervision(split))
 
 # ycb encoder self supervision dataset
-for split in ['train_1', 'train_2', 'train_3', 'train_4', 'train_5', 'test', 'all']:
+for split in ['train_1', 'train_2', 'train_3', 'train_4', 'train_5', 'test', 'all', 'train_block']:
     name = 'ycb_encoder_self_supervision_{}'.format(split)
     print name
     __sets[name] = (lambda split=split:
