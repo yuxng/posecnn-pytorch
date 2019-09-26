@@ -665,9 +665,9 @@ class PoseRBPF:
         zfar = 6.0
         znear = 0.01
         cfg.renderer.set_projection_matrix(width, height, fx, fy, px, py, znear, zfar)
-        image_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
-        seg_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
-        pcloud_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
+        image_tensor = torch.cuda.FloatTensor(height, width, 4)
+        seg_tensor = torch.cuda.FloatTensor(height, width, 4)
+        pcloud_tensor = torch.cuda.FloatTensor(height, width, 4)
 
         # render
         poses_all = []

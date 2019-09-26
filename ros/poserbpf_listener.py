@@ -173,7 +173,8 @@ class ImageListener:
             if depth.encoding == '32FC1':
                 depth_cv = self.cv_bridge.imgmsg_to_cv2(depth)
             elif depth.encoding == '16UC1':
-                depth_cv = self.cv_bridge.imgmsg_to_cv2(depth)
+                depth = self.cv_bridge.imgmsg_to_cv2(depth)
+                depth_cv = depth.copy().astype(np.float32)
                 depth_cv /= 1000.0
             else:
                 rospy.logerr_throttle(1, 'Unsupported depth type. Expected 16UC1 or 32FC1, got {}'.format(depth.encoding))
@@ -194,6 +195,7 @@ class ImageListener:
 
     def reset_poserbpf(self, req):
         self.reset = True
+        self.req = req
         return 0
 
 
@@ -206,12 +208,16 @@ class ImageListener:
             input_seg = self.input_seg.copy()
 
         if self.reset:
-            self.pose_rbpf.rbpfs = []
-            self.pose_rbpf.num_objects_per_class = np.zeros((len(cfg.TEST.CLASSES), ), dtype=np.int32)
+            if self.req.a == 0:
+                print('=========================reset===========================')
+                self.pose_rbpf.rbpfs = []
+                self.pose_rbpf.num_objects_per_class = np.zeros((len(cfg.TEST.CLASSES), ), dtype=np.int32)
+                self.scene += 1
+                self.step = 0
+                self.gen_data = True
+            elif self.req.a == 1:
+                self.gen_data = False
             self.reset = False
-            self.scene += 1
-            self.step = 0
-            self.gen_data = True
 
         # subscribe the transformation
         if self.forward_kinematics:
@@ -220,12 +226,14 @@ class ImageListener:
                 target_frame = 'measured/base_link'
                 trans, rot = self.listener.lookupTransform(target_frame, source_frame, rospy.Time(0))
                 Tbc = ros_qt_to_rt(rot, trans)
+                '''
                 if self.camera_type == 'D415':
                     T_delta = np.array([[0.99911077, 0.04145749, -0.00767817, -0.003222],
                                         [-0.04163608, 0.99882554, -0.02477858, -0.00289],
                                         [0.0066419, 0.02507623, 0.99966348, 0.003118],
                                         [0., 0., 0., 1.]], dtype=np.float32)
                     Tbc = Tbc.dot(T_delta)
+                '''
                 self.Tbc_now = Tbc.copy()
                 self.Tbr_now = Tbc.dot(np.linalg.inv(self.Trc))
                 if np.linalg.norm(self.Tbr_prev[:3, 3]) == 0:
@@ -296,6 +304,7 @@ class ImageListener:
 
         # visualization
         image_disp = self.pose_rbpf.render_image_all(self.intrinsic_matrix)
+        image_disp = 0.4 * input_rgb.astype(np.float32) + 0.6 * image_disp.astype(np.float32)
         image_disp = image_disp.astype(np.uint8)
         image_disp = np.clip(image_disp, 0, 255)
         pose_msg = self.cv_bridge.cv2_to_imgmsg(image_disp)
@@ -360,11 +369,11 @@ class ImageListener:
             print('Initialization : Object: {}, Sim obs: {:.2}, Depth Err: {:.3}, Vis Ratio: {:.2}'.format(i, sim, depth_error, vis_ratio))
 
             if sim < cfg.PF.THRESHOLD_SIM or depth_error > cfg.PF.THRESHOLD_DEPTH or vis_ratio < cfg.PF.THRESHOLD_RATIO:
-                print('is NOT initialized!')
+                print('===================is NOT initialized!=================')
                 self.pose_rbpf.num_objects_per_class[self.pose_rbpf.rbpfs[-1].cls_test] -= 1
                 del self.pose_rbpf.rbpfs[-1]
             else:
-                print('is initialized!')
+                print('===================is initialized!======================')
                 self.pose_rbpf.rbpfs[-1].roi_assign = roi
 
         # filter all the objects

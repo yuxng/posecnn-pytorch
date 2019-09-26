@@ -66,8 +66,6 @@ class Robot:
         self.open_gripper()
         self.retract()
 
-        rospy.Subscriber("poserbpf_status", numpy_msg(Floats), self.prbpf_callback)
-        self.prbpf_ok = False
         self.prbpf_grasp = False
         self.is_physical_robot = is_physical_robot
         self._grasp_frame_offset = tra.quaternion_matrix([0, 0, -0.707, 0.707])           
@@ -81,9 +79,6 @@ class Robot:
     def set_speed(self, speed):
         self._franka.set_speed(speed_level=speed)
 
-    def prbpf_callback(self, data):
-        self.prbpf_ok = bool(data.data[0])
-        self.prbpf_grasp = bool(data.data[1])
 
     def _load_object_info(self, path, prefix="00"):
         if path is None:
@@ -439,12 +434,14 @@ if __name__ == '__main__':
     theta[-1] = 75 / 57.3
 
     # main loop
-    test_n_iter = 50
+    test_n_iter = 1
+    duration = 10.0
     for i_test in range(test_n_iter):
         # robot.set_speed('fast')
 
         local_motion = False
         for i in range(len(psi)):
+            print(i)
             position_robot = center_clutter + np.array([-r[i] * np.cos(theta[i]) * np.cos(psi[i]),
                                                         -r[i] * np.cos(theta[i]) * np.sin(psi[i]),
                                                         r[i] * np.sin(theta[i])], dtype=np.float32)
@@ -466,27 +463,19 @@ if __name__ == '__main__':
                 robot.poserbpf_client(0, 0)
                 while 1:
                     Tbo = get_relative_pose_from_tf(listener, tf_name, BASE_FRAME)
-                    if Tbo[2, 3] > 0:
+                    print(Tbo)
+                    if abs(Tbo[2, 3]) > 0:
                         break
                 print(Tbo)
                 center_clutter = Tbo[:3, 3]
                 local_motion = True
             else:
                 # data recording
-                # robot.poserbpf_client(4, 0)
-                robot.interpolate_go_local(pose_start, pose_robot, rospy.Duration(5.0), timeout=5.0,)
+                robot.interpolate_go_local(pose_start, pose_robot, rospy.Duration(duration), timeout=5.0,)
                 rospy.sleep(0.5)
                 Tbo = get_relative_pose_from_tf(listener, tf_name, BASE_FRAME)
+                print(Tbo)
                 center_clutter = Tbo[:3, 3]
-                init_step = 0
-                if not i == (len(psi) - 1):
-                    while (not robot.prbpf_ok) and init_step < 3:
-                        pose_perturb = np.eye(4, dtype=np.float32)
-                        pose_perturb[2, 3] = np.random.randn(1) * 0.025
-                        robot.interpolate_go_local(pose_robot, pose_robot.dot(pose_perturb), rospy.Duration(5.0), timeout=5.0, )
-                        pose_robot = pose_robot.dot(pose_perturb)
-                        rospy.sleep(2.0)
-                        init_step += 1
                 # pose is good enough, perform grasping
                 if robot.prbpf_grasp:
                     break
@@ -494,7 +483,10 @@ if __name__ == '__main__':
 
         init_gripper = get_relative_pose_from_tf(listener, RIGHT_GRIPPER_FRAME, BASE_FRAME)
 
-        if not interaction:
+        if not args.robot_interact:
+            robot.poserbpf_client(1, 0)
+            rospy.sleep(2.0)
+            robot.retract()
             continue
 
         # robot.poserbpf_client(5, 0)
