@@ -4,7 +4,7 @@ set -x
 set -e
 
 export PYTHONUNBUFFERED="True"
-export CUDA_VISIBLE_DEVICES=0,1
+export PYTHON_EGG_CACHE=/nfs
 
 ./tools/train_net_self_supervision.py \
   --network posecnn \
