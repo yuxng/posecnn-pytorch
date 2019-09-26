@@ -10,6 +10,7 @@ import sys
 import scipy.io
 import random
 import time
+import datetime
 import tf.transformations as tra
 import matplotlib.pyplot as plt
 
@@ -17,7 +18,7 @@ from Queue import Queue
 from random import shuffle
 from cv_bridge import CvBridge, CvBridgeError
 from scipy.spatial import distance_matrix as scipy_distance_matrix
-from rospy_tutorials.srv import *
+from rospy_tutorials.srv import AddTwoInts
 from rospy.numpy_msg import numpy_msg
 from rospy_tutorials.msg import Floats
 from std_msgs.msg import String
@@ -49,7 +50,7 @@ def ros_qt_to_rt(rot, trans):
 
 class ImageListener:
 
-    def __init__(self, pose_rbpf):
+    def __init__(self, pose_rbpf, gen_data):
 
         print(' *** Initializing PoseRBPF ROS Node ... ')
 
@@ -61,7 +62,7 @@ class ImageListener:
         self.frame_lost = []
         self.num_lost = 50
         self.queue_size = 10
-        self.scene = 1
+        self.gen_data = gen_data
 
         self.pose_rbpf = pose_rbpf
         self.dataset = pose_rbpf.dataset
@@ -126,6 +127,11 @@ class ImageListener:
             self.Tbr_prev = np.eye(4, dtype=np.float32)
             self.Trc = np.load('./data/cameras/extrinsics_{}.npy'.format(self.camera_type))
             self.Tbc_now = np.eye(4, dtype=np.float32)
+        self.pose_rbpf.forward_kinematics = self.forward_kinematics
+
+        # service for reset poserbpf
+        s = rospy.Service('reset_poserbpf', AddTwoInts, self.reset_poserbpf)
+        self.reset = False
 
         K = np.array(msg.K).reshape(3, 3)
         self.intrinsic_matrix = K
@@ -143,13 +149,21 @@ class ImageListener:
         ts = message_filters.ApproximateTimeSynchronizer([rgb_sub, depth_sub, label_sub], queue_size, slop_seconds)
         ts.registerCallback(self.callback)
 
-        # data saving directory
         self.Tbr_kf = np.eye(4, dtype=np.float32)  # keyframe which is used for refine the object pose
         self.Tbr_kf_list = []
         self.Tco_kf_list = []
         self.record = False
         self.Tbr_save = np.eye(4, dtype=np.float32)
 
+        # data saving directory
+        self.scene = 0
+        self.step = 0
+        dataset_dir = './data_self/'
+        now = datetime.datetime.now()
+        seq_name = "{:%m%dT%H%M%S}/".format(now)
+        self.save_dir = dataset_dir + seq_name
+        if not os.path.exists(self.save_dir):
+            os.makedirs(self.save_dir)
 
     # callback function to get images
     def callback(self, rgb, depth, label):
@@ -178,6 +192,11 @@ class ImageListener:
             self.input_frame_id = rgb.header.frame_id
 
 
+    def reset_poserbpf(self, req):
+        self.reset = True
+        return 0
+
+
     def process_data(self):
         # callback data
         with lock:
@@ -185,6 +204,14 @@ class ImageListener:
             input_rgb = self.input_rgb.copy()
             input_depth = self.input_depth.copy()
             input_seg = self.input_seg.copy()
+
+        if self.reset:
+            self.pose_rbpf.rbpfs = []
+            self.pose_rbpf.num_objects_per_class = np.zeros((len(cfg.TEST.CLASSES), ), dtype=np.int32)
+            self.reset = False
+            self.scene += 1
+            self.step = 0
+            self.gen_data = True
 
         # subscribe the transformation
         if self.forward_kinematics:
@@ -277,6 +304,10 @@ class ImageListener:
         pose_msg.encoding = 'rgb8'
         self.pose_pub.publish(pose_msg)
 
+        # save data
+        if save and self.gen_data:
+            self.save_data(input_rgb, input_depth)
+
 
     # function for pose etimation and tracking
     def process_image_multi_obj(self, rgb, depth, mask, rois):
@@ -328,7 +359,7 @@ class ImageListener:
             sim, depth_error, vis_ratio = self.pose_rbpf.evaluate_6d_pose(pose, cls, torch.from_numpy(image_bgr), depth, self.intrinsic_matrix, mask)
             print('Initialization : Object: {}, Sim obs: {:.2}, Depth Err: {:.3}, Vis Ratio: {:.2}'.format(i, sim, depth_error, vis_ratio))
 
-            if sim < 0.4 or depth_error > 0.02 or vis_ratio < 0.3:
+            if sim < cfg.PF.THRESHOLD_SIM or depth_error > cfg.PF.THRESHOLD_DEPTH or vis_ratio < cfg.PF.THRESHOLD_RATIO:
                 print('is NOT initialized!')
                 self.pose_rbpf.num_objects_per_class[self.pose_rbpf.rbpfs[-1].cls_test] -= 1
                 del self.pose_rbpf.rbpfs[-1]
@@ -338,7 +369,48 @@ class ImageListener:
 
         # filter all the objects
         print('Filtering objects')
-        self.pose_rbpf.Filtering_PRBPF(self.intrinsic_matrix, image_bgr, depth, dpoints, mask)
-        save = True
-
+        save = self.pose_rbpf.Filtering_PRBPF(self.intrinsic_matrix, image_bgr, depth, dpoints, mask)
         return save
+
+
+    # save data
+    def save_data(self, rgb, depth):
+        factor_depth = 1000.0
+        classes_all = self.dataset._classes_all
+
+        cls_indexes = []
+        cls_names = []
+        num = self.pose_rbpf.num_rbpfs
+        poses = np.zeros((3, 4, num), dtype=np.float32)
+        for i in range(num):
+            cls_index = cfg.TEST.CLASSES[self.pose_rbpf.rbpfs[i].cls_id]
+            cls_indexes.append(cls_index)
+            cls_names.append(classes_all[cls_index])
+            poses[:3, :3, i] = quat2mat(self.pose_rbpf.rbpfs[i].pose[:4])
+            poses[:3, 3, i] = self.pose_rbpf.rbpfs[i].pose[4:]
+
+        if not os.path.exists(self.save_dir + 'scene_{:02}/'.format(self.scene)):
+            os.makedirs(self.save_dir+ 'scene_{:02}/'.format(self.scene))
+
+        meta = {'cls_names': cls_names, 'cls_indexes': cls_indexes, 'poses': poses,
+                'intrinsic_matrix': self.intrinsic_matrix, 'factor_depth': factor_depth}
+        filename = self.save_dir + 'scene_{:02}/'.format(self.scene) + '{:08}_meta.mat'.format(self.step)
+        scipy.io.savemat(filename, meta, do_compression=True)
+        print('save data to {}'.format(filename))
+
+        # convert rgb to bgr8
+        rgb_save = rgb[..., ::-1]
+        rgb_render = self.pose_rbpf.render_image_all(self.intrinsic_matrix)
+        rgb_render_save = 0.4 * rgb_save.astype(np.float32) + 0.6 * rgb_render[..., ::-1].astype(np.float32)
+        rgb_render_save = rgb_render_save.astype(np.uint8)
+
+        # convert depth to unit16
+        depth_save = np.array(depth * factor_depth, dtype=np.uint16)
+
+        save_name_rgb = self.save_dir + 'scene_{:02}/'.format(self.scene) + '{:08}_color.png'.format(self.step)
+        save_name_rgb_render = self.save_dir + 'scene_{:02}/'.format(self.scene) + '{:08}_color_render.png'.format(self.step)
+        save_name_depth = self.save_dir + 'scene_{:02}/'.format(self.scene) + '{:08}_depth.png'.format(self.step)
+        cv2.imwrite(save_name_rgb, rgb_save)
+        cv2.imwrite(save_name_rgb_render, rgb_render_save)
+        cv2.imwrite(save_name_depth, depth_save)
+        self.step += 1

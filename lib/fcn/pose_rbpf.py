@@ -62,6 +62,7 @@ class PoseRBPF:
         self.prefix = '%02d_' % (cfg.instance_id)
 
         # motion model
+        self.forward_kinematics = True
         self.T_c1c0 = np.eye(4, dtype=np.float32)
         self.T_o0o1 = np.eye(4, dtype=np.float32)
         self.T_c0o = np.eye(4, dtype=np.float32)
@@ -170,6 +171,7 @@ class PoseRBPF:
 
         n_init_samples = cfg.PF.N_PROCESS
         image = torch.from_numpy(image_bgr)
+        save = True
 
         # for each particle filter
         for i in range(self.num_rbpfs):
@@ -192,7 +194,7 @@ class PoseRBPF:
                 mask = None
 
             out_image, in_image = self.process_poserbpf(i, cls_id, autoencoder, codes_gpu, poses_cpu, image,
-                                  intrinsics, render_dist, im_depth, mask, apply_motion_prior=False, init_mode=False)
+                                  intrinsics, render_dist, im_depth, mask, apply_motion_prior=self.forward_kinematics, init_mode=False)
 
             # box and poses
             box_center = self.rbpfs[i].uv_bar[:2]
@@ -214,8 +216,17 @@ class PoseRBPF:
             im_render, box = self.render_image(self.dataset, intrinsics, cls_render, self.rbpfs[i].pose)
             self.rbpfs[i].roi[2:] = box
 
+            # pose evaluation
+            cls = cfg.TRAIN.CLASSES[int(self.rbpfs[i].roi[1])]
+            sim, depth_error, vis_ratio = self.evaluate_6d_pose(self.rbpfs[i].pose, cls, torch.from_numpy(image_bgr), \
+                im_depth, intrinsics, im_label)
+            print('Tracking: object: {}, Sim obs: {:.2}, Depth Err: {:.3}, Vis Ratio: {:.2}'.format(i, sim, depth_error, vis_ratio))
+            if sim < cfg.PF.THRESHOLD_SIM or depth_error > cfg.PF.THRESHOLD_DEPTH or vis_ratio < cfg.PF.THRESHOLD_RATIO:
+                save = False
+
             if cfg.TEST.VISUALIZE:
                 self.visualize(image, im_render, out_image, in_image, box_center, box_size, box)
+        return save
 
 
     # initialize PoseRBPF

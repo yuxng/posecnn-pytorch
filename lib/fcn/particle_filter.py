@@ -303,7 +303,7 @@ class particle_filter():
         grid_torch = torch.from_numpy(grid).unsqueeze(0).float().cuda()
 
         for i in range(int(self.n_particles)):
-            t_v = back_project(self.uv[i], intrinsics, self.z[i]).squeeze(1)
+            t_v = back_project(self.uv[i], intrinsics, self.z[i])
             Tco[:3, 3] = t_v
             Tc1o = np.matmul(Tc1c0, np.matmul(Tco, To0o1))
             t_v = Tc1o[:3, 3]

@@ -64,7 +64,7 @@ def parse_args():
                         type=str)
     parser.add_argument('--gen_data', dest='gen_data',
                         help='generate training data',
-                        action='store_false')
+                        action='store_true')
 
     args = parser.parse_args()
     return args
@@ -121,7 +121,7 @@ if __name__ == '__main__':
     pose_rbpf = PoseRBPF(dataset, args.pretrained, args.codebook)
 
     # image listener
-    listener = ImageListener(pose_rbpf)
+    listener = ImageListener(pose_rbpf, args.gen_data)
     while not rospy.is_shutdown():
         if listener.input_rgb is not None:
             listener.process_data()

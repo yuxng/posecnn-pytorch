@@ -1,0 +1,351 @@
+# Frame defining what coordinate system we control the robot in.
+base_frame: 00_base_link  
+
+# This is the basic base frame of the URDF. When switching cameras, the 
+# world_state_server will switch the link from base_frame (above) to this
+# base link, e.g. to a transform from 01_base_link to base_link.
+robot_base_frame: base_link  
+
+# The world is generally stationary w.r.t. to this frame.
+world_frame: world  
+
+# List of objects in the world. These will be described in the frame of the world
+# unless attached to a controlled robot frame, in which case, they'll be switched
+# to being described in the controlled frame it's attached to.
+objects:
+  ###################################################################
+  # Static base cylinder covering carter.
+  ###################################################################
+#  carter_base_cylinder:
+    # Carter base is .77m tall, floor to franka base_link. .3m wide radially 
+    # and .45m deep radially (middle to front). Less to the back.
+#    pose:
+#      # pt1: [0, 0, -.1]
+#      # pt1: [0, 0, -.77]
+#      # radius: .45
+#      #position: { x: 0., y: 0., z: -.435 }
+#      position: { x: 0., y: 0., z: -.5 }
+#      orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+#    model:
+#      type: cylinder
+#      scale: { x: .5, y: .5, z: .35 }
+#      color: { a: .8, r: 0.34, g: 0.51, b: 0.51 }
+#    in_coords: base_link
+#    collision_buffer: .0
+#    is_static: true
+
+  ###################################################################
+  # YCB objects right side
+  ###################################################################
+  00_table:
+    pose:
+      position: { x: 1000, y: 1000, z: 1000 }
+      orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+    model:
+      type: cube
+      scale: { x: 0.80, y: 2.80, z: 0.75 }
+      color: { a: 0.8, r: 0.0, g: 0.0, b: 0.0 }
+
+
+  ###################################################################
+  # YCB objects left side
+  ###################################################################
+  #  01_mustard_bottle:
+  #    pose:
+  #      position: { x: 1000., y: 1000., z: -1000. }
+  #      orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+  #    model:
+  #      type: cube
+  #      scale: { x: .1, y: .065, z: .195 }
+  #      color: { a: 1.0, r: 1.0, g: 1.0, b: 0.0 }
+  #    control_frames:
+  #      - name: center
+  #        frame:
+  #          position: { x: 0.0, y: 0.0, z: 0.0 }
+  #          orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+  #  01_cracker_box:
+  #    pose:
+  #      position: { x: 1000., y: 1000., z: -1000. }
+  #      orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+  #    model:
+  #      type: cube
+  #      scale: { x: .06, y: .16, z: .22 }
+  #      color: { a: 1.0, r: 1.0, g: 0.0, b: 0.0 }
+  #    control_frames:
+  #      - name: center
+  #        frame:
+  #          position: { x: 0.0, y: 0.0, z: 0.0 }
+  #          orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+  #  01_potted_meat_can:
+  #    pose:
+  #      position: { x: 1000., y: 1000., z: -1000. }
+  #      orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+  #    model:
+  #      type: cube
+  #      scale: { x: .1, y: .055, z: .0825 }
+  #      color: { a: 1.0, r: 0.0, g: 0.0, b: 0.54 }
+  #    control_frames:
+  #      - name: center
+  #        frame:
+  #          position: { x: 0.0, y: 0.0, z: 0.0 }
+  #          orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+  #      - name: bottom
+  #        frame:
+  #          position: { x: 0.0, y: 0.0, z: -0.04125 }
+  #          orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+  #  01_sugar_box:
+  #    pose:
+  #      position: { x: 1000., y: 1000., z: -1000. }
+  #      orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+  #    model:
+  #      type: cube
+  #      scale: { x: .04, y: .09, z: .18 }
+  #      color: { a: 1.0, r: 1.0, g: 1.0, b: 1.0 }
+  #    control_frames:
+  #      - name: center
+  #        frame:
+  #          position: { x: 0.0, y: 0.0, z: 0.0 }
+  #          orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+  #      - name: bottom
+  #        frame:
+  #          position: { x: 0.0, y: 0.0, z: -0.0875 }
+  #          orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+  #  01_tomato_soup_can:
+  #    pose:
+  #      position: { x: 1000., y: 1000., z: -1000. }
+  #      orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+  #    model:
+  #      type: cylinder
+  #      scale: { x: .07, y: .07, z: .1 }
+  #      color: { a: 1.0, r: 0.54, g: 0.0, b: 0.0 }
+  #    control_frames:
+  #      - name: center
+  #        frame:
+  #          position: { x: 0.0, y: 0.0, z: 0.0 }
+  #          orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+
+  ###################################################################
+  # Static parts: extractor hood, range, countertops
+  ###################################################################
+  extractor_hood:
+    pose:
+      position: { x: .0, y: .0, z: .0 }
+      orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+    model:
+      type: cube
+      scale: { x: .5, y: .76, z: .6 }
+      color: { a: 1.0, r: 0.34, g: 0.51, b: 0.51 }
+    collision_buffer: .01
+  range:
+    pose:
+      position: { x: .0, y: .0, z: .0 }
+      orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+    model:
+      type: cube
+      scale: { x: .71, y: .76, z: .92 }
+      color: { a: 1.0, r: 0.34, g: 0.51, b: 0.51 }
+    collision_buffer: .01
+  indigo_countertop:
+    pose:
+      position: { x: .0, y: .0, z: .0 }
+      orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+    model:
+      type: cube
+      scale: { x: .655, y: .835, z: .04 }
+      color: { a: 1.0, r: 0.34, g: 0.51, b: 0.51 }
+    collision_buffer: .01
+  hitman_countertop:
+    pose:
+      position: { x: .0, y: .0, z: .0 }
+      orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+    model:
+      type: cube
+      scale: { x: 0.655, y: 1.5, z: .04 }
+      color: { a: 1.0, r: 0.34, g: 0.51, b: 0.51 }
+    collision_buffer: .01
+  wall_right:
+    pose:
+      position: { x: .095, y: .9, z: .0 }
+      orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+    model:
+      type: cube
+      scale: { x: 0.915, y: 0.13, z: 1.82 }
+      color: { a: 1.0, r: 0.34, g: 0.51, b: 0.51 }
+    collision_buffer: .01
+    in_coords: indigo_tmp
+    is_static: true
+  ###################################################################
+  # Baker  (single hanging drawer in the center)
+  ###################################################################
+  baker_chewie_floor:
+    pose:
+      position: { x: -0.1825, y: -0.5725, z: .01 }
+      orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+    model:
+      type: cube
+      scale: { x: .365, y: 1.145, z: .02 }
+      color: { a: 1.0, r: 0.34, g: 0.51, b: 0.51 }
+    collision_buffer: .01
+    in_coords: sektion
+    is_static: true
+  baker_link:
+    pose:
+      position: { x: .0, y: .0, z: .0 }
+      orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+    model:
+      type: cube
+      scale: { x: .02, y: .38, z: .76 }
+      color: { a: 1.0, r: 0.34, g: 0.51, b: 0.51 }
+    collision_buffer: .01
+  ###################################################################
+  # Chewie (three hanging drawers in the center)
+  ###################################################################
+  chewie_door_left_link:
+    pose:
+      position: { x: .0, y: .0, z: .0 }
+      orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+    model:
+      type: cube
+      scale: { x: .02, y: .38, z: .76 }
+      color: { a: 1.0, r: 0.34, g: 0.51, b: 0.51 }
+    collision_buffer: .01
+  chewie_door_right_link:
+    pose:
+      position: { x: .0, y: .0, z: .0 }
+      orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+    model:
+      type: cube
+      scale: { x: .02, y: .38, z: .76 }
+      color: { a: 1.0, r: 0.34, g: 0.51, b: 0.51 }
+    collision_buffer: .01
+  ###################################################################
+  # Dagger (two hanging drawers with glass doors on the right)
+  ###################################################################
+  dagger_door_left_link:
+    pose:
+      position: { x: .0, y: .0, z: .0 }
+      orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+    model:
+      type: cube
+      scale: { x: .02, y: .38, z: .76 }
+      color: { a: 1.0, r: 0.34, g: 0.51, b: 0.51 }
+    collision_buffer: .01
+  dagger_door_right_link:
+    pose:
+      position: { x: .0, y: .0, z: .0 }
+      orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+    model:
+      type: cube
+      scale: { x: .02, y: .38, z: .76 }
+      color: { a: 1.0, r: 0.34, g: 0.51, b: 0.51 }
+  ###################################################################
+  # Hitman (two horizontal drawers in the center) 
+  ###################################################################
+  hitman_drawer_top_front:
+    pose:
+      position: { x: .0, y: .0, z: .0 }
+      orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+    model:
+      type: cube
+      scale: { x: .02, y: .76, z: .38 }
+      color: { a: .8, r: 0.34, g: 0.51, b: 0.51 }
+    control_frames:
+    - name: push_point_left
+      frame:
+        position: {x: .2675, y: 0.19125, z: 0.00}
+        orientation: {w: 1.00, x: 0.00, y: 0.00, z: 0.00}
+    - name: push_point_right
+      frame:
+        position: {x: .2675, y: -0.19125, z: 0.00}
+        orientation: {w: 1.00, x: 0.00, y: 0.00, z: 0.00}
+    collision_buffer: .01
+  hitman_drawer_bottom_front:
+    pose:
+      position: { x: .0, y: .0, z: .0 }
+      orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+    model:
+      type: cube
+      scale: { x: .02, y: .76, z: .38 }
+      color: { a: .8, r: 0.34, g: 0.51, b: 0.51 }
+    collision_buffer: .01
+  ###################################################################
+  # Indigo 
+  ###################################################################
+  #indigo_sektion:
+  #  pose:
+  #    position: { x: .5, y: .0, z: .3 }
+  #    orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+  #  model:
+  #    type: cube
+  #    scale: { x: .6, y: .764, z: .76 }
+  #    color: { a: .7, r: 0.34, g: 0.51, b: 0.51 }
+  #  collision_buffer: .01
+    #is_static: true
+  # Note that the front of the handle is about .314 meters
+  indigo_drawer_top:
+    pose:
+      position: { x: .5, y: .0, z: .3 }
+      orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+    model:
+      type: cube
+      scale: { x: .535, y: .765, z: .125 }
+      color: { a: .8, r: 0.34, g: 0.51, b: 0.51 }
+    control_frames:
+    - name: push_point_left
+      frame:
+        position: {x: .2675, y: 0.19125, z: 0.00}
+        orientation: {w: 1.00, x: 0.00, y: 0.00, z: 0.00}
+    - name: push_point_right
+      frame:
+        position: {x: .2675, y: -0.19125, z: 0.00}
+        orientation: {w: 1.00, x: 0.00, y: 0.00, z: 0.00}
+    collision_buffer: .03
+  indigo_drawer_bottom:
+    pose:
+      position: { x: .5, y: .0, z: .3 }
+      orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+    model:
+      type: cube
+      scale: { x: .535, y: .765, z: .125 }
+      color: { a: .8, r: 0.34, g: 0.51, b: 0.51 }
+    collision_buffer: .03
+  indigo_door_left:
+    pose:
+      position: { x: .5, y: .0, z: .3 }
+      orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+    model:
+      type: cube
+      scale: { x: .02, y: .382, z: .505 }
+      color: { a: 1.0, r: 0.34, g: 0.51, b: 0.51 }
+    collision_buffer: .01
+  indigo_door_right:
+    pose:
+      position: { x: .5, y: .0, z: .3 }
+      orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+    model:
+      type: cube
+      scale: { x: .02, y: .382, z: .505 }
+      color: { a: 1.0, r: 0.34, g: 0.51, b: 0.51 }
+    collision_buffer: .01
+  
+#  floor:
+#    pose:
+#      position: { x: 0., y: 0., z: -0.2 }
+#      orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+#    model:
+#      type: cube
+#      scale: { x: 3., y: 3., z: .2 }
+#      color: { a: .8, r: 0.34, g: 0.51, b: 0.51 }
+#    collision_buffer: .02
+#    is_static: true
+#  camera_pole:
+#    pose:
+#        #  -0.21448084712,0.25755417347,0.199254065752
+#      position: { x: -0.214, y: 0.258, z: .5 }
+#      orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+#    model:
+#      type: cylinder
+#      scale: { x: .2, y: .2, z: 1.2 }
+#      color: { a: .8, r: 0.34, g: 0.51, b: 0.51 }
+#    collision_buffer: .0
+#    is_static: true
