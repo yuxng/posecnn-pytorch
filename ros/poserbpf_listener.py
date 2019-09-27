@@ -33,6 +33,7 @@ from fcn.config import cfg, cfg_from_file, get_output_dir, write_selected_class_
 from fcn.train_test import backproject
 from video_recorder import *
 from utils.cython_bbox import bbox_overlaps
+from utils.nms import *
 
 lock = threading.Lock()
 
@@ -211,7 +212,7 @@ class ImageListener:
             if self.req.a == 0:
                 print('=========================reset===========================')
                 self.pose_rbpf.rbpfs = []
-                self.pose_rbpf.num_objects_per_class = np.zeros((len(cfg.TEST.CLASSES), ), dtype=np.int32)
+                self.pose_rbpf.num_objects_per_class = np.zeros((len(cfg.TEST.CLASSES), 10), dtype=np.int32)
                 self.scene += 1
                 self.step = 0
                 self.gen_data = True
@@ -370,7 +371,7 @@ class ImageListener:
 
             if sim < cfg.PF.THRESHOLD_SIM or depth_error > cfg.PF.THRESHOLD_DEPTH or vis_ratio < cfg.PF.THRESHOLD_RATIO:
                 print('===================is NOT initialized!=================')
-                self.pose_rbpf.num_objects_per_class[self.pose_rbpf.rbpfs[-1].cls_test] -= 1
+                self.pose_rbpf.num_objects_per_class[self.pose_rbpf.rbpfs[-1].cls_test, self.pose_rbpf.rbpfs[-1].object_id] = 0
                 del self.pose_rbpf.rbpfs[-1]
             else:
                 print('===================is initialized!======================')
@@ -378,7 +379,24 @@ class ImageListener:
 
         # filter all the objects
         print('Filtering objects')
-        save = self.pose_rbpf.Filtering_PRBPF(self.intrinsic_matrix, image_bgr, depth, dpoints, mask)
+        save, status = self.pose_rbpf.Filtering_PRBPF(self.intrinsic_matrix, image_bgr, depth, dpoints, mask)
+
+        # non-maximum suppression
+        num = len(status)
+        rois = np.zeros((num, 7), dtype=np.float32)
+        flags = np.zeros((num, ), dtype=np.int32)
+        for i in range(num):
+            rois[i, :6] = self.pose_rbpf.rbpfs[i].roi
+            rois[i, 6] = status[i]
+        keep = nms(rois, 0.5)
+        flags[keep] = 1
+        status[flags == 0] = 0
+
+        # remove untracked objects
+        for i in range(len(status)):
+            if status[i] == 0:
+                self.pose_rbpf.num_objects_per_class[self.pose_rbpf.rbpfs[i].cls_test, self.pose_rbpf.rbpfs[i].object_id] = 0
+        self.pose_rbpf.rbpfs = [self.pose_rbpf.rbpfs[i] for i in range(len(status)) if status[i]]
         return save
 
 

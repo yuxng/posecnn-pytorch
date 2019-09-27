@@ -58,7 +58,7 @@ class PoseRBPF:
         self.poses_cpu = poses_cpu
         self.dataset = dataset
         self.cos_sim = nn.CosineSimilarity(dim=1, eps=1e-6)
-        self.num_objects_per_class = np.zeros((len(cfg.TEST.CLASSES), ), dtype=np.int32)
+        self.num_objects_per_class = np.zeros((len(cfg.TEST.CLASSES), 10), dtype=np.int32)
         self.prefix = '%02d_' % (cfg.instance_id)
 
         # motion model
@@ -105,11 +105,13 @@ class PoseRBPF:
 
         cls_id = cfg.TRAIN.CLASSES[cls]
         cls_test = cfg.TEST.CLASSES.index(cls_id)
-        self.num_objects_per_class[cls_test] += 1
-        object_id = self.num_objects_per_class[cls_test]
+        index = np.where(self.num_objects_per_class[cls_test, :] == 0)[0]
+        object_id = index[0]
+        self.num_objects_per_class[cls_test, object_id] = 1
         ind = cfg.TEST.CLASSES[cls_test]
         name = self.prefix + self.dataset._classes_all[ind] + '_%02d' % (object_id)
         self.rbpfs.append(particle_filter(cfg.PF, n_particles=cfg.PF.N_PROCESS))
+        self.rbpfs[-1].object_id = object_id   
         self.rbpfs[-1].name = name
         self.rbpfs[-1].cls_test = cls_test
         pose = self.initialize(self.num_rbpfs-1, image, uv_init, n_init_samples, cfg.TRAIN.CLASSES[cls], roi, intrinsic_matrix, im_depth, mask)
@@ -172,6 +174,7 @@ class PoseRBPF:
         n_init_samples = cfg.PF.N_PROCESS
         image = torch.from_numpy(image_bgr)
         save = True
+        status = np.zeros((self.num_rbpfs, ), dtype=np.int32)
 
         # for each particle filter
         for i in range(self.num_rbpfs):
@@ -223,10 +226,12 @@ class PoseRBPF:
             print('Tracking: object: {}, Sim obs: {:.2}, Depth Err: {:.3}, Vis Ratio: {:.2}'.format(i, sim, depth_error, vis_ratio))
             if sim < cfg.PF.THRESHOLD_SIM or depth_error > cfg.PF.THRESHOLD_DEPTH or vis_ratio < cfg.PF.THRESHOLD_RATIO:
                 save = False
+            else:
+                status[i] = 1
 
             if cfg.TEST.VISUALIZE:
                 self.visualize(image, im_render, out_image, in_image, box_center, box_size, box)
-        return save
+        return save, status
 
 
     # initialize PoseRBPF
