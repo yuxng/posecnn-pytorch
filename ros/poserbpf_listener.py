@@ -156,6 +156,15 @@ class ImageListener:
         self.record = False
         self.Tbr_save = np.eye(4, dtype=np.float32)
 
+        # create pose publisher for each known object class
+        self.pubs = []
+        for i in range(1, self.dataset.num_classes):
+            if self.dataset.classes[i][3] == '_':
+                cls = self.prefix + self.dataset.classes[i][4:]
+            else:
+                cls = self.prefix + self.dataset.classes[i]
+            self.pubs.append(rospy.Publisher('/objects/prior_pose/' + cls, PoseStamped, queue_size=10))
+
         # data saving directory
         self.scene = 0
         self.step = 0
@@ -302,6 +311,21 @@ class ImageListener:
             q_bo = mat2quat(Tbo[:3, :3])
             name = 'poserbpf/' + self.pose_rbpf.rbpfs[i].name
             self.br.sendTransform(t_bo, [q_bo[1], q_bo[2], q_bo[3], q_bo[0]], rospy.Time.now(), name, self.target_frame)
+
+            # create pose msg
+            msg = PoseStamped()
+            msg.header.stamp = rospy.Time.now()
+            msg.header.frame_id = self.target_frame
+            msg.pose.orientation.x = self.pose_rbpf.rbpfs[i].pose[1]
+            msg.pose.orientation.y = self.pose_rbpf.rbpfs[i].pose[2]
+            msg.pose.orientation.z = self.pose_rbpf.rbpfs[i].pose[3]
+            msg.pose.orientation.w = self.pose_rbpf.rbpfs[i].pose[0]
+            msg.pose.position.x = self.pose_rbpf.rbpfs[i].pose[4]
+            msg.pose.position.y = self.pose_rbpf.rbpfs[i].pose[5]
+            msg.pose.position.z = self.pose_rbpf.rbpfs[i].pose[6]
+            cls = self.pose_rbpf.rbpfs[i].cls_id
+            pub = self.pubs[cls]
+            pub.publish(msg)
 
         # visualization
         image_disp = self.pose_rbpf.render_image_all(self.intrinsic_matrix)

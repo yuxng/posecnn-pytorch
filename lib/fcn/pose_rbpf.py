@@ -209,7 +209,6 @@ class PoseRBPF:
             # SDF refine
             pose_refined, cls_render = self.refine_pose(im_label, im_depth, dpoints, self.rbpfs[i].roi, pose, intrinsics, self.dataset)
             self.rbpfs[i].pose = pose_refined.flatten()
-            #self.rbpfs[i].pose = pose
             print(self.rbpfs[i].name)
 
             if cfg.TEST.SYNTHESIZE:
@@ -657,6 +656,10 @@ class PoseRBPF:
         cls = int(roi[1])
         cls_id = cfg.TRAIN.CLASSES[cls]
         cls_render = cfg.TEST.CLASSES.index(cls_id)
+
+        if not cfg.TEST.POSE_REFINE:
+            return pose, cls_render
+
         sdf_optim = cfg.sdf_optimizers[cls_render]
         width = im_label.shape[1]
         height = im_label.shape[0]

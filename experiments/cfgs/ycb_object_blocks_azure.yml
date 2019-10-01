@@ -52,7 +52,7 @@ TRAIN:
   SYN_STD_TRANSLATION: 0.05
 PF:
   USE_DEPTH: False
-  N_PROCESS: 100
+  N_PROCESS: 50
   N_INIT_FILTERING: 1
   UV_NOISE: 5.0
   Z_NOISE: 0.05
@@ -69,12 +69,12 @@ TEST:
   NUM_SDF_ITERATIONS: 50
   IMS_PER_BATCH: 1
   HOUGH_SKIP_PIXELS: 10
-  DET_THRESHOLD: 0.5
+  DET_THRESHOLD: 0.9
   SCALES_BASE: !!python/tuple [1.0]
   CHECK_SIZE: True
   VISUALIZE: False
   SYNTHESIZE: False
-  POSE_REFINE: True
+  POSE_REFINE: False
   ROS_CAMERA: Azure
   CLASSES: !!python/tuple [26, 27, 28, 29, 30, 31, 32, 33] # large and small blocks
   SYMMETRY: !!python/tuple [0, 1, 1, 1, 1, 1, 1, 1, 1]
