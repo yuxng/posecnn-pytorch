@@ -328,7 +328,10 @@ class ImageListener:
             pub.publish(msg)
 
         # visualization
-        image_disp = self.pose_rbpf.render_image_all(self.intrinsic_matrix)
+        '''
+        image_tensor, _ = self.pose_rbpf.render_image_all(self.intrinsic_matrix)
+        image_disp = image_tensor.cpu().numpy()
+        image_disp = np.clip(image_disp, 0, 1) * 255
         image_disp = 0.4 * input_rgb.astype(np.float32) + 0.6 * image_disp.astype(np.float32)
         image_disp = image_disp.astype(np.uint8)
         image_disp = np.clip(image_disp, 0, 255)
@@ -337,6 +340,7 @@ class ImageListener:
         pose_msg.header.frame_id = self.input_frame_id
         pose_msg.encoding = 'rgb8'
         self.pose_pub.publish(pose_msg)
+        '''
 
         # save data
         if save and self.gen_data:
@@ -344,7 +348,7 @@ class ImageListener:
 
 
     # function for pose etimation and tracking
-    def process_image_multi_obj(self, rgb, depth, mask, rois):
+    def process_image_multi_obj(self, rgb, depth, im_label, rois):
         image_rgb = rgb.astype(np.float32) / 255.0
         image_bgr = image_rgb[:, :, (2, 1, 0)]
 
@@ -386,11 +390,13 @@ class ImageListener:
             roi = rois[i]
             print('Initializing detection {} ... '.format(i))
             print(roi)
-            pose = self.pose_rbpf.Pose_Estimation_PRBPF(roi, self.intrinsic_matrix, image_bgr, depth, dpoints, mask)
+            pose = self.pose_rbpf.Pose_Estimation_PRBPF(roi, self.intrinsic_matrix, image_bgr, depth, dpoints, im_label)
 
             # pose evaluation
+            image_tensor, pcloud_tensor = self.pose_rbpf.render_image_all(self.intrinsic_matrix)
             cls = cfg.TRAIN.CLASSES[int(roi[1])]
-            sim, depth_error, vis_ratio = self.pose_rbpf.evaluate_6d_pose(pose, cls, torch.from_numpy(image_bgr), depth, self.intrinsic_matrix, mask)
+            sim, depth_error, vis_ratio = self.pose_rbpf.evaluate_6d_pose(self.pose_rbpf.rbpfs[-1].roi, pose, cls, \
+                torch.from_numpy(image_bgr), image_tensor, pcloud_tensor, depth, self.intrinsic_matrix, im_label)
             print('Initialization : Object: {}, Sim obs: {:.2}, Depth Err: {:.3}, Vis Ratio: {:.2}'.format(i, sim, depth_error, vis_ratio))
 
             if sim < cfg.PF.THRESHOLD_SIM or depth_error > cfg.PF.THRESHOLD_DEPTH or vis_ratio < cfg.PF.THRESHOLD_RATIO:
@@ -403,7 +409,7 @@ class ImageListener:
 
         # filter all the objects
         print('Filtering objects')
-        save, status = self.pose_rbpf.Filtering_PRBPF(self.intrinsic_matrix, image_bgr, depth, dpoints, mask)
+        save, status = self.pose_rbpf.Filtering_PRBPF(self.intrinsic_matrix, image_bgr, depth, dpoints, im_label)
 
         # non-maximum suppression
         num = len(status)

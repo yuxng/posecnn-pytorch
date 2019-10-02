@@ -5,6 +5,7 @@ import scipy.io
 import random
 import networks
 import numpy as np
+import time
 from layers.roi_align import ROIAlign
 from fcn.config import cfg
 from fcn.particle_filter import particle_filter
@@ -119,11 +120,13 @@ class PoseRBPF:
         # SDF refine
         pose_refined, cls_render = self.refine_pose(im_label, im_depth, dpoints, roi, pose, intrinsic_matrix, self.dataset)
         self.rbpfs[-1].pose = pose_refined.flatten()
-        im_render_refine, box_refine = self.render_image(self.dataset, intrinsic_matrix, cls_render, pose_refined.flatten())
+        box_refine = self.compute_box(self.dataset, intrinsic_matrix, int(roi[1]), pose_refined.flatten())
         self.rbpfs[-1].roi[2:] = box_refine
 
         if cfg.TEST.VISUALIZE:
-            im_render, box = self.render_image(self.dataset, intrinsic_matrix, cls_render, pose.flatten())    
+            im_render_refine = self.render_image(self.dataset, intrinsic_matrix, cls_render, pose_refined.flatten())
+            box = self.compute_box(self.dataset, intrinsic_matrix, int(roi[1]), pose.flatten())
+            im_render = self.render_image(self.dataset, intrinsic_matrix, cls_render, pose.flatten())    
             # show image
             import matplotlib.pyplot as plt
             fig = plt.figure()
@@ -176,7 +179,11 @@ class PoseRBPF:
         save = True
         status = np.zeros((self.num_rbpfs, ), dtype=np.int32)
 
+        # render pcloud of all the tracked objects
+        _, pcloud_tensor = self.render_image_all(intrinsics)
+
         # for each particle filter
+        end = time.time()
         for i in range(self.num_rbpfs):
             cls_id = self.rbpfs[i].cls_id
             autoencoder = self.autoencoders[cls_id]
@@ -196,8 +203,9 @@ class PoseRBPF:
             else:
                 mask = None
 
-            out_image, in_image = self.process_poserbpf(i, cls_id, autoencoder, codes_gpu, poses_cpu, image,
-                                  intrinsics, render_dist, im_depth, mask, apply_motion_prior=self.forward_kinematics, init_mode=False)
+            out_image, in_image = self.process_poserbpf(i, cls_id, autoencoder, codes_gpu, poses_cpu, image, \
+                                  intrinsics, render_dist, im_depth, mask, apply_motion_prior=self.forward_kinematics, \
+                                  init_mode=False, pcloud_tensor=pcloud_tensor)
 
             # box and poses
             box_center = self.rbpfs[i].uv_bar[:2]
@@ -211,25 +219,31 @@ class PoseRBPF:
             self.rbpfs[i].pose = pose_refined.flatten()
             print(self.rbpfs[i].name)
 
-            if cfg.TEST.SYNTHESIZE:
-                cls_render = cls - 1
-            else:
-                cls_render = cls_id
-            im_render, box = self.render_image(self.dataset, intrinsics, cls_render, self.rbpfs[i].pose)
+            # compute bounding box
+            box = self.compute_box(self.dataset, intrinsics, int(self.rbpfs[i].roi[1]), self.rbpfs[i].pose)
             self.rbpfs[i].roi[2:] = box
+        print('process poserbpf time %.2f' % (time.time() - end))
 
-            # pose evaluation
+        end = time.time()
+        # pose evaluation
+        image_tensor, pcloud_tensor = self.render_image_all(intrinsics)
+        for i in range(self.num_rbpfs):
             cls = cfg.TRAIN.CLASSES[int(self.rbpfs[i].roi[1])]
-            sim, depth_error, vis_ratio = self.evaluate_6d_pose(self.rbpfs[i].pose, cls, torch.from_numpy(image_bgr), \
-                im_depth, intrinsics, im_label)
-            print('Tracking: object: {}, Sim obs: {:.2}, Depth Err: {:.3}, Vis Ratio: {:.2}'.format(i, sim, depth_error, vis_ratio))
+            sim, depth_error, vis_ratio = self.evaluate_6d_pose(self.rbpfs[i].roi, self.rbpfs[i].pose, cls, torch.from_numpy(image_bgr), image_tensor, pcloud_tensor, im_depth, intrinsics, im_label)
+            print('Tracking {}, Sim obs: {:.2}, Depth Err: {:.3}, Vis Ratio: {:.2}'.format(self.rbpfs[i].name, sim, depth_error, vis_ratio))
             if sim < cfg.PF.THRESHOLD_SIM or depth_error > cfg.PF.THRESHOLD_DEPTH or vis_ratio < cfg.PF.THRESHOLD_RATIO:
                 save = False
             else:
                 status[i] = 1
 
             if cfg.TEST.VISUALIZE:
+                if cfg.TEST.SYNTHESIZE:
+                    cls_render = cls - 1
+                else:
+                    cls_render = cls_id
+                im_render = self.render_image(self.dataset, intrinsics, cls_render, self.rbpfs[i].pose)
                 self.visualize(image, im_render, out_image, in_image, box_center, box_size, box)
+        print('pose evaluation time %.2f' % (time.time() - end))
         return save, status
 
 
@@ -292,8 +306,7 @@ class PoseRBPF:
 
         # evaluate
         distribution, max_sim_all, out_images, in_images = self.evaluate_particles(self.rbpfs[rind], cls_id, autoencoder, codes_gpu, \
-            poses_cpu, image, intrinsics, \
-            uv_h, z, render_dist, cfg.PF.WT_RESHAPE_VAR, depth, mask, init_mode=True)
+            poses_cpu, image, intrinsics, uv_h, z, render_dist, cfg.PF.WT_RESHAPE_VAR, depth, mask, init_mode=True, pcloud_tensor=None)
 
         # find the max pdf from the distribution matrix
         index_star = self.arg_max_func(distribution)
@@ -315,7 +328,7 @@ class PoseRBPF:
         # filtering on the same image
         for i in range(cfg.PF.N_INIT_FILTERING):
             self.process_poserbpf(rind, cls_id, autoencoder, codes_gpu, poses_cpu, image,
-                                  intrinsics, render_dist, depth, mask, apply_motion_prior=False, init_mode=True)
+                                  intrinsics, render_dist, depth, mask, apply_motion_prior=False, init_mode=True, pcloud_tensor=None)
 
 
         # box and poses
@@ -324,16 +337,17 @@ class PoseRBPF:
         pose[4:] = self.rbpfs[rind].trans_bar
         pose[:4] = mat2quat(self.rbpfs[rind].rot_bar)
 
-        if cfg.TEST.SYNTHESIZE:
-            cls_render = cls - 1
-        else:
-            cls_render = cls_id
-        im_render, box = self.render_image(self.dataset, intrinsics, cls_render, pose)
+        box = self.compute_box(self.dataset, intrinsics, int(roi[1]), pose)
         self.rbpfs[rind].roi = roi.copy()
         self.rbpfs[rind].roi[2:] = box
         self.rbpfs[rind].cls_id = cls_id
 
         if cfg.TEST.VISUALIZE:
+            if cfg.TEST.SYNTHESIZE:
+                cls_render = cls - 1
+            else:
+                cls_render = cls_id
+            im_render = self.render_image(self.dataset, intrinsics, cls_render, pose)
             self.visualize(image, im_render, out_images[index_star[0]], in_images[index_star[0]], box_center, box_size, box)
 
         return pose
@@ -341,7 +355,7 @@ class PoseRBPF:
 
     # filtering
     def process_poserbpf(self, rind, cls_id, autoencoder, codes_gpu, poses_cpu, image, intrinsics, render_dist,
-                         depth=None, mask=None, apply_motion_prior=True, init_mode=False):
+                         depth=None, mask=None, apply_motion_prior=True, init_mode=False, pcloud_tensor=None):
 
         # propagation
         if apply_motion_prior:
@@ -373,10 +387,9 @@ class PoseRBPF:
             self.rbpfs[rind].z[-n_gt_particles:] = np.ones((n_gt_particles, 1), dtype=np.float32) * pose[-1]
             self.rbpfs[rind].z[-n_gt_particles:] += np.random.randn(n_gt_particles, 1) * cfg.PF.Z_NOISE_PRIOR
 
-
         # compute pdf matrix for each particle
         est_pdf_matrix, max_sim_all, out_images, in_images = self.evaluate_particles(self.rbpfs[rind], cls_id, autoencoder, codes_gpu, \
-            poses_cpu, image, intrinsics, self.rbpfs[rind].uv, self.rbpfs[rind].z, render_dist, cfg.PF.WT_RESHAPE_VAR, depth, mask, init_mode)
+            poses_cpu, image, intrinsics, self.rbpfs[rind].uv, self.rbpfs[rind].z, render_dist, cfg.PF.WT_RESHAPE_VAR, depth, mask, init_mode, pcloud_tensor)
 
         # most likely particle
         index_star = self.arg_max_func(est_pdf_matrix)
@@ -414,7 +427,7 @@ class PoseRBPF:
 
     # evaluate particles according to the RGB(D) images
     def evaluate_particles(self, rbpf, cls_id, autoencoder, codes_gpu, codepose, image, intrinsics, uv, z, render_dist, gaussian_std,
-                           depth=None, mask=None, init_mode=False):
+                           depth=None, mask=None, init_mode=False, pcloud_tensor=None):
 
         # crop the rois from input image
         fu = intrinsics[0, 0]
@@ -456,8 +469,7 @@ class PoseRBPF:
                                                              q_idx=i_sims.cpu().numpy(), intrinsics=intrinsics,
                                                              render_dist=render_dist, codepose=codepose,
                                                              delta=cfg.PF.DEPTH_DELTA,
-                                                             tau=cfg.PF.DEPTH_DELTA)
-
+                                                             tau=cfg.PF.DEPTH_DELTA, pcloud_tensor=pcloud_tensor)
 
             # reshape the depth score
             if np.max(depth_scores) > 0:
@@ -560,69 +572,30 @@ class PoseRBPF:
         return score
 
     # evaluate particles according to depth measurements
-    def Evaluate_Depths_Tracking(self, rbpf, cls_id, depth, uv, z, q_idx, intrinsics, render_dist, codepose, delta=0.03, tau=0.05):
-        score = np.zeros_like(z)
-        height = cfg.TRAIN.SYN_HEIGHT
-        width = cfg.TRAIN.SYN_WIDTH
-        fx = intrinsics[0, 0]
-        fy = intrinsics[1, 1]
-        px = intrinsics[0, 2]
-        py = intrinsics[1, 2]
-        zfar = 6.0
-        znear = 0.01
-        cfg.renderer.set_light_pos([0, 0, 0])
-        cfg.renderer.set_light_color([1, 1, 1])
-        cfg.renderer.set_projection_matrix(width, height, fx, fy, px, py, znear, zfar)
+    def Evaluate_Depths_Tracking(self, rbpf, cls_id, depth, uv, z, q_idx, intrinsics, render_dist, codepose, delta=0.03, tau=0.05, pcloud_tensor=None):
 
         # crop rois
         depth_roi_cuda, _ = trans_zoom_uvz_cuda(depth.detach(), uv, z, intrinsics[0, 0], intrinsics[1, 1], render_dist)
         depth_roi_np = depth_roi_cuda.cpu().numpy()
 
-        # render
+        # crop render
         pose_v = np.zeros((7,))
-        frame_cuda = torch.cuda.FloatTensor(height, width, 4)
-        seg_cuda = torch.cuda.FloatTensor(height, width, 4)
-        pc_cuda = torch.cuda.FloatTensor(height, width, 4)
+        pose_v[:3] = rbpf.trans_bar
+        pose_v[3:] = mat2quat(rbpf.rot_bar)
 
-        fast_rendering = False
-        if np.linalg.norm(rbpf.trans_bar) > 0:
-            pose_v[:3] = rbpf.trans_bar
-            pose_v[3:] = mat2quat(rbpf.rot_bar)
-            cfg.renderer.set_poses([pose_v])
-            cfg.renderer.render([cls_id], frame_cuda, seg_cuda, pc2_tensor=pc_cuda)
-            uv_crop = project(rbpf.trans_bar, intrinsics)
-            uv_crop = np.repeat(np.expand_dims(uv_crop, axis=0), uv.shape[0], axis=0)
-            z_crop = np.ones_like(z) * rbpf.trans_bar[2]
-            render_roi_cuda, _ = trans_zoom_uvz_cuda(pc_cuda.flip(0), uv_crop, z_crop, intrinsics[0, 0], intrinsics[1, 1], render_dist)
-            pc_render_all = render_roi_cuda[:, :3, :, :].permute(0, 2, 3, 1).cpu().numpy()
-            fast_rendering = True
-        else:
-            q_idx_unique, idx_inv = np.unique(q_idx, return_inverse=True)
-            pc_render_all = np.zeros((q_idx_unique.shape[0], 128, 128, 3), dtype=np.float32)
-            q_render = codepose[q_idx_unique][:, 3:]
-            for i in range(q_render.shape[0]):
-                pose_v[:3] = [0, 0, render_dist]
-                pose_v[3:] = q_render[i]
-                cfg.renderer.set_poses([pose_v])
-                cfg.renderer.render([cls_id], frame_cuda, seg_cuda, pc_cuda)
-                render_roi_cuda, _ = trans_zoom_uvz_cuda(pc_cuda.flip(0),
-                                                         np.array([[intrinsics[0, 2], intrinsics[1, 2], 1]]),
-                                                         np.array([[render_dist]]),
-                                                         intrinsics[0, 0], intrinsics[1, 1],
-                                                         render_dist)
-                pc_render_all[i] = render_roi_cuda[0, :3, :, :].permute(1, 2, 0).cpu().numpy()
+        uv_crop = project(rbpf.trans_bar, intrinsics)
+        uv_crop = np.expand_dims(uv_crop, axis=0)
+        z_crop = rbpf.trans_bar[2]
+        render_roi_cuda, _ = trans_zoom_uvz_cuda(pcloud_tensor, uv_crop, z_crop, intrinsics[0, 0], intrinsics[1, 1], render_dist)
+        pc_render_all = render_roi_cuda[:, :3, :, :].permute(0, 2, 3, 1).cpu().numpy()
 
         # evaluate every particle
+        score = np.zeros_like(z)
         for i in range(uv.shape[0]):
 
-            if fast_rendering:
-                pc_render = pc_render_all[i].copy()
-                depth_mask = pc_render[:, :, 2] > 0
-                pc_render[:, :, 2][depth_mask] = pc_render[:, :, 2][depth_mask] - rbpf.trans_bar[2] + z[i]
-            else:
-                pc_render = pc_render_all[idx_inv[i]].copy()
-                depth_mask = pc_render[:, :, 2] > 0
-                pc_render[:, :, 2][depth_mask] = pc_render[:, :, 2][depth_mask] - render_dist + z[i]
+            pc_render = pc_render_all[0].copy()
+            depth_mask = pc_render[:, :, 2] > 0
+            pc_render[:, :, 2][depth_mask] = pc_render[:, :, 2][depth_mask] - rbpf.trans_bar[2] + z[i]
 
             depth_render = pc_render[:, :, [2]]
             depth_meas_np = depth_roi_np[i, 0, :, :]
@@ -783,71 +756,51 @@ class PoseRBPF:
 
 
     # evaluate a single 6D pose of a certain object
-    def evaluate_6d_pose(self, pose, cls, image_bgr, image_depth, intrinsics, mask=None):
+    def evaluate_6d_pose(self, roi, pose, cls, image_bgr, image_tensor, pcloud_tensor, image_depth, intrinsics, im_label):
 
         sim = 0
         depth_error = 1
         vis_ratio = 0
+        height = image_depth.shape[0]
+        width = image_depth.shape[1]
 
         if cls in cfg.TEST.CLASSES:
 
             cls_id = cfg.TEST.CLASSES.index(cls)
+            autoencoder = self.autoencoders[cls_id]
             render_dist = self.codebooks[cls_id]['distance']
-
             t = pose[4:]
             uv = project(np.expand_dims(t, axis=1), intrinsics).transpose()
-
             z = np.array([t[2]], dtype=np.float32)
             fx = intrinsics[0, 0]
             fy = intrinsics[1, 1]
-            px = intrinsics[0, 2]
-            py = intrinsics[1, 2]
+
+            # mask
+            x1 = max(int(roi[2]), 0)
+            y1 = max(int(roi[3]), 0)
+            x2 = min(int(roi[4]), width-1)
+            y2 = min(int(roi[5]), height-1)
+            mask = np.zeros((height, width), dtype=np.float32)
+            mask[y1:y2, x1:x2] = im_label[y1:y2, x1:x2]
 
             # get roi
             rois, scale_roi = trans_zoom_uvz_cuda(image_bgr.detach(), uv, z, fx, fy, render_dist)
 
             # render object
-            zfar = 6.0
-            znear = 0.01
-            width = image_bgr.shape[1]
-            height = image_bgr.shape[0]
-            # rendering
-            cfg.renderer.set_projection_matrix(width, height, fx, fy, px, py, znear, zfar)
-            image_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
-            seg_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
-            pcloud_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
-            poses_all = []
-            qt = np.zeros((7,), dtype=np.float32)
-            qt[3:] = pose[:4]
-            qt[0] = pose[4]
-            qt[1] = pose[5]
-            qt[2] = pose[6]
-            poses_all.append(qt)
-            cfg.renderer.set_poses(poses_all)
-
-            cfg.renderer.render([cls_id], image_tensor, seg_tensor, pc2_tensor=pcloud_tensor)
-            pcloud_tensor = pcloud_tensor[:, :, :3].flip(0)
-
-            render_bgr = image_tensor[:, :, :3].flip(0)[:, :, (2,1,0)]
+            render_bgr = image_tensor[:, :, (2,1,0)]
             rois_render, scale_roi_render = trans_zoom_uvz_cuda(render_bgr.detach(), uv, z, fx, fy, render_dist)
 
             # forward passing
-            out_img, embeddings = self.autoencoders[cls_id](torch.cat((rois, rois_render), dim=0))
-            embeddings = embeddings.detach()
+            embeddings = autoencoder.module.encode(torch.cat((rois, rois_render), dim=0)).detach()
             sim = self.cos_sim(embeddings[[0], :], embeddings[[1], :])[0].detach().cpu().numpy()
 
             # evaluate depth error
             depth_render = pcloud_tensor[:, :, 2].cpu().numpy()
 
             # compute visibility mask
-            if not mask is None:
-                cls_id_train = cfg.TRAIN.CLASSES.index(cls)
-                visibility_mask = np.logical_and(np.logical_and(mask == cls_id_train, depth_render > 0),
-                                                 estimate_visib_mask_numba(image_depth, depth_render, 0.05))
-            else:
-                visibility_mask = estimate_visib_mask_numba(image_depth, depth_render, 0.02)
-
-            vis_ratio = np.sum(visibility_mask.astype(np.float32)) * 1.0 / np.sum(depth_render != 0)
+            cls_id_train = cfg.TRAIN.CLASSES.index(cls)
+            visibility_mask = np.logical_and(np.logical_and(mask == cls_id_train, depth_render > 0), estimate_visib_mask_numba(image_depth, depth_render, 0.05))
+            vis_ratio = np.sum(visibility_mask.astype(np.float32)) * 1.0 / np.sum(mask == cls_id_train)
             depth_error = np.mean(np.abs(depth_render[visibility_mask] - image_depth[visibility_mask]))
 
         return sim, depth_error, vis_ratio
@@ -956,22 +909,31 @@ class PoseRBPF:
         im_render = im_render[:, :, :3] * 255
         im_render = im_render.astype(np.uint8)
         im_output = im_render
-
-        # compute box
-        I = np.where(seg.cpu().numpy() > 0)
-        if len(I[0]) > 0 and len(I[1]) > 0:
-            x1 = np.min(I[1])
-            y1 = np.min(I[0])
-            x2 = np.max(I[1])
-            y2 = np.max(I[0])
-            box = np.array([x1, y1, x2, y2])
-        else:
-            box = np.array([0, 0, 0, 0])
-
-        return im_output, box
+        return im_output
 
 
+    # compute bounding box by projection
+    def compute_box(self, dataset, intrinsic_matrix, cls, pose):
+        x3d = np.ones((4, dataset._points_all.shape[1]), dtype=np.float32)
+        x3d[0, :] = dataset._points_all[cls,:,0]
+        x3d[1, :] = dataset._points_all[cls,:,1]
+        x3d[2, :] = dataset._points_all[cls,:,2]
+        RT = np.zeros((3, 4), dtype=np.float32)
+        RT[:3, :3] = quat2mat(pose[:4])
+        RT[:, 3] = pose[4:]
+        x2d = np.matmul(intrinsic_matrix, np.matmul(RT, x3d))
+        x2d[0, :] = np.divide(x2d[0, :], x2d[2, :])
+        x2d[1, :] = np.divide(x2d[1, :], x2d[2, :])
 
+        x1 = np.min(x2d[0, :])
+        y1 = np.min(x2d[1, :])
+        x2 = np.max(x2d[0, :])
+        y2 = np.max(x2d[1, :])
+        box = np.array([x1, y1, x2, y2])
+        return box
+
+
+    # render all the tracked objects
     def render_image_all(self, intrinsic_matrix):
 
         height = cfg.TRAIN.SYN_HEIGHT
@@ -981,11 +943,12 @@ class PoseRBPF:
         px = intrinsic_matrix[0, 2]
         py = intrinsic_matrix[1, 2]
         zfar = 6.0
-        znear = 0.25
+        znear = 0.01
 
         im_output = np.zeros((height, width, 3), dtype=np.uint8)
         image_tensor = torch.cuda.FloatTensor(height, width, 4)
         seg_tensor = torch.cuda.FloatTensor(height, width, 4)
+        pcloud_tensor = torch.cuda.FloatTensor(height, width, 4)
 
         # set renderer
         cfg.renderer.set_light_pos([0, 0, 0])
@@ -994,13 +957,10 @@ class PoseRBPF:
 
         cls_indexes = []
         poses_all = []
-
         for i in range(self.num_rbpfs):
-
             rbpf = self.rbpfs[i]
             cls_index = rbpf.cls_id
             cls_indexes.append(cls_index)
-
             pose = rbpf.pose
             pose_render = np.zeros((7,), dtype=np.float32)
             pose_render[:3] = pose[4:]
@@ -1009,14 +969,7 @@ class PoseRBPF:
 
         # rendering
         cfg.renderer.set_poses(poses_all)
-        cfg.renderer.render(cls_indexes, image_tensor, seg_tensor)
-        image_tensor = image_tensor.flip(0)
-        seg_tensor = seg_tensor.flip(0)
-        seg = seg_tensor[:,:,2] + 256*seg_tensor[:,:,1] + 256*256*seg_tensor[:,:,0]
-
-        im_render = image_tensor.cpu().numpy()
-        im_render = np.clip(im_render, 0, 1)
-        im_render = im_render[:, :, :3] * 255
-        im_render = im_render.astype(np.uint8)
-        im_output = im_render
-        return im_output
+        cfg.renderer.render(cls_indexes, image_tensor, seg_tensor, pc2_tensor=pcloud_tensor)
+        image_tensor = image_tensor[:, :, :3].flip(0)
+        pcloud_tensor = pcloud_tensor[:, :, :3].flip(0)
+        return image_tensor, pcloud_tensor
