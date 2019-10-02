@@ -16,6 +16,7 @@ import cv2
 import scipy
 
 from fcn.config import cfg
+from fcn.particle_filter import particle_filter
 from transforms3d.quaternions import mat2quat, quat2mat, qmult
 from utils.se3 import *
 from utils.nms import *
@@ -288,6 +289,8 @@ def test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset, im_depth=
     rois_return = rois.copy()
     poses_return = poses.copy()
     image = None
+    if len(pose_rbpf.rbpfs) == 0:
+        pose_rbpf.rbpfs.append(particle_filter(cfg.PF, n_particles=cfg.PF.N_PROCESS))
 
     for i in range(num):
         ind = int(rois[i, 0])
@@ -307,14 +310,11 @@ def test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset, im_depth=
         uv_init[0] = fx * poses[i, 4] + px
         uv_init[1] = fy * poses[i, 5] + py
 
-        roi_w = rois[i, 4] - rois[i, 2]
-        roi_h = rois[i, 5] - rois[i, 3]
-
         if im_label is not None:
             mask = np.zeros(im_label.shape, dtype=np.float32)
             mask[im_label == cls] = 1.0
 
-        pose = pose_rbpf.initialize(image, uv_init, n_init_samples, cfg.TRAIN.CLASSES[cls], roi_w, roi_h, intrinsic_matrix, im_depth, mask)
+        pose = pose_rbpf.initialize(0, image, uv_init, n_init_samples, cfg.TRAIN.CLASSES[cls], rois[i, :6], intrinsic_matrix, im_depth, mask)
         if dataset.classes[cls] == '052_extra_large_clamp' and 'ycb_video' in dataset.name:
             pose_extra = pose
             pose_render = poses_return[i,:].copy()
@@ -351,20 +351,18 @@ def test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset, im_depth=
     return rois_return, poses_return, image
 
 
-def eval_poses(pose_rbpf, poses, rois, im_rgb, im_depth, meta_data):
-
-    num = rois.shape[0]
+def eval_poses(pose_rbpf, poses, rois, im_rgb, im_depth, im_label, meta_data):
 
     sims = np.zeros((rois.shape[0],), dtype=np.float32)
     depth_errors = np.ones((rois.shape[0],), dtype=np.float32)
     vis_ratios = np.zeros((rois.shape[0],), dtype=np.float32)
-
     pose_scores = np.zeros((rois.shape[0],), dtype=np.float32)
 
+    intrinsic_matrix = meta_data[0, :9].cpu().numpy().reshape((3, 3))
+    image_tensor, pcloud_tensor = pose_rbpf.render_poses_all(poses, rois, intrinsic_matrix)
+    num = rois.shape[0]
     for i in range(num):
-        ind = int(rois[i, 0])
         cls = int(rois[i, 1])
-
         # todo: fix the problem for large clamp
         if cls == -1:
             cls_id = 19
@@ -374,13 +372,8 @@ def eval_poses(pose_rbpf, poses, rois, im_rgb, im_depth, meta_data):
         if cls_id not in cfg.TEST.CLASSES:
             continue
 
-        intrinsic_matrix = meta_data[ind, :9].cpu().numpy().reshape((3, 3))
-        sims[i], depth_errors[i], vis_ratios[i] = pose_rbpf.evaluate_6d_pose(poses[i],
-                                                                             cls_id,
-                                                                             im_rgb,
-                                                                             im_depth,
-                                                                             intrinsic_matrix)
-
+        sims[i], depth_errors[i], vis_ratios[i] = pose_rbpf.evaluate_6d_pose(rois[i], poses[i], cls_id, im_rgb, \
+            image_tensor, pcloud_tensor, im_depth, intrinsic_matrix, im_label)
         pose_scores[i] = sims[i] / (depth_errors[i] / 0.002 / vis_ratios[i])
 
     return sims, depth_errors, vis_ratios, pose_scores
@@ -847,16 +840,15 @@ def test_image(network, pose_rbpf, dataset, im_color, im_depth=None):
             poses = poses[index, :]
 
             # run poseRBPF for codebook matching to compute the rotations
-            labels_out = out_label.detach().cpu().numpy()[0]
             if pose_rbpf is not None:
-                rois, poses, im_rgb = test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset, im_depth, labels_out)
+                rois, poses, im_rgb = test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset, im_depth, labels)
 
             # optimize depths
             cls_render_ids = None
             if cfg.TEST.POSE_REFINE and im_depth is not None:
-                poses, poses_refined, cls_render_ids = refine_pose(labels_out, im_depth, rois, poses, meta_data, dataset)
+                poses, poses_refined, cls_render_ids = refine_pose(labels, im_depth, rois, poses, meta_data, dataset)
                 if pose_rbpf is not None:
-                    sims, depth_errors, vis_ratios, pose_scores = eval_poses(pose_rbpf, poses_refined, rois, im_rgb, im_depth, meta_data)
+                    sims, depth_errors, vis_ratios, pose_scores = eval_poses(pose_rbpf, poses_refined, rois, im_rgb, im_depth, labels, meta_data)
             else:
                 num = rois.shape[0]
                 for j in range(num):
@@ -2275,7 +2267,7 @@ def vis_test(dataset, im, im_depth, label, out_vertex, rois, poses, poses_refine
     plt.imshow(im_pose)
     ax.set_title('rendered image')
 
-    if cfg.TEST.POSE_REFINE:
+    if cfg.TEST.POSE_REFINE and im_pose_refine is not None:
         ax = fig.add_subplot(3, 3, 9)
         plt.imshow(im_pose_refine)
         ax.set_title('rendered image refine')

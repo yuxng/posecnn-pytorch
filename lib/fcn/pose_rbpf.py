@@ -799,7 +799,8 @@ class PoseRBPF:
 
             # compute visibility mask
             cls_id_train = cfg.TRAIN.CLASSES.index(cls)
-            visibility_mask = np.logical_and(np.logical_and(mask == cls_id_train, depth_render > 0), estimate_visib_mask_numba(image_depth, depth_render, 0.05))
+            visibility_mask = np.logical_and(np.logical_and(mask == cls_id_train, depth_render > 0), \
+                                             estimate_visib_mask_numba(image_depth, depth_render, 0.05))
             vis_ratio = np.sum(visibility_mask.astype(np.float32)) * 1.0 / np.sum(mask == cls_id_train)
             depth_error = np.mean(np.abs(depth_render[visibility_mask] - image_depth[visibility_mask]))
 
@@ -962,6 +963,52 @@ class PoseRBPF:
             cls_index = rbpf.cls_id
             cls_indexes.append(cls_index)
             pose = rbpf.pose
+            pose_render = np.zeros((7,), dtype=np.float32)
+            pose_render[:3] = pose[4:]
+            pose_render[3:] = pose[:4]
+            poses_all.append(pose_render)
+
+        # rendering
+        cfg.renderer.set_poses(poses_all)
+        cfg.renderer.render(cls_indexes, image_tensor, seg_tensor, pc2_tensor=pcloud_tensor)
+        image_tensor = image_tensor[:, :, :3].flip(0)
+        pcloud_tensor = pcloud_tensor[:, :, :3].flip(0)
+        return image_tensor, pcloud_tensor
+
+
+    # render all the tracked objects
+    def render_poses_all(self, poses, rois, intrinsic_matrix):
+
+        height = cfg.TRAIN.SYN_HEIGHT
+        width = cfg.TRAIN.SYN_WIDTH
+        fx = intrinsic_matrix[0, 0]
+        fy = intrinsic_matrix[1, 1]
+        px = intrinsic_matrix[0, 2]
+        py = intrinsic_matrix[1, 2]
+        zfar = 6.0
+        znear = 0.01
+
+        im_output = np.zeros((height, width, 3), dtype=np.uint8)
+        image_tensor = torch.cuda.FloatTensor(height, width, 4)
+        seg_tensor = torch.cuda.FloatTensor(height, width, 4)
+        pcloud_tensor = torch.cuda.FloatTensor(height, width, 4)
+
+        # set renderer
+        cfg.renderer.set_light_pos([0, 0, 0])
+        cfg.renderer.set_light_color([1, 1, 1])
+        cfg.renderer.set_projection_matrix(width, height, fx, fy, px, py, znear, zfar)
+
+        cls_indexes = []
+        poses_all = []
+        num = rois.shape[0]
+        for i in range(num):
+            cls = int(rois[i, 1])
+            cls_id = cfg.TRAIN.CLASSES[cls]
+            if cls_id not in cfg.TEST.CLASSES:
+                continue
+            cls_index = cfg.TEST.CLASSES.index(cls_id)
+            cls_indexes.append(cls_index)
+            pose = poses[i, :]
             pose_render = np.zeros((7,), dtype=np.float32)
             pose_render[:3] = pose[4:]
             pose_render[3:] = pose[:4]

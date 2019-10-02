@@ -43,11 +43,23 @@ def parse_args():
     parser.add_argument('--pretrained', dest='pretrained',
                         help='initialize with pretrained checkpoint',
                         default=None, type=str)
+    parser.add_argument('--pretrained_encoder', dest='pretrained_encoder',
+                        help='initialize with pretrained encoder checkpoint',
+                        default=None, type=str)
+    parser.add_argument('--codebook', dest='codebook',
+                        help='codebook',
+                        default=None, type=str)
     parser.add_argument('--cfg', dest='cfg_file',
                         help='optional config file', default=None, type=str)
     parser.add_argument('--dataset', dest='dataset_name',
                         help='dataset to train on',
                         default='shapenet_scene_train', type=str)
+    parser.add_argument('--depth', dest='depth_name',
+                        help='depth image pattern',
+                        default='*depth.png', type=str)
+    parser.add_argument('--color', dest='color_name',
+                        help='color image pattern',
+                        default='*color.png', type=str)
     parser.add_argument('--imgdir', dest='imgdir',
                         help='path of the directory with the test images',
                         default='data/Images', type=str)
@@ -96,6 +108,7 @@ if __name__ == '__main__':
     # device
     cfg.gpu_id = 0
     cfg.device = torch.device('cuda:{:d}'.format(cfg.gpu_id))
+    cfg.instance_id = 0
     print('GPU device {:d}'.format(args.gpu_id))
 
     # dataset
@@ -110,13 +123,20 @@ if __name__ == '__main__':
 
     # list images
     images_color = []
-    images_depth = []
-    filename = os.path.join(args.imgdir, '*color.png')
+    filename = os.path.join(args.imgdir, args.color_name)
     files = glob.glob(filename)
     for i in range(len(files)):
         filename = files[i]
         images_color.append(filename)
-        images_depth.append(filename.replace('color', 'depth'))
+    images_color.sort()
+
+    images_depth = []
+    filename = os.path.join(args.imgdir, args.depth_name)
+    files = glob.glob(filename)
+    for i in range(len(files)):
+        filename = files[i]
+        images_depth.append(filename)
+    images_depth.sort()
 
     if cfg.TEST.VISUALIZE:
         index_images = np.random.permutation(len(images_color))
@@ -163,7 +183,7 @@ if __name__ == '__main__':
 
     # prepare autoencoder and codebook
     if cfg.TRAIN.VERTEX_REG:
-        pose_rbpf = PoseRBPF(dataset)
+        pose_rbpf = PoseRBPF(dataset, args.pretrained_encoder, args.codebook)
     else:
         pose_rbpf = None
 
