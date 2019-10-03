@@ -177,7 +177,6 @@ class PoseRBPF:
         n_init_samples = cfg.PF.N_PROCESS
         image = torch.from_numpy(image_bgr)
         save = True
-        status = np.zeros((self.num_rbpfs, ), dtype=np.int32)
 
         # render pcloud of all the tracked objects
         _, pcloud_tensor = self.render_image_all(intrinsics)
@@ -229,12 +228,14 @@ class PoseRBPF:
         image_tensor, pcloud_tensor = self.render_image_all(intrinsics)
         for i in range(self.num_rbpfs):
             cls = cfg.TRAIN.CLASSES[int(self.rbpfs[i].roi[1])]
-            sim, depth_error, vis_ratio = self.evaluate_6d_pose(self.rbpfs[i].roi, self.rbpfs[i].pose, cls, torch.from_numpy(image_bgr), image_tensor, pcloud_tensor, im_depth, intrinsics, im_label)
-            print('Tracking {}, Sim obs: {:.2}, Depth Err: {:.3}, Vis Ratio: {:.2}'.format(self.rbpfs[i].name, sim, depth_error, vis_ratio))
-            if sim < cfg.PF.THRESHOLD_SIM or depth_error > cfg.PF.THRESHOLD_DEPTH or vis_ratio < cfg.PF.THRESHOLD_RATIO:
+            sim, depth_error, vis_ratio = self.evaluate_6d_pose(self.rbpfs[i].roi, self.rbpfs[i].pose, cls, \
+                torch.from_numpy(image_bgr), image_tensor, pcloud_tensor, im_depth, intrinsics, im_label)
+            if sim < cfg.PF.THRESHOLD_SIM or np.isnan(depth_error) or depth_error > cfg.PF.THRESHOLD_DEPTH or vis_ratio < cfg.PF.THRESHOLD_RATIO:
                 save = False
+                self.rbpfs[i].num_lost += 1
             else:
-                status[i] = 1
+                self.rbpfs[i].num_lost = 0
+            print('Tracking {}, Sim obs: {:.2}, Depth Err: {:.3}, Vis Ratio: {:.2}, lost: {}'.format(self.rbpfs[i].name, sim, depth_error, vis_ratio, self.rbpfs[i].num_lost))
 
             if cfg.TEST.VISUALIZE:
                 if cfg.TEST.SYNTHESIZE:
@@ -244,7 +245,7 @@ class PoseRBPF:
                 im_render = self.render_image(self.dataset, intrinsics, cls_render, self.rbpfs[i].pose)
                 self.visualize(image, im_render, out_image, in_image, box_center, box_size, box)
         print('pose evaluation time %.2f' % (time.time() - end))
-        return save, status
+        return save
 
 
     # initialize PoseRBPF
@@ -370,21 +371,33 @@ class PoseRBPF:
             self.rbpfs[rind].add_noise_r3(uv_noise, z_noise)
             self.rbpfs[rind].add_noise_rot()
 
-        # add particles from estimated pose
-        if self.rbpfs[rind].pose[-1] > 0:
+        # add particles from detection
+        if self.rbpfs[rind].roi_assign is not None:
             n_gt_particles = int(cfg.PF.N_PROCESS / 2)
-            fx = intrinsics[0, 0]
-            fy = intrinsics[1, 1]
-            px = intrinsics[0, 2]
-            py = intrinsics[1, 2]
-            pose = self.rbpfs[rind].pose
+            roi = self.rbpfs[rind].roi_assign
             uv_init = np.zeros((2,), dtype=np.float32)
-            uv_init[0] = fx * pose[4] / pose[6] + px
-            uv_init[1] = fy * pose[5] / pose[6] + py
+            uv_init[0] = (roi[2] + roi[4]) / 2
+            uv_init[1] = (roi[3] + roi[5]) / 2
             uv_h = np.array([uv_init[0], uv_init[1], 1])
-            self.rbpfs[rind].uv[-n_gt_particles:] = np.repeat(np.expand_dims(uv_h, axis=0), n_gt_particles, axis=0)
+            uv_h = np.repeat(np.expand_dims(uv_h, axis=0), n_gt_particles, axis=0)
+            self.rbpfs[rind].uv[-n_gt_particles:] = uv_h
             self.rbpfs[rind].uv[-n_gt_particles:, :2] += np.random.randn(n_gt_particles, 2) * cfg.PF.UV_NOISE_PRIOR
-            self.rbpfs[rind].z[-n_gt_particles:] = np.ones((n_gt_particles, 1), dtype=np.float32) * pose[-1]
+
+            uv_h_int = uv_h.astype(int)
+            uv_h_int[:, 0] = np.clip(uv_h_int[:, 0], 0, image.shape[1] - 1)
+            uv_h_int[:, 1] = np.clip(uv_h_int[:, 1], 0, image.shape[0] - 1)
+            roi_w = roi[4] - roi[2]
+            roi_h = roi[5] - roi[3]
+            roi_size = max(roi_w, roi_h)
+            z_init = (128 - 40) * render_dist / roi_size * intrinsics[0, 0] / cfg.PF.FU
+            z_init = z_init[0, 0]           
+            z = depth[uv_h_int[:, 1], uv_h_int[:, 0]]
+            z[np.isnan(z)] = z_init
+            z = np.expand_dims(z, axis=1)
+            extent = np.mean(self.dataset._extents[int(roi[1]), :]) / 2
+            z[z > 0] += np.random.uniform(0, extent, z[z > 0].shape)
+            z[z == 0 | ~np.isfinite(z)] = np.random.uniform(0.9 * z_init, 1.1 * z_init, z[z == 0 | ~np.isfinite(z)].shape)
+            self.rbpfs[rind].z[-n_gt_particles:] = z
             self.rbpfs[rind].z[-n_gt_particles:] += np.random.randn(n_gt_particles, 1) * cfg.PF.Z_NOISE_PRIOR
 
         # compute pdf matrix for each particle

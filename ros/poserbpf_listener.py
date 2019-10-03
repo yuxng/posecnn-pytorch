@@ -352,29 +352,35 @@ class ImageListener:
         image_rgb = rgb.astype(np.float32) / 255.0
         image_bgr = image_rgb[:, :, (2, 1, 0)]
 
-        # data association based on bounding box overlap
-        num_rbpfs = self.pose_rbpf.num_rbpfs
+        # assign the clostest roi to rbpf
         num_rois = rois.shape[0]
-        if num_rbpfs > 0 and num_rois > 0:
-            rois_rbpf = np.zeros((num_rbpfs, 6), dtype=np.float32)
-            for i in range(num_rbpfs):
-                rois_rbpf[i, :] = self.pose_rbpf.rbpfs[i].roi.copy()
+        num_rbpfs = self.pose_rbpf.num_rbpfs
+        rois_rbpf = np.zeros((num_rbpfs, 6), dtype=np.float32)
+        assignment = np.zeros((num_rois, ), dtype=np.float32)
+        for i in range(num_rbpfs):
+            roi = self.pose_rbpf.rbpfs[i].roi.copy()
+            rois_rbpf[i, :] = roi
+            cls = int(roi[1])
+            index = np.where((rois[:, 1] == cls) & (assignment == 0))[0]
+            if len(index) > 0:
+                center = np.array([(roi[2] + roi[4]) / 2, (roi[3] + roi[5]) / 2])
+                center = np.repeat(np.expand_dims(center, axis=0), len(index), axis=0)
+                centers = np.zeros((len(index), 2), dtype=np.float32)
+                centers[:, 0] = (rois[index, 2] + rois[index, 4]) / 2
+                centers[:, 1] = (rois[index, 3] + rois[index, 5]) / 2
+                distance = np.linalg.norm(center - centers, axis=1)
+                ind = np.argmin(distance)
+                self.pose_rbpf.rbpfs[i].roi_assign = rois[index[ind]]
+                assignment[index[ind]] = 1
+            else:
+                self.pose_rbpf.rbpfs[i].roi_assign = None
 
+        # data association based on bounding box overlap
+        if num_rbpfs > 0 and num_rois > 0:
             # overlaps: (rois x gt_boxes) (batch_id, x1, y1, x2, y2)
             overlaps = bbox_overlaps(np.ascontiguousarray(rois_rbpf[:, (0, 2, 3, 4, 5)], dtype=np.float),
                 np.ascontiguousarray(rois[:, (0, 2, 3, 4, 5)], dtype=np.float))
-
-            # assignment
-            assignment = overlaps.argmax(axis=1)
-            overlaps_rbpf = overlaps.max(axis=1)
             overlaps_rois = overlaps.max(axis=0)
-
-            for i in range(num_rbpfs):
-                if overlaps_rbpf[i] > 0.5:
-                    self.pose_rbpf.rbpfs[i].roi_assign = rois[assignment[i]]
-                else:
-                    self.pose_rbpf.rbpfs[i].roi_assign = None
-
         elif num_rbpfs == 0 and num_rois == 0:
             return False
         elif num_rois > 0:
@@ -385,7 +391,7 @@ class ImageListener:
 
         # initialize new object
         for i in range(num_rois):
-            if overlaps_rois[i] > 0.2:
+            if overlaps_rois[i] > 0.2 or assignment[i]:
                 continue
             roi = rois[i]
             print('Initializing detection {} ... '.format(i))
@@ -409,24 +415,27 @@ class ImageListener:
 
         # filter all the objects
         print('Filtering objects')
-        save, status = self.pose_rbpf.Filtering_PRBPF(self.intrinsic_matrix, image_bgr, depth, dpoints, im_label)
+        save = self.pose_rbpf.Filtering_PRBPF(self.intrinsic_matrix, image_bgr, depth, dpoints, im_label)
 
         # non-maximum suppression
-        num = len(status)
+        num = self.pose_rbpf.num_rbpfs
+        status = np.zeros((num, ), dtype=np.int32)
         rois = np.zeros((num, 7), dtype=np.float32)
-        flags = np.zeros((num, ), dtype=np.int32)
         for i in range(num):
             rois[i, :6] = self.pose_rbpf.rbpfs[i].roi
-            rois[i, 6] = status[i]
+            rois[i, 6] = 1 - self.pose_rbpf.rbpfs[i].num_lost
         keep = nms(rois, 0.5)
-        flags[keep] = 1
-        status[flags == 0] = 0
+        status[keep] = 1
 
         # remove untracked objects
-        for i in range(len(status)):
-            if status[i] == 0:
+        for i in range(num):
+            if status[i] == 0 or self.pose_rbpf.rbpfs[i].num_lost >= 3:
                 self.pose_rbpf.num_objects_per_class[self.pose_rbpf.rbpfs[i].cls_test, self.pose_rbpf.rbpfs[i].object_id] = 0
-        self.pose_rbpf.rbpfs = [self.pose_rbpf.rbpfs[i] for i in range(len(status)) if status[i]]
+                status[i] = 0
+        self.pose_rbpf.rbpfs = [self.pose_rbpf.rbpfs[i] for i in range(num) if status[i] > 0]
+
+        if self.pose_rbpf.num_rbpfs == 0:
+            save = False
         return save
 
 
@@ -456,9 +465,11 @@ class ImageListener:
         print('save data to {}'.format(filename))
 
         # convert rgb to bgr8
-        rgb_save = rgb[..., ::-1]
-        rgb_render = self.pose_rbpf.render_image_all(self.intrinsic_matrix)
-        rgb_render_save = 0.4 * rgb_save.astype(np.float32) + 0.6 * rgb_render[..., ::-1].astype(np.float32)
+        rgb_save = rgb[:, :, (2, 1, 0)]
+        image_tensor, _ = self.pose_rbpf.render_image_all(self.intrinsic_matrix)
+        rgb_render = image_tensor.cpu().numpy()
+        rgb_render = np.clip(rgb_render, 0, 1) * 255
+        rgb_render_save = 0.4 * rgb_save.astype(np.float32) + 0.6 * rgb_render[:, :, (2, 1, 0)].astype(np.float32)
         rgb_render_save = rgb_render_save.astype(np.uint8)
 
         # convert depth to unit16

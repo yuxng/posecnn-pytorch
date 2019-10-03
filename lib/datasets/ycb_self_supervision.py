@@ -62,11 +62,17 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
                               (150, 0, 0), (0, 150, 0), (0, 0, 150), (150, 150, 0)]
         self._extents_all = self._load_object_extents()
 
-        self._width = 640
-        self._height = 480
+        self._width = cfg.TRAIN.SYN_WIDTH
+        self._height = cfg.TRAIN.SYN_HEIGHT
         self._intrinsic_matrix = np.array([[616.3653,    0.,      310.25882],
                                            [  0.,      616.20294, 236.59981],
                                            [  0.,        0.,        1.     ]])
+
+        if self._width == 1280:
+            self._intrinsic_matrix = np.array([[599.48681641,   0.,         639.84338379],
+                                               [  0.,         599.24389648, 366.09042358],
+                                               [  0.,           0.,           1.        ]])
+
 
         # select a subset of classes
         self._classes = [self._classes_all[i] for i in cfg.TRAIN.CLASSES]
