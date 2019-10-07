@@ -18,7 +18,53 @@ from utils.blob import pad_im, chromatic_transform, add_noise, add_noise_cuda, a
 from transforms3d.quaternions import mat2quat, quat2mat
 from transforms3d.euler import euler2quat
 from utils.se3 import *
+from scipy.optimize import minimize
 import matplotlib.pyplot as plt
+
+def get_bb3D(points):
+    num = points.shape[1]
+    bb_all = np.zeros((3, num * 864), dtype=np.float32)
+    count = 0
+    interval = 30
+    for yaw in range(-180, 180, interval):
+        for pitch in range(-90, 90, interval):
+            for roll in range(-180, 180, interval):
+                qt = euler2quat(roll * math.pi / 180.0, pitch * math.pi / 180.0, yaw * math.pi / 180.0, 'syxz')
+                R = quat2mat(qt)
+                bb_all[:, num*count:num*count+num] = np.matmul(R, points)
+                count += 1
+    return bb_all
+
+
+def optimize_depths(width, height, points, intrinsic_matrix):
+    # extract 3D points
+    x3d = np.ones((4, points.shape[1]), dtype=np.float32)
+    x3d[:3, :] = points
+
+    # optimization
+    x0 = 2.0
+    res = minimize(objective_depth, x0, args=(width, height, x3d, intrinsic_matrix), method='nelder-mead', options={'xtol': 1e-1, 'disp': False})
+    return res.x
+
+
+def objective_depth(x, width, height, x3d, intrinsic_matrix):
+    # project points
+    RT = np.zeros((3, 4), dtype=np.float32)
+    RT[:3, :3] = np.eye(3, dtype=np.float32)
+    RT[2, 3] = x
+    x2d = np.matmul(intrinsic_matrix, np.matmul(RT, x3d))
+    x2d[0, :] = np.divide(x2d[0, :], x2d[2, :])
+    x2d[1, :] = np.divide(x2d[1, :], x2d[2, :])
+
+    roi_pred = np.zeros((4, ), dtype=np.float32)
+    roi_pred[0] = np.min(x2d[0, :])
+    roi_pred[1] = np.min(x2d[1, :])
+    roi_pred[2] = np.max(x2d[0, :])
+    roi_pred[3] = np.max(x2d[1, :])
+    w = roi_pred[2] - roi_pred[0]
+    h = roi_pred[3] - roi_pred[1]
+    return np.abs(w - width)
+
 
 class YCBObject(data.Dataset, datasets.imdb):
     def __init__(self, image_set, ycb_object_path = None):
@@ -42,7 +88,7 @@ class YCBObject(data.Dataset, datasets.imdb):
                               (0, 0, 128), (0, 128, 0), (128, 0, 0), (128, 128, 0), (128, 0, 128), (0, 128, 128), \
                               (0, 64, 0), (64, 0, 0), (0, 0, 64), (64, 64, 0), (64, 0, 64), (0, 64, 64), \
                               (192, 0, 0), (0, 192, 0), (0, 0, 192), (192, 192, 0), (192, 0, 192), (0, 192, 192), (32, 0, 0), \
-                              (150, 0, 0), (0, 150, 0), (0, 0, 150), (150, 150, 0), (75, 0, 0), (0, 75, 0), (0, 0, 75), (75, 75, 0)]
+                              (150, 0, 0), (0, 150, 0), (0, 0, 150), (150, 150, 0), (255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0)]
         self._extents_all = self._load_object_extents()
 
         self._width = cfg.TRAIN.SYN_WIDTH
@@ -53,11 +99,16 @@ class YCBObject(data.Dataset, datasets.imdb):
 
         # select a subset of classes
         self._classes = [self._classes_all[i] for i in cfg.TRAIN.CLASSES]
+        self._classes_test = [self._classes_all[i] for i in cfg.TEST.CLASSES]
         self._num_classes = len(self._classes)
         self._class_colors = [self._class_colors_all[i] for i in cfg.TRAIN.CLASSES]
         self._symmetry = np.array(cfg.TRAIN.SYMMETRY).astype(np.float32)
+        self._symmetry_test = np.array(cfg.TEST.SYMMETRY).astype(np.float32)
         self._extents = self._extents_all[cfg.TRAIN.CLASSES]
-        self._points, self._points_all, self._point_blob, self._points_clamp = self._load_object_points()
+        self._extents_test = self._extents_all[cfg.TEST.CLASSES]
+        self._points, self._points_all, self._point_blob, self._points_clamp = self._load_object_points(self._classes, self._extents, self._symmetry)
+        self._points_test, self._points_all_test, self._point_blob_test, self._points_clamp_test = \
+            self._load_object_points(self._classes_test, self._extents_test, self._symmetry_test)
         self._pixel_mean = torch.tensor(cfg.PIXEL_MEANS / 255.0).cuda().float()
 
         self._classes_other = []
@@ -152,6 +203,42 @@ class YCBObject(data.Dataset, datasets.imdb):
         self.input_poses = torch.from_numpy(pose_blob).cuda()
         self.input_points = torch.from_numpy(self._point_blob).cuda()
         self.input_symmetry = torch.from_numpy(self._symmetry).cuda()
+
+        # compute the canonical distance to render
+        margin = 20
+        self.render_depths = self.compute_render_depths(margin)
+
+
+    def compute_render_depths(self, margin):
+        width = 128
+        height = 128
+        intrinsic_matrix = np.array([[500, 0, 64],
+                                          [0, 500, 64],
+                                          [0, 0, 1]])
+
+        prefix = '_class'
+        for i in range(len(cfg.TEST.CLASSES)):
+            prefix += '_%d' % cfg.TEST.CLASSES[i]
+        cache_file = os.path.join(self.cache_path, self.name + prefix + '_render_depths.pkl')
+        if os.path.exists(cache_file):
+            with open(cache_file, 'rb') as fid:
+                render_depths = cPickle.load(fid)
+            print('{} render_depths loaded from {}'.format(self.name, cache_file))
+            print(render_depths)
+            return render_depths
+
+        print('computing canonical depths')
+        render_depths = np.zeros((self._extents_test.shape[0], ), dtype=np.float32)
+        for i in range(1, self._extents_test.shape[0]):
+            points = get_bb3D(np.transpose(self._points_test[i]))
+            render_depths[i] = optimize_depths(width - margin, height - margin, points, intrinsic_matrix)
+            print(self._classes_test[i], render_depths[i])
+
+        with open(cache_file, 'wb') as fid:
+            cPickle.dump(render_depths, fid, cPickle.HIGHEST_PROTOCOL)
+        print 'wrote render_depths to {}'.format(cache_file)
+
+        return render_depths
 
 
     def _render_item(self):
@@ -733,31 +820,31 @@ class YCBObject(data.Dataset, datasets.imdb):
         return os.path.join(datasets.ROOT_DIR, 'data', 'YCB_Object')
 
 
-    def _load_object_points(self):
+    def _load_object_points(self, classes, extents, symmetry):
 
-        points = [[] for _ in xrange(len(self._classes))]
+        points = [[] for _ in range(len(classes))]
         num = np.inf
-
-        for i in xrange(1, len(self._classes)):
-            point_file = os.path.join(self._ycb_object_path, 'models', self._classes[i], 'points.xyz')
-            print point_file
+        num_classes = len(classes)
+        for i in range(1, num_classes):
+            point_file = os.path.join(self._ycb_object_path, 'models', classes[i], 'points.xyz')
+            print(point_file)
             assert os.path.exists(point_file), 'Path does not exist: {}'.format(point_file)
             points[i] = np.loadtxt(point_file)
             if points[i].shape[0] < num:
                 num = points[i].shape[0]
 
-        points_all = np.zeros((self._num_classes, num, 3), dtype=np.float32)
-        for i in xrange(1, len(self._classes)):
+        points_all = np.zeros((num_classes, num, 3), dtype=np.float32)
+        for i in range(1, num_classes):
             points_all[i, :, :] = points[i][:num, :]
 
         # rescale the points
         point_blob = points_all.copy()
-        for i in xrange(1, self._num_classes):
+        for i in range(1, num_classes):
             # compute the rescaling factor for the points
-            weight = 10.0 / np.amax(self._extents[i, :])
+            weight = 10.0 / np.amax(extents[i, :])
             if weight < 10:
                 weight = 10
-            if self._symmetry[i] > 0:
+            if symmetry[i] > 0:
                 point_blob[i, :, :] = 4 * weight * point_blob[i, :, :]
             else:
                 point_blob[i, :, :] = weight * point_blob[i, :, :]

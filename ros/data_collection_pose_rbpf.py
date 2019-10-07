@@ -457,6 +457,8 @@ if __name__ == '__main__':
             pose_robot = np.eye(4, dtype=np.double)
             pose_robot[:3, 3] = position_robot.astype(np.double)
             pose_robot[:3, :3] = R_BG[:3, :3].astype(np.double)
+            print(pose_robot)
+            sys.exit(1)
             if local_motion == False:
                 robot.goto(pose_robot, timeout=20.0)
                 rospy.sleep(3.0)

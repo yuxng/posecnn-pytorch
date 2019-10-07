@@ -145,7 +145,7 @@ __global__ void SDFdistanceForward(const int nthreads, const Dtype* pose_delta, 
     top_values[index] = losses[index];
 
     // L2 penalty on translation
-    float lambda = 0.001;
+    float lambda = 0.1;
     losses[index] += 0.5 * lambda * (pose_delta[0] * pose_delta[0] + pose_delta[1] * pose_delta[1] + pose_delta[2] * pose_delta[2]);
 
     // compute gradient

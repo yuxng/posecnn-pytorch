@@ -52,12 +52,14 @@ TEST:
   HOUGH_VOTING_THRESHOLD: 10
   IMS_PER_BATCH: 1
   HOUGH_SKIP_PIXELS: 10
-  DET_THRESHOLD: 0.9
+  DET_THRESHOLD: 0.5
+  CHECK_SIZE: True
   SCALES_BASE: !!python/tuple [1.0]
   VISUALIZE: False
   SYNTHESIZE: False
   POSE_REFINE: True
-#  ROS_CAMERA: D415
+  ROS_CAMERA: D415
 #  ROS_CAMERA: ISAAC_SIM
-  ROS_CAMERA: Azure
-  CLASSES: !!python/tuple [26, 27, 28, 29]
+#  ROS_CAMERA: Azure
+  CLASSES: !!python/tuple [0, 26, 27, 28, 29]
+  SYMMETRY: !!python/tuple [0, 1, 1, 1, 1]

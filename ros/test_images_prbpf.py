@@ -171,7 +171,7 @@ class ImageListener:
     def callback_rgbd(self, rgb, depth):
 
         if cfg.TEST.ROS_CAMERA == 'D415':
-            Tbr = get_relative_pose_from_tf(self.listener, 'measured/camera_link', 'measured/base_link')
+            Tbr = get_relative_pose_from_tf(self.listener, 'camera_link', 'measured/base_link')
 
         if depth.encoding == '32FC1':
             depth_cv = self.cv_bridge.imgmsg_to_cv2(depth)

@@ -38,8 +38,8 @@ __global__ void ROIPoolForward(const int nthreads, const float* bottom_data, con
     float roi_end_h = bottom_rois[n * channel_rois + 5] * spatial_scale;
 
     // Force malformed ROIs to be 1x1
-    int roi_width = fmax(roi_end_w - roi_start_w + 1, 1.0);
-    int roi_height = fmax(roi_end_h - roi_start_h + 1, 1.0);
+    int roi_width = max(roi_end_w - roi_start_w + 1, 1.0);
+    int roi_height = max(roi_end_h - roi_start_h + 1, 1.0);
     float bin_size_h = static_cast<float>(roi_height) / static_cast<float>(pool_height);
     float bin_size_w = static_cast<float>(roi_width) / static_cast<float>(pool_width);
 
@@ -49,10 +49,10 @@ __global__ void ROIPoolForward(const int nthreads, const float* bottom_data, con
     int wend = static_cast<int>(ceil(static_cast<float>(pw + 1) * bin_size_w));
 
     // Add roi offsets and clip to input boundaries
-    hstart = fmin(fmax(hstart + roi_start_h, 0.0), height);
-    hend = fmin(fmax(hend + roi_start_h, 0.0), height);
-    wstart = fmin(fmax(wstart + roi_start_w, 0.0), width);
-    wend = fmin(fmax(wend + roi_start_w, 0.0), width);
+    hstart = min(max(int(hstart + roi_start_h), 0), height);
+    hend = min(max(int(hend + roi_start_h), 0), height);
+    wstart = min(max(int(wstart + roi_start_w), 0), width);
+    wend = min(max(int(wend + roi_start_w), 0), width);
     bool is_empty = (hend <= hstart) || (wend <= wstart);
 
     // Define an empty pooling region to be zero
@@ -157,8 +157,8 @@ __global__ void ROIPoolBackward(const int nthreads, const float* top_diff, const
       // this bottom unit
 
       // Force malformed ROIs to be 1x1
-      int roi_width = fmax(roi_end_w - roi_start_w + 1, 1.0);
-      int roi_height = fmax(roi_end_h - roi_start_h + 1, 1.0);
+      int roi_width = max(roi_end_w - roi_start_w + 1, 1);
+      int roi_height = max(roi_end_h - roi_start_h + 1, 1);
       float bin_size_h = static_cast<float>(roi_height) / static_cast<float>(pool_height);
       float bin_size_w = static_cast<float>(roi_width) / static_cast<float>(pool_width);
 
@@ -167,10 +167,10 @@ __global__ void ROIPoolBackward(const int nthreads, const float* top_diff, const
       int pwstart = floor(static_cast<float>(w - roi_start_w) / bin_size_w);
       int pwend = ceil(static_cast<float>(w - roi_start_w + 1) / bin_size_w);
 
-      phstart = fmin(fmax(phstart, 0.0), pool_height);
-      phend = fmin(fmax(phend, 0.0), pool_height);
-      pwstart = fmin(fmax(pwstart, 0.0), pool_width);
-      pwend = fmin(fmax(pwend, 0.0), pool_width);
+      phstart = min(max(phstart, 0), pool_height);
+      phend = min(max(phend, 0), pool_height);
+      pwstart = min(max(pwstart, 0), pool_width);
+      pwend = min(max(pwend, 0), pool_width);
 
       for (int ph = phstart; ph < phend; ++ph) 
       {

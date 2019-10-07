@@ -1522,17 +1522,9 @@ def render_image_detection(dataset, im, rois, labels):
     class_colors = dataset._class_colors
 
     for i in range(num):
-        if cfg.MODE == 'TEST':
-            cls_index = int(rois[i, 1]) - 1
-        else:
-            cls_index = cfg.TRAIN.CLASSES[int(rois[i, 1])] - 1
-
-        if cls_index < 0:
-            continue
-
         cls = int(rois[i, 1])
-        print(classes[cls], rois[i, -1])
-        if cls > 0 and rois[i, -1] > cfg.TEST.DET_THRESHOLD:
+        print(dataset._classes[cls], rois[i, -1])
+        if rois[i, -1] > cfg.TEST.DET_THRESHOLD:
             # draw roi
             x1 = rois[i, 2]
             y1 = rois[i, 3]

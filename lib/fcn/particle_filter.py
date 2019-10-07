@@ -34,6 +34,8 @@ class particle_filter():
         self.ele_pad = nn.ReplicationPad3d((0, 0, 0, 0, cfg_pf.ROT_GAUSSIAN_KERNEL_SZ//2, cfg_pf.ROT_GAUSSIAN_KERNEL_SZ//2))
         self.roi_assign = None
         self.num_lost = 0
+        self.num_tracked = 0
+        self.need_filter = True
 
         # star
         self.uv_star = [0, 0, 1]

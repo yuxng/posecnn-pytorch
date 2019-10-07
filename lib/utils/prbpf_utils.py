@@ -1,4 +1,5 @@
 import numpy as np
+import numpy.matlib as npm
 from transforms3d.quaternions import *
 from transforms3d.euler import *
 from transforms3d.axangles import *
@@ -128,6 +129,44 @@ def back_project(uv, intrinsics, z):
     xyz = np.multiply(np.transpose(xyz), z)
     return xyz
 
+def weightedAverageQuaternions(Q, w):
+    # Number of quaternions to average
+    M = Q.shape[0]
+    A = npm.zeros(shape=(4,4))
+    weightSum = 0
+
+    for i in range(0,M):
+        q = Q[i,:]
+        A = w[i] * np.outer(q,q) + A
+        weightSum += w[i]
+
+    # scale
+    A = (1.0/weightSum) * A
+
+    # compute eigenvalues and -vectors
+    eigenValues, eigenVectors = np.linalg.eig(A)
+
+    # Sort by largest eigenvalue
+    eigenVectors = eigenVectors[:,eigenValues.argsort()[::-1]]
+
+    # return the real part of the largest eigenvector (has only real part)
+    return np.real(eigenVectors[:,0].A1)
+
+
+def moving_average_pose(pose, pn, alpha=0.9):
+    pose_new = pn.copy()
+    trans = pose[4:]
+    tn = pn[4:]
+    pose_new[4:] = alpha * tn + (1.0 - alpha) * trans
+
+    Q = np.zeros((2, 4), dtype=np.float32)
+    w = np.zeros((2, ), dtype=np.float32)
+    Q[0, :] = pose[:4]
+    w[0] = 1.0 - alpha
+    Q[1, :] = pn[:4]
+    w[1] = alpha
+    pose_new[:4] = weightedAverageQuaternions(Q, w)
+    return pose_new
 
 def single_orientation_error(q_gt, q_est):
     q_diff = qmult(qinverse(q_est), q_gt)

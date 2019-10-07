@@ -158,11 +158,12 @@ class ImageListener:
 
         # create pose publisher for each known object class
         self.pubs = []
-        for i in range(1, self.dataset.num_classes):
-            if self.dataset.classes[i][3] == '_':
-                cls = self.prefix + self.dataset.classes[i][4:]
+        for i in range(1, len(cfg.TEST.CLASSES)):
+            ind = cfg.TEST.CLASSES[i]
+            if self.dataset._classes_all[ind][3] == '_':
+                cls = self.prefix + self.dataset._classes_all[ind][4:]
             else:
-                cls = self.prefix + self.dataset.classes[i]
+                cls = self.prefix + self.dataset._classes_all[ind]
             self.pubs.append(rospy.Publisher('/objects/prior_pose/' + cls, PoseStamped, queue_size=10))
 
         # data saving directory
@@ -209,6 +210,70 @@ class ImageListener:
         return 0
 
 
+    def check_object_size(self, input_rgb, input_depth, input_seg, rois):
+        rois_est = rois.copy()
+        im_label = input_seg.copy()
+        width = im_label.shape[1]
+        height = im_label.shape[0]
+        for i in range(rois_est.shape[0]):
+            roi = rois_est[i, :]
+            cls = int(roi[1])
+            roi_w = roi[4] - roi[2]
+            roi_h = roi[5] - roi[3]
+            roi_size = min(roi_w, roi_h)
+            cls_id = cfg.TEST.CLASSES.index(cfg.TRAIN.CLASSES[cls])
+            n_init_samples = cfg.PF.N_PROCESS
+            uv_init = np.zeros((2, ), dtype=np.float32)
+            uv_init[0] = (roi[4] + roi[2]) / 2
+            uv_init[1] = (roi[5] + roi[3]) / 2
+
+            # codebook of the class
+            codebook = self.pose_rbpf.codebooks[cls_id]
+            render_dist = codebook['distance']
+            intrinsic_matrix = codebook['intrinsic_matrix']
+            cfg.PF.FU = intrinsic_matrix[0, 0]
+            cfg.PF.FV = intrinsic_matrix[1, 1]
+            z_init = (128 - 40) * render_dist / roi_size * self.intrinsic_matrix[0, 0] / cfg.PF.FU
+            z_init = z_init[0, 0]
+
+            # sample around the center of bounding box
+            uv_h = np.array([uv_init[0], uv_init[1], 1])
+            uv_h = np.repeat(np.expand_dims(uv_h, axis=0), n_init_samples, axis=0)
+            bound = roi_w * 0.1
+            uv_h[:, 0] += np.random.uniform(-bound, bound, (n_init_samples, ))
+            bound = roi_h * 0.1
+            uv_h[:, 1] += np.random.uniform(-bound, bound, (n_init_samples, ))
+            uv_h[:, 0] = np.clip(uv_h[:, 0], 0, input_rgb.shape[1])
+            uv_h[:, 1] = np.clip(uv_h[:, 1], 0, input_rgb.shape[0])
+
+            # sampling with depth        
+            uv_h_int = uv_h.astype(int)
+            uv_h_int[:, 0] = np.clip(uv_h_int[:, 0], 0, input_rgb.shape[1] - 1)
+            uv_h_int[:, 1] = np.clip(uv_h_int[:, 1], 0, input_rgb.shape[0] - 1)
+            z = input_depth[uv_h_int[:, 1], uv_h_int[:, 0]]
+            z[np.isnan(z)] = 0
+
+            print(self.dataset._classes_all[cfg.TRAIN.CLASSES[int(roi[1])]], z_init, np.mean(z[z > 0]))
+            if z_init - np.mean(z[z > 0]) > 0.25:
+                cls_name = self.dataset._classes_all[cfg.TRAIN.CLASSES[int(roi[1])]] + '_small'
+                for j in range(len(self.dataset._classes_all)):
+                    if cls_name == self.dataset._classes_all[j]:
+                        cls_test = cfg.TEST.CLASSES.index(j)
+                        rois_est[i, 1] = cls_test
+                        # change labels
+                        x1 = max(int(roi[2]), 0)
+                        y1 = max(int(roi[3]), 0)
+                        x2 = min(int(roi[4]), width-1)
+                        y2 = min(int(roi[5]), height-1)
+                        labels = np.zeros((height, width), dtype=np.float32)
+                        labels[y1:y2, x1:x2] = im_label[y1:y2, x1:x2]
+                        labels[labels == cls] = cls_test
+                        im_label[y1:y2, x1:x2] = labels[y1:y2, x1:x2]
+                        print(i, 'small object ' + cls_name)
+                        break
+        return rois_est, im_label
+
+
     def process_data(self):
         # callback data
         with lock:
@@ -232,18 +297,18 @@ class ImageListener:
         # subscribe the transformation
         if self.forward_kinematics:
             try:
-                source_frame = 'measured/camera_color_optical_frame'
+                source_frame = 'camera_color_optical_frame'
                 target_frame = 'measured/base_link'
                 trans, rot = self.listener.lookupTransform(target_frame, source_frame, rospy.Time(0))
                 Tbc = ros_qt_to_rt(rot, trans)
-                '''
+                #'''
                 if self.camera_type == 'D415':
                     T_delta = np.array([[0.99911077, 0.04145749, -0.00767817, -0.003222],
                                         [-0.04163608, 0.99882554, -0.02477858, -0.00289],
                                         [0.0066419, 0.02507623, 0.99966348, 0.003118],
                                         [0., 0., 0., 1.]], dtype=np.float32)
                     Tbc = Tbc.dot(T_delta)
-                '''
+                #'''
                 self.Tbc_now = Tbc.copy()
                 self.Tbr_now = Tbc.dot(np.linalg.inv(self.Trc))
                 if np.linalg.norm(self.Tbr_prev[:3, 3]) == 0:
@@ -260,7 +325,7 @@ class ImageListener:
         # detection information of the target object
         rois_est = np.zeros((0, 6), dtype=np.float32)
         # TODO look for multiple object instances
-        max_objects = 3
+        max_objects = 5
         for i in range(len(cfg.TEST.CLASSES)):
 
             for object_id in range(max_objects):
@@ -294,11 +359,17 @@ class ImageListener:
                 except:
                     continue
 
+        # differentiate objects with different sizes
+        if cfg.TEST.CHECK_SIZE:
+            rois_est, input_seg = self.check_object_size(input_rgb, input_depth, input_seg, rois_est)
+
         # call pose estimation function
         save = self.process_image_multi_obj(input_rgb, input_depth, input_seg, rois_est)
 
         # publish pose
         for i in range(self.pose_rbpf.num_rbpfs):
+            if self.pose_rbpf.rbpfs[i].num_tracked == 0:
+                continue
             Tco = np.eye(4, dtype=np.float32)
             Tco[:3, :3] = quat2mat(self.pose_rbpf.rbpfs[i].pose[:4])
             Tco[:3, 3] = self.pose_rbpf.rbpfs[i].pose[4:]
@@ -324,11 +395,11 @@ class ImageListener:
             msg.pose.position.y = self.pose_rbpf.rbpfs[i].pose[5]
             msg.pose.position.z = self.pose_rbpf.rbpfs[i].pose[6]
             cls = self.pose_rbpf.rbpfs[i].cls_id
-            pub = self.pubs[cls]
+            pub = self.pubs[cls-1]
             pub.publish(msg)
 
         # visualization
-        '''
+        #'''
         image_tensor, _ = self.pose_rbpf.render_image_all(self.intrinsic_matrix)
         image_disp = image_tensor.cpu().numpy()
         image_disp = np.clip(image_disp, 0, 1) * 255
@@ -340,7 +411,7 @@ class ImageListener:
         pose_msg.header.frame_id = self.input_frame_id
         pose_msg.encoding = 'rgb8'
         self.pose_pub.publish(pose_msg)
-        '''
+        #'''
 
         # save data
         if save and self.gen_data:
@@ -390,32 +461,37 @@ class ImageListener:
         dpoints = backproject(depth, self.intrinsic_matrix)
 
         # initialize new object
+        if num_rois > 0:
+            good_initial = True
+        else:
+            good_initial = False
         for i in range(num_rois):
             if overlaps_rois[i] > 0.2 or assignment[i]:
                 continue
             roi = rois[i]
             print('Initializing detection {} ... '.format(i))
             print(roi)
-            pose = self.pose_rbpf.Pose_Estimation_PRBPF(roi, self.intrinsic_matrix, image_bgr, depth, dpoints, im_label)
+            pose = self.pose_rbpf.estimation_poserbpf(roi, self.intrinsic_matrix, image_bgr, depth, dpoints, im_label)
 
             # pose evaluation
             image_tensor, pcloud_tensor = self.pose_rbpf.render_image_all(self.intrinsic_matrix)
-            cls = cfg.TRAIN.CLASSES[int(roi[1])]
+            cls = cfg.TEST.CLASSES[int(roi[1])]
             sim, depth_error, vis_ratio = self.pose_rbpf.evaluate_6d_pose(self.pose_rbpf.rbpfs[-1].roi, pose, cls, \
                 torch.from_numpy(image_bgr), image_tensor, pcloud_tensor, depth, self.intrinsic_matrix, im_label)
             print('Initialization : Object: {}, Sim obs: {:.2}, Depth Err: {:.3}, Vis Ratio: {:.2}'.format(i, sim, depth_error, vis_ratio))
 
             if sim < cfg.PF.THRESHOLD_SIM or depth_error > cfg.PF.THRESHOLD_DEPTH or vis_ratio < cfg.PF.THRESHOLD_RATIO:
                 print('===================is NOT initialized!=================')
-                self.pose_rbpf.num_objects_per_class[self.pose_rbpf.rbpfs[-1].cls_test, self.pose_rbpf.rbpfs[-1].object_id] = 0
+                self.pose_rbpf.num_objects_per_class[self.pose_rbpf.rbpfs[-1].cls_id, self.pose_rbpf.rbpfs[-1].object_id] = 0
                 del self.pose_rbpf.rbpfs[-1]
+                good_initial = False
             else:
                 print('===================is initialized!======================')
                 self.pose_rbpf.rbpfs[-1].roi_assign = roi
 
         # filter all the objects
         print('Filtering objects')
-        save = self.pose_rbpf.Filtering_PRBPF(self.intrinsic_matrix, image_bgr, depth, dpoints, im_label)
+        save = self.pose_rbpf.filtering_poserbpf(self.intrinsic_matrix, image_bgr, depth, dpoints, im_label)
 
         # non-maximum suppression
         num = self.pose_rbpf.num_rbpfs
@@ -424,19 +500,21 @@ class ImageListener:
         for i in range(num):
             rois[i, :6] = self.pose_rbpf.rbpfs[i].roi
             rois[i, 6] = 1 - self.pose_rbpf.rbpfs[i].num_lost
+        rois[:, 1] = 0
         keep = nms(rois, 0.5)
         status[keep] = 1
 
         # remove untracked objects
         for i in range(num):
             if status[i] == 0 or self.pose_rbpf.rbpfs[i].num_lost >= 3:
-                self.pose_rbpf.num_objects_per_class[self.pose_rbpf.rbpfs[i].cls_test, self.pose_rbpf.rbpfs[i].object_id] = 0
+                self.pose_rbpf.num_objects_per_class[self.pose_rbpf.rbpfs[i].cls_id, self.pose_rbpf.rbpfs[i].object_id] = 0
                 status[i] = 0
+                save = False
         self.pose_rbpf.rbpfs = [self.pose_rbpf.rbpfs[i] for i in range(num) if status[i] > 0]
 
         if self.pose_rbpf.num_rbpfs == 0:
             save = False
-        return save
+        return save & good_initial
 
 
     # save data
