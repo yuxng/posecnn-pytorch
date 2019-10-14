@@ -49,6 +49,7 @@ from geometry_msgs.msg import PoseStamped
 from ycb_renderer import YCBRenderer
 from utils.se3 import *
 from utils.nms import *
+from utils.blob import pad_im
 from Queue import Queue
 from sdf.sdf_optimizer import *
 from fcn.pose_rbpf import *
@@ -112,14 +113,14 @@ class ImageListener:
             fusion_type = '_rgbd_'
 
         # initialize a node
-        rospy.init_node("posecnn_rgb")
+        rospy.init_node("posecnn_rgb" + fusion_type + suffix)
         self.listener = tf.TransformListener()
         self.br = tf.TransformBroadcaster()
         self.label_pub = rospy.Publisher('posecnn_label' + fusion_type + suffix, Image, queue_size=10)
         self.rgb_pub = rospy.Publisher('posecnn_rgb' + fusion_type + suffix, Image, queue_size=10)
         self.depth_pub = rospy.Publisher('posecnn_depth' + fusion_type + suffix, Image, queue_size=10)
-        self.fk_pub = rospy.Publisher('posecnn/T_br', PoseStamped, queue_size=10)  # gripper in base
-        self.posecnn_pub = rospy.Publisher('posecnn_detection', Image, queue_size=10)
+        self.fk_pub = rospy.Publisher('posecnn/T_br' + fusion_type + suffix, PoseStamped, queue_size=10)  # gripper in base
+        self.posecnn_pub = rospy.Publisher('posecnn_detection' + fusion_type + suffix, Image, queue_size=10)
 
         # create pose publisher for each known object class
         self.pubs = []
@@ -185,6 +186,12 @@ class ImageListener:
             return
 
         im = self.cv_bridge.imgmsg_to_cv2(rgb, 'bgr8')
+
+        # rescale image if necessary
+        if cfg.TEST.SCALES_BASE[0] != 1:
+            im_scale = cfg.TEST.SCALES_BASE[0]
+            im = pad_im(cv2.resize(im, None, None, fx=im_scale, fy=im_scale, interpolation=cv2.INTER_LINEAR), 16)
+            depth_cv = pad_im(cv2.resize(depth_cv, None, None, fx=im_scale, fy=im_scale, interpolation=cv2.INTER_NEAREST), 16)
 
         with lock:
             self.im = im.copy()

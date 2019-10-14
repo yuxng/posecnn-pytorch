@@ -146,7 +146,7 @@ if __name__ == '__main__':
     T_co_init = np.linalg.inv(Twc_gt)
     R_perturb = axangle2mat(np.random.rand(3,), 20 * np.random.rand() / 57.3, is_normalized=False)
     T_co_init[:3, :3] = np.matmul(T_co_init[:3, :3], R_perturb)
-    T_co_init[:3, 3] += 0.02
+    T_co_init[:3, 3] += 0.01
 
     points_init = np.matmul(np.linalg.inv(T_co_init), points_c.numpy().transpose()).transpose()
 

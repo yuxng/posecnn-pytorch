@@ -112,7 +112,8 @@ class PoseRBPF:
         pose = self.initialize(self.num_rbpfs-1, image, uv_init, n_init_samples, cfg.TEST.CLASSES[cls], roi, intrinsic_matrix, im_depth, mask)
 
         # SDF refine
-        pose_refined, cls_render = self.refine_pose(im_label, im_depth, dpoints, roi, pose, intrinsic_matrix, self.dataset, steps=200)
+        pose_refined, cls_render = self.refine_pose(im_label, im_depth, dpoints, roi, pose, \
+            intrinsic_matrix, self.dataset, steps=cfg.TEST.NUM_SDF_ITERATIONS_INIT)
         self.rbpfs[-1].pose = pose_refined.flatten()
         box_refine = self.compute_box(self.dataset, intrinsic_matrix, int(roi[1]), pose_refined.flatten())
         self.rbpfs[-1].roi[2:] = box_refine
@@ -166,7 +167,7 @@ class PoseRBPF:
     # pose estimation pipeline
     # roi: object detection from posecnn, shape (1, 6)
     # image_bgr: input bgr image, range (0, 1)
-    def filtering_poserbpf(self, intrinsics, image_bgr, im_depth, dpoints, im_label=None):
+    def filtering_poserbpf(self, intrinsics, image_bgr, im_depth, dpoints, im_label=None, grasp_mode=False, grasp_cls=-1):
 
         n_init_samples = cfg.PF.N_PROCESS
         image = torch.from_numpy(image_bgr)
@@ -178,6 +179,9 @@ class PoseRBPF:
         # for each particle filter
         end = time.time()
         for i in range(self.num_rbpfs):
+            if grasp_mode and self.rbpfs[i].cls_id != grasp_cls:
+                continue
+
             if self.rbpfs[i].need_filter:
                 cls_id = self.rbpfs[i].cls_id
                 autoencoder = self.autoencoders[cls_id]
@@ -210,7 +214,8 @@ class PoseRBPF:
                 self.rbpfs[i].pose = pose
 
             # SDF refine
-            pose_refined, cls_render = self.refine_pose(im_label, im_depth, dpoints, self.rbpfs[i].roi, self.rbpfs[i].pose, intrinsics, self.dataset, steps=20)
+            pose_refined, cls_render = self.refine_pose(im_label, im_depth, dpoints, \
+                self.rbpfs[i].roi, self.rbpfs[i].pose, intrinsics, self.dataset, steps=cfg.TEST.NUM_SDF_ITERATIONS_TRACKING)
             self.rbpfs[i].pose = moving_average_pose(self.rbpfs[i].pose, pose_refined.flatten(), alpha=0.8)
             print('filtering:', self.rbpfs[i].name)
 
@@ -222,19 +227,38 @@ class PoseRBPF:
         # pose evaluation
         end = time.time()
         image_tensor, pcloud_tensor = self.render_image_all(intrinsics)
+        if grasp_mode:
+            threshold_sim = cfg.PF.THRESHOLD_SIM_GRASPING
+            threshold_depth = cfg.PF.THRESHOLD_DEPTH_GRASPING
+            threshold_ratio = cfg.PF.THRESHOLD_RATIO_GRASPING
+        else:
+            threshold_sim = cfg.PF.THRESHOLD_SIM
+            threshold_depth = cfg.PF.THRESHOLD_DEPTH
+            threshold_ratio = cfg.PF.THRESHOLD_RATIO
+
         for i in range(self.num_rbpfs):
+            if grasp_mode and self.rbpfs[i].cls_id != grasp_cls:
+                continue
+
             cls = cfg.TEST.CLASSES[int(self.rbpfs[i].roi[1])]
             sim, depth_error, vis_ratio = self.evaluate_6d_pose(self.rbpfs[i].roi, self.rbpfs[i].pose, cls, \
                 torch.from_numpy(image_bgr), image_tensor, pcloud_tensor, im_depth, intrinsics, im_label)
-            if sim < cfg.PF.THRESHOLD_SIM or np.isnan(depth_error) or depth_error > cfg.PF.THRESHOLD_DEPTH or vis_ratio < cfg.PF.THRESHOLD_RATIO:
+            if sim < threshold_sim or np.isnan(depth_error) or depth_error > threshold_depth or vis_ratio < threshold_ratio:
                 save = False
                 self.rbpfs[i].num_lost += 1
                 self.rbpfs[i].num_tracked = 0
                 self.rbpfs[i].need_filter = True
+                self.rbpfs[i].graspable = False
+                self.rbpfs[i].status = False
             else:
                 self.rbpfs[i].num_lost = 0
                 self.rbpfs[i].num_tracked += 1
                 self.rbpfs[i].need_filter = False
+                self.rbpfs[i].status = True
+                if grasp_mode:
+                    self.rbpfs[i].graspable = True
+                else:
+                    self.rbpfs[i].graspable = False
             print('Tracking {}, Sim obs: {:.2}, Depth Err: {:.3}, Vis Ratio: {:.2}, lost: {}, tracked {}'.format(self.rbpfs[i].name, \
                 sim, depth_error, vis_ratio, self.rbpfs[i].num_lost, self.rbpfs[i].num_tracked))
 
@@ -263,6 +287,7 @@ class PoseRBPF:
         poses_cpu = self.poses_cpu[cls_id]
         pose = np.zeros((7,), dtype=np.float32)
         if not autoencoder or not codebook:
+            print('no codebooks or checkpoint')
             return pose
 
         render_dist = codebook['distance']
@@ -818,8 +843,8 @@ class PoseRBPF:
             depth_render = pcloud_tensor[:, :, 2].cpu().numpy()
 
             # compute visibility mask
-            visibility_mask = np.logical_and(np.logical_and(mask == cls_id, depth_render > 0), \
-                                             estimate_visib_mask_numba(image_depth, depth_render, 0.05))
+            # visibility_mask = np.logical_and(np.logical_and(mask == cls_id, depth_render > 0), estimate_visib_mask_numba(image_depth, depth_render, 0.05))
+            visibility_mask = np.logical_and(np.logical_and(mask == cls_id, depth_render > 0), image_depth > 0)
             vis_ratio = np.sum(visibility_mask.astype(np.float32)) * 1.0 / np.sum(mask == cls_id)
             depth_error = np.mean(np.abs(depth_render[visibility_mask] - image_depth[visibility_mask]))
 

@@ -14,7 +14,7 @@ from .ycb_object import YCBObject
 from .background import BackgroundDataset
 from .linemod import linemod
 from .isaac_sim import IsaacSim
-from .panda import panda
+#from .panda import panda
 
 import os.path as osp
 ROOT_DIR = osp.join(osp.dirname(__file__), '..', '..')

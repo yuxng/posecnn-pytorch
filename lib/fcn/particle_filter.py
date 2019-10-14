@@ -36,6 +36,9 @@ class particle_filter():
         self.num_lost = 0
         self.num_tracked = 0
         self.need_filter = True
+        self.graspable = False
+        self.pose = None
+        self.status = False
 
         # star
         self.uv_star = [0, 0, 1]
