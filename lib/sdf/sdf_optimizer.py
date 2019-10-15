@@ -162,12 +162,20 @@ class sdf_optimizer():
         self.dpose.data[:3] *= 0
         self.dpose.data[3:] = self.dpose.data[3:] * 0 + 1e-12
 
+        start = time.time()
         for i in range(steps):
 
-            self.optimizer.zero_grad()
-            loss, sdf_values, T_oc_opt = self.sdf_loss(self.dpose, pose_init, self.sdf_torch, self.sdf_limits, points)
-            loss.backward()
-            self.optimizer.step()
+            # self.optimizer.zero_grad()
+            loss, sdf_values, T_oc_opt, JTJ, J = self.sdf_loss(self.dpose, pose_init, self.sdf_torch, self.sdf_limits, points)
+            # loss.backward()
+            # self.optimizer.step()
+
+            JTJ = JTJ.cpu().detach().numpy() + 0.1 * np.eye(6, dtype=np.float32)
+            J = J.cpu().detach().numpy()
+            self.dpose = self.dpose - 0.005 * torch.from_numpy(np.matmul(np.linalg.inv(JTJ), J)).cuda()
+
+        end = time.time()
+        print('iterations %d, time %f' % (steps, end - start))
 
         T_co_opt = np.linalg.inv(T_oc_opt.cpu().detach().numpy())
         return T_co_opt, sdf_values

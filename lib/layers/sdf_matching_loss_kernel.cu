@@ -88,7 +88,8 @@ inline __device__ __host__ float3 getGradientInterpolated(const float3 & pGrid, 
 template <typename Dtype>
 __global__ void SDFdistanceForward(const int nthreads, const Dtype* pose_delta, const Dtype* pose_init,
     const Dtype* sdf_grids, const Dtype* sdf_limits, const Dtype* points, 
-    const int num_points, const int d0, const int d1, const int d2, Dtype* losses, Dtype* top_values, Dtype* diffs, Dtype* top_se3) 
+    const int num_points, const int d0, const int d1, const int d2, Dtype* losses, Dtype* top_values, 
+    Dtype* diffs, Dtype* JTJ, Dtype* top_se3) 
 {
   typedef Sophus::SE3<Dtype> SE3;
   typedef Eigen::Matrix<Dtype,3,1,Eigen::DontAlign> Vec3;
@@ -138,15 +139,14 @@ __global__ void SDFdistanceForward(const int nthreads, const Dtype* pose_delta, 
     int3 dim = make_int3(d0, d1, d2);
     Dtype value = getValueInterpolated(pGrid, dim, sdf_grids);
 
+    // L2 loss
     int flag = 1;
     if (value < 0)
       flag = -1;
-    losses[index] = flag * value;
-    top_values[index] = losses[index];
+    value *= flag;
 
-    // L2 penalty on translation
-    float lambda = 0.1;
-    losses[index] += 0.5 * lambda * (pose_delta[0] * pose_delta[0] + pose_delta[1] * pose_delta[1] + pose_delta[2] * pose_delta[2]);
+    losses[index] = 0.5 * value * value;
+    top_values[index] = losses[index];
 
     // compute gradient
     float3 grad = getGradientInterpolated(pGrid, dim, sdf_grids);
@@ -158,16 +158,19 @@ __global__ void SDFdistanceForward(const int nthreads, const Dtype* pose_delta, 
                0, 1, 0, -updatedPoint(2),                     0,  updatedPoint(0),
                0, 0, 1,  updatedPoint(1), -updatedPoint(0),                     0;
 
-    Eigen::Matrix<Dtype,1,6> grad_pose = sdfUpdate.transpose() * dUpdate;
+    Eigen::Matrix<Dtype,1,6> J = flag * sdfUpdate.transpose() * dUpdate;
 
     // assign gradient
     for (int i = 0; i < 6; i++)
-      diffs[6 * index + i] = flag * grad_pose(i);
+      diffs[6 * index + i] = value * J(i);
 
-    // L2 penalty on translation
-    diffs[6 * index + 0] += lambda * pose_delta[0];
-    diffs[6 * index + 1] += lambda * pose_delta[1];
-    diffs[6 * index + 2] += lambda * pose_delta[2];
+    // compute JTJ
+    Eigen::Matrix<Dtype,6,6> result = J.transpose() * J;
+    for (int i = 0; i < 6; i++)
+    {
+      for (int j = 0; j < 6; j++)
+        JTJ[36 * index + i * 6 + j] = result(i, j);
+    }
   }
 }
 
@@ -179,7 +182,7 @@ __global__ void sum_gradients(const int nthreads, const Dtype* diffs, const int 
   CUDA_1D_KERNEL_LOOP(index, nthreads) 
   {
     bottom_diff[index] = 0;
-    int num_channels = 6;
+    int num_channels = nthreads;
     for (int p = 0; p < num_points; p++)
     {
       int index_diff = p * num_channels + index;
@@ -218,13 +221,16 @@ std::vector<at::Tensor> sdf_loss_cuda_forward(
 
   // temp diffs
   auto diffs = at::zeros({num_points, num_channels}, points.options());
+  auto JTJ = at::zeros({num_points, num_channels, num_channels}, points.options());
   auto bottom_diff = at::zeros({num_channels}, points.options());
+  auto bottom_JTJ = at::zeros({num_channels, num_channels}, points.options());
 
   // compute the losses and gradients
   output_size = num_points;
   SDFdistanceForward<<<(output_size + kThreadsPerBlock - 1) / kThreadsPerBlock, kThreadsPerBlock>>>(
       output_size, pose_delta.data<float>(), pose_init.data<float>(), sdf_grids.data<float>(), sdf_limits.data<float>(),
-      points.data<float>(), num_points, dim.x, dim.y, dim.z, losses.data<float>(), top_values.data<float>(), diffs.data<float>(), top_se3.data<float>());
+      points.data<float>(), num_points, dim.x, dim.y, dim.z, losses.data<float>(), top_values.data<float>(), 
+      diffs.data<float>(), JTJ.data<float>(), top_se3.data<float>());
   cudaDeviceSynchronize();
 
   err = cudaGetLastError();
@@ -238,6 +244,9 @@ std::vector<at::Tensor> sdf_loss_cuda_forward(
   output_size = num_channels;
   sum_gradients<<<(output_size + kThreadsPerBlock - 1) / kThreadsPerBlock, kThreadsPerBlock>>>(
       output_size, diffs.data<float>(), num_points, bottom_diff.data<float>());
+  output_size = num_channels * num_channels;
+  sum_gradients<<<(output_size + kThreadsPerBlock - 1) / kThreadsPerBlock, kThreadsPerBlock>>>(
+      output_size, JTJ.data<float>(), num_points, bottom_JTJ.data<float>());
   cudaDeviceSynchronize();
 
   // sum the loss
@@ -252,7 +261,7 @@ std::vector<at::Tensor> sdf_loss_cuda_forward(
     exit( -1 );
   }
 
-  return {top_data, top_values, top_se3, bottom_diff};
+  return {top_data, top_values, top_se3, bottom_JTJ, bottom_diff};
 }
 
 

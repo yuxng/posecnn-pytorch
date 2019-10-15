@@ -11,13 +11,15 @@ class SDFLossFunction(Function):
         loss = outputs[0]
         sdf_values = outputs[1]
         se3 = outputs[2]
-        variables = outputs[3:]
+        JTJ = outputs[3]
+        J = outputs[4]
+        variables = outputs[4:]
         ctx.save_for_backward(*variables)
 
-        return loss, sdf_values, se3
+        return loss, sdf_values, se3, JTJ, J
 
     @staticmethod
-    def backward(ctx, grad_loss, grad_sdf_values, grad_se3):
+    def backward(ctx, grad_loss, grad_sdf_values, grad_se3, grad_JTJ, grad_J):
         outputs = posecnn_cuda.sdf_loss_backward(grad_loss, *ctx.saved_variables)
         d_delta = outputs[0]
 

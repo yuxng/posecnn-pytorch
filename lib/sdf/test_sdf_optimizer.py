@@ -144,7 +144,7 @@ if __name__ == '__main__':
     print(points_c.shape)
 
     T_co_init = np.linalg.inv(Twc_gt)
-    R_perturb = axangle2mat(np.random.rand(3,), 20 * np.random.rand() / 57.3, is_normalized=False)
+    R_perturb = axangle2mat(np.random.rand(3,), 40 * np.random.rand() / 57.3, is_normalized=False)
     T_co_init[:3, :3] = np.matmul(T_co_init[:3, :3], R_perturb)
     T_co_init[:3, 3] += 0.01
 
@@ -152,12 +152,12 @@ if __name__ == '__main__':
 
     # optimization
     points_input = points_c[:, :3].clone().cuda()
-    T_co_opt, sdf_values = sdf_optim.refine_pose_layer(T_co_init, points_input, steps=200)
+    T_co_opt, sdf_values = sdf_optim.refine_pose_layer(T_co_init, points_input, steps=10)
 
     print(T_co_opt)
     print(np.linalg.inv(Twc_gt))
     np.set_printoptions(threshold=sys.maxsize)
-    print(sdf_values.detach().cpu().numpy())
+    # print(sdf_values.detach().cpu().numpy())
 
     # visualization for debugging
     points_opt = np.matmul(np.linalg.inv(T_co_opt), points_c.numpy().transpose()).transpose()
