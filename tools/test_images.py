@@ -118,6 +118,12 @@ if __name__ == '__main__':
     # overwrite intrinsics
     if len(cfg.INTRINSICS) > 0:
         K = np.array(cfg.INTRINSICS).reshape(3, 3)
+        if cfg.TEST.SCALES_BASE[0] != 1:
+            scale = cfg.TEST.SCALES_BASE[0]
+            K[0, 0] *= scale
+            K[0, 2] *= scale
+            K[1, 1] *= scale
+            K[1, 2] *= scale
         dataset._intrinsic_matrix = K
         print(dataset._intrinsic_matrix)
 
@@ -141,7 +147,7 @@ if __name__ == '__main__':
     if cfg.TEST.VISUALIZE:
         index_images = np.random.permutation(len(images_color))
     else:
-        index_images = np.range(len(images_color))
+        index_images = range(len(images_color))
         resdir = args.imgdir + '_posecnn_results'
         if not os.path.exists(resdir):
             os.makedirs(resdir)
@@ -162,13 +168,13 @@ if __name__ == '__main__':
 
     #'''
     print('loading 3D models')
-    cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, gpu_id=args.gpu_id, render_marker=False)
+    cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, gpu_id=1-args.gpu_id, render_marker=False)
     if cfg.TEST.SYNTHESIZE:
         cfg.renderer.load_objects(dataset.model_mesh_paths, dataset.model_texture_paths, dataset.model_colors)
     else:
-        model_mesh_paths = [dataset.model_mesh_paths[i-1] for i in cfg.TEST.CLASSES]
-        model_texture_paths = [dataset.model_texture_paths[i-1] for i in cfg.TEST.CLASSES]
-        model_colors = [dataset.model_colors[i-1] for i in cfg.TEST.CLASSES]
+        model_mesh_paths = [dataset.model_mesh_paths[i-1] for i in cfg.TEST.CLASSES[1:]]
+        model_texture_paths = [dataset.model_texture_paths[i-1] for i in cfg.TEST.CLASSES[1:]]
+        model_colors = [dataset.model_colors[i-1] for i in cfg.TEST.CLASSES[1:]]
         cfg.renderer.load_objects(model_mesh_paths, model_texture_paths, model_colors)
     cfg.renderer.set_camera_default()
     print(dataset.model_mesh_paths)
@@ -178,7 +184,8 @@ if __name__ == '__main__':
     if cfg.TEST.POSE_REFINE:
         print('loading SDFs')
         cfg.sdf_optimizers = []
-        for i in cfg.TEST.CLASSES:
+        for i in cfg.TEST.CLASSES[1:]:
+            print(dataset.model_sdf_paths[i-1])
             cfg.sdf_optimizers.append(sdf_optimizer(dataset.model_sdf_paths[i-1]))
 
     # prepare autoencoder and codebook
@@ -189,13 +196,20 @@ if __name__ == '__main__':
 
     # run network
     for i in index_images:
-        print(files[i])
         im = pad_im(cv2.imread(images_color[i], cv2.IMREAD_COLOR), 16)
         if osp.exists(images_depth[i]):
             depth = pad_im(cv2.imread(images_depth[i], cv2.IMREAD_UNCHANGED), 16)
             depth = depth.astype('float') / 1000.0
         else:
             depth = None
+        print(images_color[i], images_depth[i])
+
+        # rescale image if necessary
+        if cfg.TEST.SCALES_BASE[0] != 1:
+            im_scale = cfg.TEST.SCALES_BASE[0]
+            im = pad_im(cv2.resize(im, None, None, fx=im_scale, fy=im_scale, interpolation=cv2.INTER_LINEAR), 16)
+            depth = pad_im(cv2.resize(depth, None, None, fx=im_scale, fy=im_scale, interpolation=cv2.INTER_NEAREST), 16)
+
         im_pose, labels, rois, poses = test_image(network, pose_rbpf, dataset, im, depth)
 
         # save result
@@ -203,5 +217,7 @@ if __name__ == '__main__':
             result = {'labels': labels, 'rois': rois, 'poses': poses, 'intrinsic_matrix': dataset._intrinsic_matrix}
             head, tail = os.path.split(images_color[i])
             filename = os.path.join(resdir, tail + '.mat')
-            print(images_color[i], filename)
             scipy.io.savemat(filename, result, do_compression=True)
+            # rendered image
+            filename = os.path.join(resdir, tail + '_render.jpg')
+            cv2.imwrite(filename, im_pose[:, :, (2, 1, 0)])

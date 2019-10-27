@@ -280,14 +280,14 @@ def train(train_loader, background_loader, network, optimizer, epoch):
         cfg.TRAIN.ITERS += 1
 
 
-def test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset, im_depth=None, im_label=None):
+def test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset, depth_tensor=None, label_tensor=None):
 
     n_init_samples = cfg.PF.N_PROCESS
     num = rois.shape[0]
     uv_init = np.zeros((2, ), dtype=np.float32)
     pixel_mean = torch.tensor(cfg.PIXEL_MEANS / 255.0).cuda().float()
-    rois_return = rois.copy()
-    poses_return = poses.copy()
+    rois_return = np.zeros((0, rois.shape[1]), dtype=np.float32)
+    poses_return = np.zeros((0, poses.shape[1]), dtype=np.float32)
     image = None
     if len(pose_rbpf.rbpfs) == 0:
         pose_rbpf.rbpfs.append(particle_filter(cfg.PF, n_particles=cfg.PF.N_PROCESS))
@@ -310,11 +310,15 @@ def test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset, im_depth=
         uv_init[0] = fx * poses[i, 4] + px
         uv_init[1] = fy * poses[i, 5] + py
 
-        if im_label is not None:
-            mask = np.zeros(im_label.shape, dtype=np.float32)
-            mask[im_label == cls] = 1.0
+        if label_tensor is not None:
+            mask = torch.zeros_like(label_tensor)
+            mask[label_tensor == cls] = 1.0
 
-        pose = pose_rbpf.initialize(0, image, uv_init, n_init_samples, cfg.TRAIN.CLASSES[cls], rois[i, :6], intrinsic_matrix, im_depth, mask)
+        roi = rois[i, :].copy()
+        roi[1] = cfg.TEST.CLASSES.index(cfg.TRAIN.CLASSES[cls])
+        rois_return = np.concatenate((rois_return,  np.expand_dims(roi, axis=0)), axis=0)
+
+        pose = pose_rbpf.initialize(0, image, uv_init, n_init_samples, cfg.TRAIN.CLASSES[cls], roi, intrinsic_matrix, depth_tensor, mask)
         if dataset.classes[cls] == '052_extra_large_clamp' and 'ycb_video' in dataset.name:
             pose_extra = pose
             pose_render = poses_return[i,:].copy()
@@ -341,12 +345,12 @@ def test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset, im_depth=
                 rois_return[i, 1] = -1  # mask as large clamp
                 print('it is large clamp')
 
-        if pose[-1] > 0:
-            # only update rotation from codebook matching
-            # poses_return[i, :4] = pose[:4]
-            poses_return[i, :] = pose
-            poses_return[i, 4] /= poses_return[i, 6]
-            poses_return[i, 5] /= poses_return[i, 6]
+        if pose[6] > 0:
+            pose[4] /= pose[6]
+            pose[5] /= pose[6]
+        else:
+            pose = poses[i, :].copy()
+        poses_return = np.concatenate((poses_return,  np.expand_dims(pose, axis=0)), axis=0)
 
     return rois_return, poses_return, image
 
@@ -359,6 +363,7 @@ def eval_poses(pose_rbpf, poses, rois, im_rgb, im_depth, im_label, meta_data):
     pose_scores = np.zeros((rois.shape[0],), dtype=np.float32)
 
     intrinsic_matrix = meta_data[0, :9].cpu().numpy().reshape((3, 3))
+    print(rois)
     image_tensor, pcloud_tensor = pose_rbpf.render_poses_all(poses, rois, intrinsic_matrix)
     num = rois.shape[0]
     for i in range(num):
@@ -766,6 +771,7 @@ def test_image(network, pose_rbpf, dataset, im_color, im_depth=None):
         im_xyz = im_xyz[np.newaxis, :, :, :]
         depth_mask = im_depth > 0.0
         depth_mask = depth_mask.astype('float')
+    depth_tensor = torch.from_numpy(im_depth).cuda()
 
     # transfer to GPU
     if cfg.INPUT == 'DEPTH':
@@ -821,7 +827,7 @@ def test_image(network, pose_rbpf, dataset, im_color, im_depth=None):
             out_label, out_vertex, rois, out_pose = network(inputs, dataset.input_labels, meta_data, \
                 dataset.input_extents, dataset.input_gt_boxes, dataset.input_poses, dataset.input_points, dataset.input_symmetry)
 
-            labels = out_label.detach().cpu().numpy()[0]
+            labels = out_label[0]
 
             rois = rois.detach().cpu().numpy()
             out_pose = out_pose.detach().cpu().numpy()
@@ -841,7 +847,7 @@ def test_image(network, pose_rbpf, dataset, im_color, im_depth=None):
 
             # run poseRBPF for codebook matching to compute the rotations
             if pose_rbpf is not None:
-                rois, poses, im_rgb = test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset, im_depth, labels)
+                rois, poses, im_rgb = test_pose_rbpf(pose_rbpf, inputs, rois, poses, meta_data, dataset, depth_tensor, labels)
 
             # optimize depths
             cls_render_ids = None
@@ -884,9 +890,9 @@ def test_image(network, pose_rbpf, dataset, im_color, im_depth=None):
         rois = np.zeros((0, 7), dtype=np.float32)
         poses = np.zeros((0, 7), dtype=np.float32)
 
-    im_pose, im_pose_refine, im_label = render_image(dataset, im_color, rois, poses, poses_refined, labels, cls_render_ids)
+    im_pose, im_pose_refine, im_label = render_image(dataset, im_color, rois, poses, poses_refined, labels.cpu().numpy(), cls_render_ids)
     if cfg.TEST.VISUALIZE:
-        vis_test(dataset, im, im_depth, labels, out_vertex, rois, poses, poses_refined, im_pose, im_pose_refine)
+        vis_test(dataset, im, im_depth, labels.cpu().numpy(), out_vertex, rois, poses, poses_refined, im_pose, im_pose_refine)
 
     if cfg.TEST.POSE_REFINE and im_depth is not None:
         return im_pose_refine, im_label, rois, poses_refined
@@ -1344,20 +1350,9 @@ def refine_pose(im_label, im_depth, rois, poses, meta_data, dataset):
     for i in range(num):
         cls_indexes = []
         cls = int(rois[i, 1])
+        cls_label = cfg.TRAIN.CLASSES.index(cfg.TEST.CLASSES[cls])
 
-        # todo: fix the problem for large clamp
-        if cls == -1:
-            cls_label = cfg.TRAIN.CLASSES.index(20)
-            cls_id = 19
-        else:
-            cls_id = cfg.TRAIN.CLASSES[cls]
-            cls_label = cls
-
-        if cls_id not in cfg.TEST.CLASSES:
-            cls_render_ids.append(-1)
-            continue
-
-        cls_render = cfg.TEST.CLASSES.index(cls_id)
+        cls_render = cls - 1
         cls_indexes.append(cls_render)
 
         poses_all = []
@@ -1373,138 +1368,114 @@ def refine_pose(im_label, im_depth, rois, poses, meta_data, dataset):
         pcloud_tensor = pcloud_tensor.flip(0)
         pcloud = pcloud_tensor[:,:,:3].cpu().numpy().reshape((-1, 3))
 
+        # compare label
         x1 = max(int(rois[i, 2]), 0)
         y1 = max(int(rois[i, 3]), 0)
         x2 = min(int(rois[i, 4]), width-1)
         y2 = min(int(rois[i, 5]), height-1)
-        labels = np.zeros((height, width), dtype=np.float32)
+        labels = torch.zeros_like(im_label)
         labels[y1:y2, x1:x2] = im_label[y1:y2, x1:x2]
+        labels = labels.cpu().numpy()
         mask_label = np.ma.getmaskarray(np.ma.masked_equal(labels, cls_label))
-        labels = labels.reshape((width * height, ))
-        diff = np.abs(dpoints[:, 2] - pcloud[:, 2])
-        index = np.where((labels == cls_label) & np.isfinite(dpoints[:, 2]) & (dpoints[:, 2] > 0) & (pcloud[:, 2] > 0) & (diff < 0.5))[0]  
 
-        if len(index) > 10:
-            T = np.mean(dpoints[index, :] - pcloud[index, :], axis=0)
-            poses_refined[i, 6] += T[2]
-            poses_refined[i, 4] *= poses_refined[i, 6]
-            poses_refined[i, 5] *= poses_refined[i, 6]
-
-            # check if object with different size
-            threshold = -0.2
-            if cfg.TEST.CHECK_SIZE and T[2] < threshold:
-               cls_name = dataset._classes_all[cfg.TEST.CLASSES[cls_render]] + '_small'
-               for j in range(len(dataset._classes_all)):
-                   if cls_name == dataset._classes_all[j]:
-                       print(j, 'small object ' + cls_name)
-                       cls_render = cfg.TEST.CLASSES.index(j)
-                       break
-        else:
-            poses_refined[i, 4] *= poses_refined[i, 6]
-            poses_refined[i, 5] *= poses_refined[i, 6]
-            print('no pose refinement')
+        # compare the depth
+        delta = 0.05
+        depth_meas_roi = im_pcloud[:, :, 2]
+        depth_render_roi = pcloud_tensor[:, :, 2].cpu().numpy()
+        mask_depth_valid = np.ma.getmaskarray(np.ma.masked_where(np.isfinite(depth_meas_roi), depth_meas_roi))
+        mask_depth_meas = np.ma.getmaskarray(np.ma.masked_not_equal(depth_meas_roi, 0))
+        mask_depth_render = np.ma.getmaskarray(np.ma.masked_greater(depth_render_roi, 0))
+        mask_depth_vis = np.ma.getmaskarray(np.ma.masked_less(np.abs(depth_render_roi - depth_meas_roi), delta))
+        mask = mask_label * mask_depth_valid * mask_depth_meas * mask_depth_render * mask_depth_vis
+        index_p = mask.flatten().nonzero()[0]
 
         poses[i, 4] *= poses[i, 6]
         poses[i, 5] *= poses[i, 6]
         cls_render_ids.append(cls_render)
 
         # run SDF optimization
-        if cfg.TEST.POSE_SDF and len(index) > 10:
+        if cfg.TEST.POSE_SDF and len(index_p) > 10:
             sdf_optim = cfg.sdf_optimizers[cls_render]
 
-            # re-render
-            qt[3:] = poses_refined[i, :4]
-            qt[:3] = poses_refined[i, 4:]
-            poses_all[0] = qt
-            cfg.renderer.set_poses(poses_all)
-            cfg.renderer.render(cls_indexes, image_tensor, seg_tensor, pc2_tensor=pcloud_tensor)
-            pcloud_tensor = pcloud_tensor.flip(0)
+            points = torch.from_numpy(dpoints[index_p, :]).float()
+            points = torch.cat((points, torch.ones((points.size(0), 1), dtype=torch.float32)), dim=1)
+            RT = np.zeros((4, 4), dtype=np.float32)
+            qt = poses[i, :4]
+            T = poses[i, 4:]
+            RT[:3, :3] = quat2mat(qt)
+            RT[:3, 3] = T
+            RT[3, 3] = 1.0
+            T_co_init = RT
+            T_co_opt, sdf_values = sdf_optim.refine_pose_layer(T_co_init, points.cuda(), steps=cfg.TEST.NUM_SDF_ITERATIONS_INIT)
+            RT_opt = T_co_opt
+            poses_refined[i, :4] = mat2quat(RT_opt[:3, :3])
+            poses_refined[i, 4:] = RT_opt[:3, 3]
 
-            # compare the depth
-            delta = 0.05
-            depth_meas_roi = im_pcloud[:, :, 2]
-            depth_render_roi = pcloud_tensor[:, :, 2].cpu().numpy()
-            mask_depth_valid = np.ma.getmaskarray(np.ma.masked_where(np.isfinite(depth_meas_roi), depth_meas_roi))
-            mask_depth_meas = np.ma.getmaskarray(np.ma.masked_not_equal(depth_meas_roi, 0))
-            mask_depth_render = np.ma.getmaskarray(np.ma.masked_greater(depth_render_roi, 0))
-            mask_depth_vis = np.ma.getmaskarray(np.ma.masked_less(np.abs(depth_render_roi - depth_meas_roi), delta))
-            mask = mask_label * mask_depth_valid * mask_depth_meas * mask_depth_render * mask_depth_vis
-            index_p = mask.flatten().nonzero()[0]
+            if cfg.TEST.VISUALIZE:
+                import matplotlib.pyplot as plt
+                fig = plt.figure()
+                ax = fig.add_subplot(3, 3, 1, projection='3d')
+                if cls == -1:
+                    points_obj = dataset._points_clamp
+                else:
+                    points_obj = dataset._points_all_test[cls, :, :]
 
-            if len(index_p) > 10:
-                points = torch.from_numpy(dpoints[index_p, :]).float()
-                points = torch.cat((points, torch.ones((points.size(0), 1), dtype=torch.float32)), dim=1)
-                RT = np.zeros((4, 4), dtype=np.float32)
-                qt = poses_refined[i, :4]
-                T = poses_refined[i, 4:]
-                RT[:3, :3] = quat2mat(qt)
-                RT[:3, 3] = T
-                RT[3, 3] = 1.0
-                T_co_init = RT
-                T_co_opt, sdf_values = sdf_optim.refine_pose_layer(T_co_init, points.cuda(), steps=cfg.TEST.NUM_SDF_ITERATIONS)
-                RT_opt = T_co_opt
-                poses_refined[i, :4] = mat2quat(RT_opt[:3, :3])
-                poses_refined[i, 4:] = RT_opt[:3, 3]
+                points_init = np.matmul(np.linalg.inv(T_co_init), points.numpy().transpose()).transpose()
+                points_opt = np.matmul(np.linalg.inv(T_co_opt), points.numpy().transpose()).transpose()
 
-                # if 0:
-                if cfg.TEST.VISUALIZE:
-                    import matplotlib.pyplot as plt
-                    fig = plt.figure()
-                    ax = fig.add_subplot(3, 3, 1, projection='3d')
-                    if cls == -1:
-                        points_obj = dataset._points_clamp
-                    else:
-                        points_obj = dataset._points_all[cls, :, :]
+                ax.scatter(points_obj[::5, 0], points_obj[::5, 1], points_obj[::5, 2], color='yellow')
+                ax.scatter(points_init[::10, 0], points_init[::10, 1], points_init[::10, 2], color='red')
+                ax.scatter(points_opt[::10, 0], points_opt[::10, 1], points_opt[::10, 2], color='blue')
 
-                    points_init = np.matmul(np.linalg.inv(T_co_init), points.numpy().transpose()).transpose()
-                    points_opt = np.matmul(np.linalg.inv(T_co_opt), points.numpy().transpose()).transpose()
+                ax.set_xlabel('X Label')
+                ax.set_ylabel('Y Label')
+                ax.set_zlabel('Z Label')
 
-                    ax.scatter(points_obj[::5, 0], points_obj[::5, 1], points_obj[::5, 2], color='green')
-                    ax.scatter(points_init[::10, 0], points_init[::10, 1], points_init[::10, 2], color='red')
-                    ax.scatter(points_opt[::10, 0], points_opt[::10, 1], points_opt[::10, 2], color='blue')
+                ax.set_xlim(sdf_optim.xmin, sdf_optim.xmax)
+                ax.set_ylim(sdf_optim.ymin, sdf_optim.ymax)
+                ax.set_zlim(sdf_optim.zmin, sdf_optim.zmax)
 
-                    ax.set_xlabel('X Label')
-                    ax.set_ylabel('Y Label')
-                    ax.set_zlabel('Z Label')
+                ax = fig.add_subplot(3, 3, 2)
+                label_image = dataset.labels_to_image(np.multiply(im_label.cpu().numpy(), mask_label))
+                plt.imshow(label_image)
+                ax.set_title('mask label')
 
-                    ax.set_xlim(sdf_optim.xmin, sdf_optim.xmax)
-                    ax.set_ylim(sdf_optim.ymin, sdf_optim.ymax)
-                    ax.set_zlim(sdf_optim.zmin, sdf_optim.zmax)
+                ax = fig.add_subplot(3, 3, 3)
+                plt.imshow(mask_depth_meas)
+                ax.set_title('mask_depth_meas')
 
-                    ax = fig.add_subplot(3, 3, 2)
-                    label_image = dataset.labels_to_image(np.multiply(im_label, mask_label))
-                    plt.imshow(label_image)
-                    ax.set_title('mask label')
+                ax = fig.add_subplot(3, 3, 4)
+                plt.imshow(mask_depth_render)
+                ax.set_title('mask_depth_render')
 
-                    ax = fig.add_subplot(3, 3, 3)
-                    plt.imshow(mask_depth_meas)
-                    ax.set_title('mask_depth_meas')
+                ax = fig.add_subplot(3, 3, 5)
+                plt.imshow(mask_depth_vis)
+                ax.set_title('mask_depth_vis')
 
-                    ax = fig.add_subplot(3, 3, 4)
-                    plt.imshow(mask_depth_render)
-                    ax.set_title('mask_depth_render')
+                ax = fig.add_subplot(3, 3, 6)
+                plt.imshow(mask)
+                ax.set_title('mask')
 
-                    ax = fig.add_subplot(3, 3, 5)
-                    plt.imshow(mask_depth_vis)
-                    ax.set_title('mask_depth_vis')
+                ax = fig.add_subplot(3, 3, 7)
+                plt.imshow(depth_meas_roi)
+                ax.set_title('depth input')
 
-                    ax = fig.add_subplot(3, 3, 6)
-                    plt.imshow(mask)
-                    ax.set_title('mask')
+                ax = fig.add_subplot(3, 3, 8)
+                plt.imshow(depth_render_roi)
+                ax.set_title('depth render')
 
-                    ax = fig.add_subplot(3, 3, 7)
-                    plt.imshow(depth_meas_roi)
-                    ax.set_title('depth input')
+                # ax = fig.add_subplot(3, 3, 9)
+                # plt.imshow(im_depth)
+                # ax.set_title('depth image')
 
-                    ax = fig.add_subplot(3, 3, 8)
-                    plt.imshow(depth_render_roi)
-                    ax.set_title('depth render')
+                ax = fig.add_subplot(3, 3, 9, projection='3d')
+                ax.scatter(points.cpu().numpy()[::5, 0], points.cpu().numpy()[::5, 1], points.cpu().numpy()[::5, 2], color='yellow')
+                ax.set_xlabel('X Label')
+                ax.set_ylabel('Y Label')
+                ax.set_zlabel('Z Label')
+                ax.set_title('points')
 
-                    ax = fig.add_subplot(3, 3, 9)
-                    plt.imshow(im_depth)
-                    ax.set_title('depth image')
-
-                    plt.show()
+                plt.show()
 
     return poses, poses_refined, cls_render_ids
 
@@ -1544,8 +1515,8 @@ def render_image(dataset, im, rois, poses, poses_refine, labels, cls_render_ids=
     im_label[I[0], I[1], :] = 0.5 * label_image[I[0], I[1], :] + 0.5 * im_label[I[0], I[1], :]
 
     num = poses.shape[0]
-    classes = dataset._classes
-    class_colors = dataset._class_colors
+    classes = dataset._classes_test
+    class_colors = dataset._class_colors_test
 
     cls_indexes = []
     poses_all = []
@@ -2229,10 +2200,10 @@ def vis_test(dataset, im, im_depth, label, out_vertex, rois, poses, poses_refine
     """Visualize a testing results."""
     import matplotlib.pyplot as plt
 
-    num_classes = dataset.num_classes
-    classes = dataset._classes
-    class_colors = dataset._class_colors
-    points = dataset._points_all
+    num_classes = len(dataset._class_colors_test)
+    classes = dataset._classes_test
+    class_colors = dataset._class_colors_test
+    points = dataset._points_all_test
     intrinsic_matrix = dataset._intrinsic_matrix
     vertex_pred = out_vertex.detach().cpu().numpy()
     height = label.shape[0]
@@ -2272,9 +2243,6 @@ def vis_test(dataset, im, im_depth, label, out_vertex, rois, poses, poses_refine
         ax.set_title('predicted boxes')
         for j in range(rois.shape[0]):
             cls = rois[j, 1]
-            if cfg.TRAIN.CLASSES[int(cls)] not in cfg.TEST.CLASSES:
-                continue
-
             x1 = rois[j, 2]
             y1 = rois[j, 3]
             x2 = rois[j, 4]
@@ -2293,7 +2261,7 @@ def vis_test(dataset, im, im_depth, label, out_vertex, rois, poses, poses_refine
             plt.imshow(im)
             for j in xrange(rois.shape[0]):
                 cls = int(rois[j, 1])
-                print classes[cls], rois[j, -1]
+                print(classes[cls], rois[j, -1])
                 if cls > 0 and rois[j, -1] > cfg.TEST.DET_THRESHOLD:
                     # extract 3D points
                     x3d = np.ones((4, points.shape[1]), dtype=np.float32)
@@ -2320,7 +2288,7 @@ def vis_test(dataset, im, im_depth, label, out_vertex, rois, poses, poses_refine
         vertex_target = vertex_pred[0, :, :, :]
         center = np.zeros((3, height, width), dtype=np.float32)
 
-        for j in range(1, num_classes):
+        for j in range(1, dataset._num_classes):
             index = np.where(label == j)
             if len(index[0]) > 0:
                 center[0, index[0], index[1]] = vertex_target[3*j, index[0], index[1]]

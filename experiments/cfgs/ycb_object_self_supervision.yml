@@ -58,14 +58,16 @@ TEST:
   HOUGH_VOTING_THRESHOLD: 10
   IMS_PER_BATCH: 1
   HOUGH_SKIP_PIXELS: 10
-  NUM_SDF_ITERATIONS: 50
+  NUM_SDF_ITERATIONS_INIT: 10
+  NUM_SDF_ITERATIONS_TRACKING: 10
   DET_THRESHOLD: 0.2
   SCALES_BASE: !!python/tuple [1.0]
-  VISUALIZE: False
+  VISUALIZE: True
   SYNTHESIZE: False
   POSE_REFINE: True
   POSE_SDF: True
   CHECK_SIZE: False
   ROS_CAMERA: D435
-  CLASSES: !!python/tuple [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 21]
+  CLASSES: !!python/tuple [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 21]
+  SYMMETRY: !!python/tuple [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1]
 #  CLASSES: !!python/tuple [3, 12, 14]   # for debug

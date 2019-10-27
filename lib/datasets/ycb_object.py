@@ -102,6 +102,7 @@ class YCBObject(data.Dataset, datasets.imdb):
         self._classes_test = [self._classes_all[i] for i in cfg.TEST.CLASSES]
         self._num_classes = len(self._classes)
         self._class_colors = [self._class_colors_all[i] for i in cfg.TRAIN.CLASSES]
+        self._class_colors_test = [self._class_colors_all[i] for i in cfg.TEST.CLASSES]
         self._symmetry = np.array(cfg.TRAIN.SYMMETRY).astype(np.float32)
         self._symmetry_test = np.array(cfg.TEST.SYMMETRY).astype(np.float32)
         self._extents = self._extents_all[cfg.TRAIN.CLASSES]

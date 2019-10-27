@@ -145,10 +145,10 @@ class ImageListener:
             msg = rospy.wait_for_message('/camera/color/camera_info', CameraInfo)
             self.target_frame = 'measured/base_link'
         elif cfg.TEST.ROS_CAMERA == 'Azure':             
-            rgb_sub = message_filters.Subscriber('/rgb/image_raw', Image, queue_size=10)
-            depth_sub = message_filters.Subscriber('/depth_to_rgb/image_raw', Image, queue_size=10)
-            msg = rospy.wait_for_message('/rgb/camera_info', CameraInfo)
-            self.target_frame = 'rgb_camera_link'
+            rgb_sub = message_filters.Subscriber('/k4a/rgb/image_raw', Image, queue_size=10)
+            depth_sub = message_filters.Subscriber('/k4a/depth_to_rgb/image_raw', Image, queue_size=10)
+            msg = rospy.wait_for_message('/k4a/rgb/camera_info', CameraInfo)
+            self.target_frame = 'measured/base_link'
 
         # update camera intrinsics
         K = np.array(msg.K).reshape(3, 3)
@@ -266,7 +266,7 @@ class ImageListener:
                 x2 = rois[i, 4] / n
                 y2 = rois[i, 5] / n
                 now = rospy.Time.now()
-                self.br.sendTransform([n, now.secs, 0], [x1, y1, x2, y2], now, tf_name + '_roi', self.target_frame)
+                self.br.sendTransform([n, now.secs, rois[i, 6]], [x1, y1, x2, y2], now, tf_name + '_roi', self.target_frame)
 
 def parse_args():
     """

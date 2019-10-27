@@ -6,13 +6,16 @@ import random
 import networks
 import numpy as np
 import time
+import matplotlib.pyplot as plt
+import torch.nn as nn
+
 from layers.roi_align import ROIAlign
 from fcn.config import cfg
 from fcn.particle_filter import particle_filter
 from utils.blob import add_noise_cuda
-import matplotlib.pyplot as plt
-import torch.nn as nn
-from utils.prbpf_utils import *
+from transforms3d.quaternions import mat2quat, quat2mat, qmult
+from utils.prbpf_utils import trans_zoom_uvz_cuda, mat2pdf_np, mat2pdf, back_project, project
+
 
 class PoseRBPF:
 
@@ -73,6 +76,7 @@ class PoseRBPF:
         self.Trc = np.eye(4, dtype=np.float32)
 
         # initialize the particle filters
+        self.reset = False
         self.rbpf = None
         self.rbpfs = []
 
@@ -85,11 +89,10 @@ class PoseRBPF:
     # pose estimation pipeline
     # roi: object detection from posecnn, shape (1, 6)
     # image_bgr: input bgr image, range (0, 1)
-    def estimation_poserbpf(self, roi, intrinsic_matrix, image_bgr, im_depth, dpoints, im_label=None):
+    def estimation_poserbpf(self, roi, intrinsic_matrix, image, im_depth, dpoints, im_label=None):
 
         n_init_samples = cfg.PF.N_PROCESS
         uv_init = np.zeros((2, ), dtype=np.float32)
-        image = torch.from_numpy(image_bgr)
         roi = roi.flatten()
         cls = int(roi[1])
 
@@ -98,7 +101,7 @@ class PoseRBPF:
         uv_init[1] = (roi[5] + roi[3]) / 2
 
         if im_label is not None:
-            mask = np.zeros(im_label.shape, dtype=np.float32)
+            mask = torch.zeros_like(im_label)
             mask[im_label == cls] = 1.0
 
         index = np.where(self.num_objects_per_class[cls, :] == 0)[0]
@@ -116,7 +119,7 @@ class PoseRBPF:
             intrinsic_matrix, self.dataset, steps=cfg.TEST.NUM_SDF_ITERATIONS_INIT)
         self.rbpfs[-1].pose = pose_refined.flatten()
         box_refine = self.compute_box(self.dataset, intrinsic_matrix, int(roi[1]), pose_refined.flatten())
-        self.rbpfs[-1].roi[2:] = box_refine
+        self.rbpfs[-1].roi[2:6] = box_refine
 
         if cfg.TEST.VISUALIZE:
             im_render_refine = self.render_image(self.dataset, intrinsic_matrix, cls_render, pose_refined.flatten())
@@ -125,7 +128,7 @@ class PoseRBPF:
             # show image
             import matplotlib.pyplot as plt
             fig = plt.figure()
-            im = image_bgr
+            im = image.cpu().numpy()
             im = im * 255.0
             im = im [:, :, (2, 1, 0)]
             im = im.astype(np.uint8)
@@ -153,7 +156,7 @@ class PoseRBPF:
             plt.gca().add_patch(plt.Rectangle((x1, y1), x2-x1, y2-y1, fill=False, edgecolor='g', linewidth=3, clip_on=False))
 
             ax = fig.add_subplot(2, 2, 4)
-            plt.imshow(mask)
+            plt.imshow(mask.cpu().numpy())
             ax.set_title('mask')
             plt.show()
 
@@ -167,10 +170,9 @@ class PoseRBPF:
     # pose estimation pipeline
     # roi: object detection from posecnn, shape (1, 6)
     # image_bgr: input bgr image, range (0, 1)
-    def filtering_poserbpf(self, intrinsics, image_bgr, im_depth, dpoints, im_label=None, grasp_mode=False, grasp_cls=-1):
+    def filtering_poserbpf(self, intrinsics, image, im_depth, dpoints, im_label=None, grasp_mode=False, grasp_cls=-1):
 
         n_init_samples = cfg.PF.N_PROCESS
-        image = torch.from_numpy(image_bgr)
         save = True
 
         # render pcloud of all the tracked objects
@@ -179,7 +181,14 @@ class PoseRBPF:
         # for each particle filter
         end = time.time()
         for i in range(self.num_rbpfs):
+            if self.reset:
+                return False
+
             if grasp_mode and self.rbpfs[i].cls_id != grasp_cls:
+                continue
+
+            # the current pose is good for grasping
+            if grasp_mode and self.rbpfs[i].graspable and self.rbpfs[i].status:
                 continue
 
             if self.rbpfs[i].need_filter:
@@ -189,13 +198,13 @@ class PoseRBPF:
                 codes_gpu = self.codes_gpu[cls_id]
                 poses_cpu = self.poses_cpu[cls_id]
 
-                render_dist = codebook['distance']
+                render_dist = codebook['distance'][0, 0]
                 intrinsic_matrix = codebook['intrinsic_matrix']
                 cfg.PF.FU = intrinsic_matrix[0, 0]
                 cfg.PF.FV = intrinsic_matrix[1, 1]
 
                 if im_label is not None:
-                    mask = np.zeros(im_label.shape, dtype=np.float32)
+                    mask = torch.zeros_like(im_label)
                     cls = int(self.rbpfs[i].roi[1])
                     mask[im_label == cls] = 1.0
                 else:
@@ -216,49 +225,56 @@ class PoseRBPF:
             # SDF refine
             pose_refined, cls_render = self.refine_pose(im_label, im_depth, dpoints, \
                 self.rbpfs[i].roi, self.rbpfs[i].pose, intrinsics, self.dataset, steps=cfg.TEST.NUM_SDF_ITERATIONS_TRACKING)
-            self.rbpfs[i].pose = moving_average_pose(self.rbpfs[i].pose, pose_refined.flatten(), alpha=0.8)
+            # self.rbpfs[i].pose = moving_average_pose(self.rbpfs[i].pose, pose_refined.flatten(), alpha=0.5)
+            self.rbpfs[i].pose = pose_refined.flatten()
             print('filtering:', self.rbpfs[i].name)
 
             # compute bounding box
             box = self.compute_box(self.dataset, intrinsics, int(self.rbpfs[i].roi[1]), self.rbpfs[i].pose)
-            self.rbpfs[i].roi[2:] = box
+            self.rbpfs[i].roi[2:6] = box
         print('process poserbpf time %.2f' % (time.time() - end))
 
         # pose evaluation
         end = time.time()
         image_tensor, pcloud_tensor = self.render_image_all(intrinsics)
-        if grasp_mode:
-            threshold_sim = cfg.PF.THRESHOLD_SIM_GRASPING
-            threshold_depth = cfg.PF.THRESHOLD_DEPTH_GRASPING
-            threshold_ratio = cfg.PF.THRESHOLD_RATIO_GRASPING
-        else:
-            threshold_sim = cfg.PF.THRESHOLD_SIM
-            threshold_depth = cfg.PF.THRESHOLD_DEPTH
-            threshold_ratio = cfg.PF.THRESHOLD_RATIO
-
         for i in range(self.num_rbpfs):
+            if self.reset:
+                return False
+
             if grasp_mode and self.rbpfs[i].cls_id != grasp_cls:
                 continue
 
             cls = cfg.TEST.CLASSES[int(self.rbpfs[i].roi[1])]
             sim, depth_error, vis_ratio = self.evaluate_6d_pose(self.rbpfs[i].roi, self.rbpfs[i].pose, cls, \
-                torch.from_numpy(image_bgr), image_tensor, pcloud_tensor, im_depth, intrinsics, im_label)
-            if sim < threshold_sim or np.isnan(depth_error) or depth_error > threshold_depth or vis_ratio < threshold_ratio:
+                image, image_tensor, pcloud_tensor, im_depth, intrinsics, im_label)
+
+            if grasp_mode:
+               threshold_sim = cfg.PF.THRESHOLD_SIM_GRASPING
+               threshold_depth = cfg.PF.THRESHOLD_DEPTH_GRASPING
+               threshold_ratio = cfg.PF.THRESHOLD_RATIO_GRASPING
+            else:
+               threshold_sim = cfg.PF.THRESHOLD_SIM
+               threshold_depth = cfg.PF.THRESHOLD_DEPTH
+               threshold_ratio = cfg.PF.THRESHOLD_RATIO
+
+            if sim < threshold_sim or torch.isnan(depth_error) or depth_error > threshold_depth or vis_ratio < threshold_ratio:
                 save = False
                 self.rbpfs[i].num_lost += 1
-                self.rbpfs[i].num_tracked = 0
-                self.rbpfs[i].need_filter = True
-                self.rbpfs[i].graspable = False
+                self.rbpfs[i].num_tracked = 0                
                 self.rbpfs[i].status = False
             else:
                 self.rbpfs[i].num_lost = 0
                 self.rbpfs[i].num_tracked += 1
-                self.rbpfs[i].need_filter = False
                 self.rbpfs[i].status = True
-                if grasp_mode:
-                    self.rbpfs[i].graspable = True
-                else:
-                    self.rbpfs[i].graspable = False
+
+            # more strict threshold
+            if sim < cfg.PF.THRESHOLD_SIM_GRASPING or torch.isnan(depth_error) or depth_error > cfg.PF.THRESHOLD_DEPTH_GRASPING or vis_ratio < cfg.PF.THRESHOLD_RATIO_GRASPING:
+                self.rbpfs[i].graspable = False
+                self.rbpfs[i].need_filter = True
+            else:
+                self.rbpfs[i].graspable = True
+                self.rbpfs[i].need_filter = False
+
             print('Tracking {}, Sim obs: {:.2}, Depth Err: {:.3}, Vis Ratio: {:.2}, lost: {}, tracked {}'.format(self.rbpfs[i].name, \
                 sim, depth_error, vis_ratio, self.rbpfs[i].num_lost, self.rbpfs[i].num_tracked))
 
@@ -290,7 +306,7 @@ class PoseRBPF:
             print('no codebooks or checkpoint')
             return pose
 
-        render_dist = codebook['distance']
+        render_dist = codebook['distance'][0, 0]
         intrinsic_matrix = codebook['intrinsic_matrix']
         cfg.PF.FU = intrinsic_matrix[0, 0]
         cfg.PF.FV = intrinsic_matrix[1, 1]
@@ -308,7 +324,6 @@ class PoseRBPF:
         # sample around z
         roi_size = max(roi_w, roi_h)
         z_init = (128 - 40) * render_dist / roi_size * intrinsics[0, 0] / cfg.PF.FU
-        z_init = z_init[0, 0]
 
         # sampling with depth        
         if depth is not None:
@@ -316,7 +331,8 @@ class PoseRBPF:
             uv_h_int[:, 0] = np.clip(uv_h_int[:, 0], 0, image.shape[1] - 1)
             uv_h_int[:, 1] = np.clip(uv_h_int[:, 1], 0, image.shape[0] - 1)
             z = depth[uv_h_int[:, 1], uv_h_int[:, 0]]
-            z[np.isnan(z)] = 0
+            z[torch.isnan(z)] = 0
+            z = z.cpu().numpy()
             z = np.expand_dims(z, axis=1)
             extent = np.mean(self.dataset._extents_test[int(roi[1]), :]) / 2
             z[z > 0] += np.random.uniform(-extent, extent, z[z > 0].shape)
@@ -359,7 +375,7 @@ class PoseRBPF:
 
         box = self.compute_box(self.dataset, intrinsics, int(roi[1]), pose)
         self.rbpfs[rind].roi = roi.copy()
-        self.rbpfs[rind].roi[2:] = box
+        self.rbpfs[rind].roi[2:6] = box
         self.rbpfs[rind].cls_id = cls_id
 
         if cfg.TEST.VISUALIZE:
@@ -406,9 +422,9 @@ class PoseRBPF:
             roi_h = roi[5] - roi[3]
             roi_size = max(roi_w, roi_h)
             z_init = (128 - 40) * render_dist / roi_size * intrinsics[0, 0] / cfg.PF.FU
-            z_init = z_init[0, 0]           
             z = depth[uv_h_int[:, 1], uv_h_int[:, 0]]
-            z[np.isnan(z)] = z_init
+            z[torch.isnan(z)] = z_init
+            z = z.cpu().numpy()
             z = np.expand_dims(z, axis=1)
             extent = np.mean(self.dataset._extents_test[int(roi[1]), :]) / 2
             z[z > 0] += np.random.uniform(0, extent, z[z > 0].shape)
@@ -479,9 +495,9 @@ class PoseRBPF:
         # evaluate particles with depth images
         depth_scores = np.ones_like(z)
         if depth is not None:
-            depth_gpu = torch.from_numpy(depth).unsqueeze(2).cuda()
+            depth_gpu = depth.unsqueeze(2)
             if mask is not None:
-                mask_gpu = torch.from_numpy(mask).unsqueeze(2).cuda()
+                mask_gpu = mask.unsqueeze(2)
             else:
                 mask_gpu = None
             if init_mode:
@@ -539,11 +555,9 @@ class PoseRBPF:
 
         # crop rois
         depth_roi_cuda, _ = trans_zoom_uvz_cuda(depth.detach(), uv, z, intrinsics[0, 0], intrinsics[1, 1], render_dist)
-        depth_roi_np = depth_roi_cuda.cpu().numpy()
 
         if mask is not None:
             mask_roi_cuda, _ = trans_zoom_uvz_cuda(mask.detach(), uv, z, intrinsics[0, 0], intrinsics[1, 1], render_dist)
-            mask_roi_np = mask_roi_cuda.cpu().numpy()
 
         # render
         pose_v = np.zeros((7,))
@@ -552,7 +566,7 @@ class PoseRBPF:
         pc_cuda = torch.cuda.FloatTensor(height, width, 4)
 
         q_idx_unique, idx_inv = np.unique(q_idx, return_inverse=True)
-        pc_render_all = np.zeros((q_idx_unique.shape[0], 128, 128, 3), dtype=np.float32)
+        pc_render_all = torch.cuda.FloatTensor(q_idx_unique.shape[0], 128, 128, 3)
         q_render = codepose[q_idx_unique, 3:]
         for i in range(q_render.shape[0]):
             pose_v[:3] = [0, 0, render_dist]
@@ -564,38 +578,43 @@ class PoseRBPF:
                                                      np.array([[render_dist]]),
                                                      intrinsics[0, 0], intrinsics[1, 1],
                                                      render_dist)
-            pc_render_all[i] = render_roi_cuda[0, :3, :, :].permute(1, 2, 0).cpu().numpy()
+            pc_render_all[i] = render_roi_cuda[0, :3, :, :].permute(1, 2, 0)
 
         # evaluate every particle
         for i in range(uv.shape[0]):
 
-            pc_render = pc_render_all[idx_inv[i]].copy()
-            depth_mask = pc_render[:, :, 2] > 0
-            pc_render[depth_mask, 2] = pc_render[depth_mask, 2] - render_dist + z[i]
-
-            depth_render = pc_render[:, :, [2]]
-            depth_meas_np = depth_roi_np[i, 0, :, :]
-            depth_render_np = depth_render[:, :, 0]
+            pc_render = pc_render_all[idx_inv[i]].clone()
+            depth_render = pc_render[:, :, 2]
+            depth_mask = depth_render > 0
+            depth_render[depth_mask] = depth_render[depth_mask] - render_dist + z[i][0]
+            depth_meas = depth_roi_cuda[i, 0, :, :]
 
             # compute visibility mask
             if mask is None:
-                visibility_mask = estimate_visib_mask_numba(depth_meas_np, depth_render_np, delta=delta)
+                mask_depth_meas = depth_meas > 0
+                mask_depth_render = depth_render > 0
+                mask_depth_vis = torch.abs(depth_render - depth_meas) < delta
+                visibility_mask = mask_depth_meas * mask_depth_render * mask_depth_vis
             else:
-                visibility_mask = np.logical_and((mask_roi_np[i, 0, :, :] > 0), np.logical_and(depth_meas_np>0, depth_render_np>0))
+                mask_label = mask_roi_cuda[i, 0, :, :] > 0
+                mask_depth_meas = depth_meas > 0
+                mask_depth_render = depth_render > 0
+                visibility_mask = mask_depth_meas * mask_depth_render * mask_label
 
-            if np.sum(visibility_mask) == 0:
+            if torch.sum(visibility_mask) == 0:
                 continue
 
             # compute depth error
-            depth_error = np.abs(depth_meas_np[visibility_mask] - depth_render_np[visibility_mask])
+            depth_error = torch.abs(depth_meas[visibility_mask] - depth_render[visibility_mask])
             depth_error /= tau
             depth_error[depth_error > 1] = 1
 
             # score computation
-            total_pixels = np.sum((depth_render_np > 0).astype(np.float32))
+            total_pixels = torch.sum(depth_render > 0).float()
             if total_pixels is not 0:
-                vis_ratio = np.sum(visibility_mask.astype(np.float32)) / total_pixels
-                score[i] = (1 - np.mean(depth_error)) * vis_ratio
+                vis_ratio = torch.sum(visibility_mask).float() / total_pixels
+                s = (1 - torch.mean(depth_error)) * vis_ratio
+                score[i] = s.cpu().numpy()
             else:
                 score[i] = 0
 
@@ -606,11 +625,9 @@ class PoseRBPF:
 
         # crop rois
         depth_roi_cuda, _ = trans_zoom_uvz_cuda(depth.detach(), uv, z, intrinsics[0, 0], intrinsics[1, 1], render_dist)
-        depth_roi_np = depth_roi_cuda.cpu().numpy()
 
         if mask is not None:
             mask_roi_cuda, _ = trans_zoom_uvz_cuda(mask.detach(), uv, z, intrinsics[0, 0], intrinsics[1, 1], render_dist)
-            mask_roi_np = mask_roi_cuda.cpu().numpy()
 
         # crop render
         pose_v = np.zeros((7,))
@@ -619,41 +636,46 @@ class PoseRBPF:
 
         uv_crop = project(rbpf.trans_bar, intrinsics)
         uv_crop = np.expand_dims(uv_crop, axis=0)
-        z_crop = rbpf.trans_bar[2]
+        z_crop = np.array([rbpf.trans_bar[2]], dtype=np.float32).reshape((1, 1))
         render_roi_cuda, _ = trans_zoom_uvz_cuda(pcloud_tensor, uv_crop, z_crop, intrinsics[0, 0], intrinsics[1, 1], render_dist)
-        pc_render_all = render_roi_cuda[:, :3, :, :].permute(0, 2, 3, 1).cpu().numpy()
+        pc_render_all = render_roi_cuda[:, :3, :, :].permute(0, 2, 3, 1)
 
         # evaluate every particle
         score = np.zeros_like(z)
         for i in range(uv.shape[0]):
 
-            pc_render = pc_render_all[0].copy()
-            depth_mask = pc_render[:, :, 2] > 0
-            pc_render[:, :, 2][depth_mask] = pc_render[:, :, 2][depth_mask] - rbpf.trans_bar[2] + z[i]
-
-            depth_render = pc_render[:, :, [2]]
-            depth_meas_np = depth_roi_np[i, 0, :, :]
-            depth_render_np = depth_render[:, :, 0]
+            pc_render = pc_render_all[0].clone()
+            depth_render = pc_render[:, :, 2]
+            depth_mask = depth_render > 0
+            depth_render[depth_mask] = depth_render[depth_mask] - rbpf.trans_bar[2] + z[i][0]
+            depth_meas = depth_roi_cuda[i, 0, :, :]
 
             # compute visibility mask
             if mask is None:
-                visibility_mask = estimate_visib_mask_numba(depth_meas_np, depth_render_np, delta=delta)
+                mask_depth_meas = depth_meas > 0
+                mask_depth_render = depth_render > 0
+                mask_depth_vis = torch.abs(depth_render - depth_meas) < delta
+                visibility_mask = mask_depth_meas * mask_depth_render * mask_depth_vis
             else:
-                visibility_mask = np.logical_and((mask_roi_np[i, 0, :, :] > 0), np.logical_and(depth_meas_np > 0, depth_render_np > 0))
+                mask_label = mask_roi_cuda[i, 0, :, :] > 0
+                mask_depth_meas = depth_meas > 0
+                mask_depth_render = depth_render > 0
+                visibility_mask = mask_depth_meas * mask_depth_render * mask_label
 
-            if np.sum(visibility_mask) == 0:
+            if torch.sum(visibility_mask) == 0:
                 continue
 
             # compute depth error
-            depth_error = np.abs(depth_meas_np[visibility_mask] - depth_render_np[visibility_mask])
+            depth_error = torch.abs(depth_meas[visibility_mask] - depth_render[visibility_mask])
             depth_error /= tau
             depth_error[depth_error > 1] = 1
 
             # score computation
-            total_pixels = np.sum((depth_render_np > 0).astype(np.float32))
-            if total_pixels is not 0:
-                vis_ratio = np.sum(visibility_mask.astype(np.float32)) / total_pixels
-                score[i] = (1 - np.mean(depth_error)) * vis_ratio
+            total_pixels = torch.sum(depth_render > 0).float()
+            if total_pixels != 0:
+                vis_ratio = torch.sum(visibility_mask).float() / total_pixels
+                s = (1 - torch.mean(depth_error)) * vis_ratio
+                score[i] = s.cpu().numpy()
             else:
                 score[i] = 0
 
@@ -672,7 +694,7 @@ class PoseRBPF:
         sdf_optim = cfg.sdf_optimizers[cls_render]
         width = im_label.shape[1]
         height = im_label.shape[0]
-        im_pcloud = dpoints.reshape((height, width, 3))
+        im_pcloud = torch.reshape(dpoints, (height, width, 3))
 
         # setup render
         fx = intrinsics[0, 0]
@@ -701,33 +723,33 @@ class PoseRBPF:
         # compare the depth
         delta = 0.05
         depth_meas_roi = im_pcloud[:, :, 2]
-        depth_render_roi = pcloud_tensor[:, :, 2].cpu().numpy()
-        mask_depth_valid = np.ma.getmaskarray(np.ma.masked_where(np.isfinite(depth_meas_roi), depth_meas_roi))
-        mask_depth_meas = np.ma.getmaskarray(np.ma.masked_not_equal(depth_meas_roi, 0))
-        mask_depth_render = np.ma.getmaskarray(np.ma.masked_greater(depth_render_roi, 0))
-        mask_depth_vis = np.ma.getmaskarray(np.ma.masked_less(np.abs(depth_render_roi - depth_meas_roi), delta))
+        depth_render_roi = pcloud_tensor[:, :, 2]
+        mask_depth_valid = torch.isfinite(depth_meas_roi)
+        mask_depth_meas = depth_meas_roi > 0
+        mask_depth_render = depth_render_roi > 0
+        mask_depth_vis = torch.abs(depth_render_roi - depth_meas_roi) < delta
 
         # mask label
         x1 = max(int(roi[2]), 0)
         y1 = max(int(roi[3]), 0)
         x2 = min(int(roi[4]), width-1)
         y2 = min(int(roi[5]), height-1)
-        labels = np.zeros((height, width), dtype=np.float32)
+        labels = torch.zeros_like(im_label)
         labels[y1:y2, x1:x2] = im_label[y1:y2, x1:x2]
-        mask_label = np.ma.getmaskarray(np.ma.masked_equal(labels, cls))
+        mask_label = labels == cls
         mask = mask_label * mask_depth_valid * mask_depth_meas * mask_depth_render * mask_depth_vis
-        index_p = mask.flatten().nonzero()[0]
+        index_p = torch.nonzero(mask)
 
         pose_refined = pose.copy()
-        if len(index_p) > 10:
-            points = torch.from_numpy(dpoints[index_p, :]).float()
-            points = torch.cat((points, torch.ones((points.size(0), 1), dtype=torch.float32)), dim=1)
+        if index_p.shape[0] > 10:
+            points = im_pcloud[index_p[:, 0], index_p[:, 1], :]
+            points = torch.cat((points, torch.ones((points.size(0), 1), dtype=torch.float32).cuda()), dim=1)
             RT = np.zeros((4, 4), dtype=np.float32)
             RT[:3, :3] = quat2mat(pose[:4])
             RT[:3, 3] = pose[4:]
             RT[3, 3] = 1.0
             T_co_init = RT
-            T_co_opt, sdf_values = sdf_optim.refine_pose_layer(T_co_init, points.cuda(), steps=steps)
+            T_co_opt, sdf_values = sdf_optim.refine_pose_layer(T_co_init, points, steps=steps)
             RT_opt = T_co_opt
             pose_refined[:4] = mat2quat(RT_opt[:3, :3])
             pose_refined[4:] = RT_opt[:3, 3]
@@ -738,8 +760,8 @@ class PoseRBPF:
                 ax = fig.add_subplot(3, 3, 1, projection='3d')
                 points_obj = dataset._points_all_test[cls, :, :]
 
-                points_init = np.matmul(np.linalg.inv(T_co_init), points.numpy().transpose()).transpose()
-                points_opt = np.matmul(np.linalg.inv(T_co_opt), points.numpy().transpose()).transpose()
+                points_init = np.matmul(np.linalg.inv(T_co_init), points.cpu().numpy().transpose()).transpose()
+                points_opt = np.matmul(np.linalg.inv(T_co_opt), points.cpu().numpy().transpose()).transpose()
 
                 ax.scatter(points_obj[::5, 0], points_obj[::5, 1], points_obj[::5, 2], color='green')
                 ax.scatter(points_init[::10, 0], points_init[::10, 1], points_init[::10, 2], color='red')
@@ -754,32 +776,32 @@ class PoseRBPF:
                 ax.set_zlim(sdf_optim.zmin, sdf_optim.zmax)
 
                 ax = fig.add_subplot(3, 3, 2)
-                label_image = dataset.labels_to_image(np.multiply(im_label, mask_label))
+                label_image = dataset.labels_to_image(np.multiply(im_label.cpu().numpy(), mask_label.cpu().numpy()))
                 plt.imshow(label_image)
                 ax.set_title('mask label')
 
                 ax = fig.add_subplot(3, 3, 3)
-                plt.imshow(mask_depth_meas)
+                plt.imshow(mask_depth_meas.cpu().numpy())
                 ax.set_title('mask_depth_meas')
 
                 ax = fig.add_subplot(3, 3, 4)
-                plt.imshow(mask_depth_render)
+                plt.imshow(mask_depth_render.cpu().numpy())
                 ax.set_title('mask_depth_render')
 
                 ax = fig.add_subplot(3, 3, 5)
-                plt.imshow(mask_depth_vis)
+                plt.imshow(mask_depth_vis.cpu().numpy())
                 ax.set_title('mask_depth_vis')
 
                 ax = fig.add_subplot(3, 3, 6)
-                plt.imshow(mask)
+                plt.imshow(mask.cpu().numpy())
                 ax.set_title('mask')
 
                 ax = fig.add_subplot(3, 3, 7)
-                plt.imshow(depth_meas_roi)
+                plt.imshow(depth_meas_roi.cpu().numpy())
                 ax.set_title('depth input')
 
                 ax = fig.add_subplot(3, 3, 8)
-                plt.imshow(depth_render_roi)
+                plt.imshow(depth_render_roi.cpu().numpy())
                 ax.set_title('depth render')
 
                 # ax = fig.add_subplot(3, 3, 9)
@@ -787,7 +809,7 @@ class PoseRBPF:
                 # ax.set_title('depth image')
 
                 ax = fig.add_subplot(3, 3, 9, projection='3d')
-                ax.scatter(points[::5, 0], points[::5, 1], points[::5, 2], color='green')
+                ax.scatter(points.cpu().numpy()[::5, 0], points.cpu().numpy()[::5, 1], points.cpu().numpy()[::5, 2], color='green')
                 ax.set_xlabel('X Label')
                 ax.set_ylabel('Y Label')
                 ax.set_zlabel('Z Label')
@@ -795,7 +817,7 @@ class PoseRBPF:
 
                 plt.show()
         else:
-            print('no pose refinement', 'points: ', len(index_p))
+            print('no pose refinement', 'points: ', index_p.shape[0])
 
         return pose_refined, cls_render
 
@@ -813,10 +835,10 @@ class PoseRBPF:
 
             cls_id = cfg.TEST.CLASSES.index(cls)
             autoencoder = self.autoencoders[cls_id]
-            render_dist = self.codebooks[cls_id]['distance']
+            render_dist = self.codebooks[cls_id]['distance'][0, 0]
             t = pose[4:]
             uv = project(np.expand_dims(t, axis=1), intrinsics).transpose()
-            z = np.array([t[2]], dtype=np.float32)
+            z = np.array([t[2]], dtype=np.float32).reshape((1, 1))
             fx = intrinsics[0, 0]
             fy = intrinsics[1, 1]
 
@@ -825,7 +847,7 @@ class PoseRBPF:
             y1 = max(int(roi[3]), 0)
             x2 = min(int(roi[4]), width-1)
             y2 = min(int(roi[5]), height-1)
-            mask = np.zeros((height, width), dtype=np.float32)
+            mask = torch.zeros_like(im_label)
             mask[y1:y2, x1:x2] = im_label[y1:y2, x1:x2]
 
             # get roi
@@ -837,16 +859,25 @@ class PoseRBPF:
 
             # forward passing
             embeddings = autoencoder.module.encode(torch.cat((rois, rois_render), dim=0)).detach()
+
             sim = self.cos_sim(embeddings[[0], :], embeddings[[1], :])[0].detach().cpu().numpy()
 
             # evaluate depth error
-            depth_render = pcloud_tensor[:, :, 2].cpu().numpy()
+            depth_render = pcloud_tensor[:, :, 2]
 
             # compute visibility mask
-            # visibility_mask = np.logical_and(np.logical_and(mask == cls_id, depth_render > 0), estimate_visib_mask_numba(image_depth, depth_render, 0.05))
-            visibility_mask = np.logical_and(np.logical_and(mask == cls_id, depth_render > 0), image_depth > 0)
-            vis_ratio = np.sum(visibility_mask.astype(np.float32)) * 1.0 / np.sum(mask == cls_id)
-            depth_error = np.mean(np.abs(depth_render[visibility_mask] - image_depth[visibility_mask]))
+            mask_label = mask == cls_id
+            mask_depth_render = depth_render > 0
+            mask_depth_valid = torch.isfinite(image_depth)
+            mask_depth_meas = image_depth > 0
+            mask_depth_vis = torch.abs(image_depth - image_depth) < 0.05
+            visibility_mask = mask_label * mask_depth_valid * mask_depth_meas * mask_depth_render * mask_depth_vis
+
+            # visibility_mask = np.logical_and(np.logical_and(mask == cls_id, depth_render > 0), estimate_visib_mask_numba(image_depth, image_depth, 0.05))
+            # visibility_mask = np.logical_and(np.logical_and(mask == cls_id, depth_render > 0), image_depth > 0)
+            # visibility_mask = np.logical_and(mask == cls_id, image_depth > 0)
+            vis_ratio = torch.sum(visibility_mask).float() / torch.sum(mask_label).float()
+            depth_error = torch.mean(torch.abs(depth_render[visibility_mask] - image_depth[visibility_mask]))
 
         return sim, depth_error, vis_ratio
 

@@ -102,8 +102,8 @@ if __name__ == '__main__':
 
     # object_name = '002_master_chef_can'
     # object_name = '037_scissors'
-    object_name = '061_foam_brick'
-    # object_name = '007_tuna_fish_can'
+    # object_name = '061_foam_brick'
+    object_name = '007_tuna_fish_can'
 
     visualize_sdf = False
 
@@ -152,7 +152,7 @@ if __name__ == '__main__':
 
     # optimization
     points_input = points_c[:, :3].clone().cuda()
-    T_co_opt, sdf_values = sdf_optim.refine_pose_layer(T_co_init, points_input, steps=10)
+    T_co_opt, sdf_values = sdf_optim.refine_pose_layer(T_co_init, points_input, steps=100)
 
     print(T_co_opt)
     print(np.linalg.inv(Twc_gt))

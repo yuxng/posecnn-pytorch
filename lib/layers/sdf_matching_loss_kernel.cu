@@ -4,6 +4,7 @@
 #include <cuda_runtime.h>
 #include <thrust/device_vector.h>
 #include <Eigen/Core>
+#include <Eigen/Dense>
 #include <sophus/se3.hpp>
 #include <vector>
 
@@ -56,8 +57,8 @@ inline __device__ __host__ Dtype getValueInterpolated(const float3 & pGrid, cons
   float dxyz = lerp( dxy0, dxy1, fz );
 
   // penalize inside objects
-  if (dxyz < 0)
-    dxyz *= 10;
+  // if (dxyz < 0)
+  //  dxyz *= 10;
 
   return dxyz;
 }
@@ -148,6 +149,11 @@ __global__ void SDFdistanceForward(const int nthreads, const Dtype* pose_delta, 
     losses[index] = 0.5 * value * value;
     top_values[index] = losses[index];
 
+    // L2 penalty on translation#include <Eigen/Dense>
+
+    // float lambda = 0.1;
+    // losses[index] += 0.5 * lambda * (pose_delta[0] * pose_delta[0] + pose_delta[1] * pose_delta[1] + pose_delta[2] * pose_delta[2]);
+
     // compute gradient
     float3 grad = getGradientInterpolated(pGrid, dim, sdf_grids);
     Vec3 sdfUpdate;
@@ -163,6 +169,11 @@ __global__ void SDFdistanceForward(const int nthreads, const Dtype* pose_delta, 
     // assign gradient
     for (int i = 0; i < 6; i++)
       diffs[6 * index + i] = value * J(i);
+
+    // L2 penalty on translation
+    // diffs[6 * index + 0] += lambda * pose_delta[0];
+    // diffs[6 * index + 1] += lambda * pose_delta[1];
+    // diffs[6 * index + 2] += lambda * pose_delta[2];
 
     // compute JTJ
     Eigen::Matrix<Dtype,6,6> result = J.transpose() * J;
@@ -203,13 +214,15 @@ std::vector<at::Tensor> sdf_loss_cuda_forward(
     at::Tensor pose_init,
     at::Tensor sdf_grids,
     at::Tensor sdf_limits,
-    at::Tensor points) 
+    at::Tensor points, 
+    at::Tensor regularization) 
 {
   // run kernels
   cudaError_t err;
   const int kThreadsPerBlock = 512;
   const int num_channels = 6;
   int output_size;
+#include <Eigen/Dense>
 
   // temp losses
   const int num_points = points.size(0); 
@@ -261,7 +274,29 @@ std::vector<at::Tensor> sdf_loss_cuda_forward(
     exit( -1 );
   }
 
-  return {top_data, top_values, top_se3, bottom_JTJ, bottom_diff};
+  // compute Gauss Newton update
+  float* bottom_diff_host = (float*)malloc(num_channels * sizeof(float));
+  float* regularization_host = (float*)malloc(num_channels * sizeof(float));
+  float* bottom_JTJ_host = (float*)malloc(num_channels * num_channels * sizeof(float));
+  cudaMemcpy(bottom_diff_host, bottom_diff.data<float>(), num_channels * sizeof(float), cudaMemcpyDeviceToHost);
+  cudaMemcpy(regularization_host, regularization.data<float>(), num_channels * sizeof(float), cudaMemcpyDeviceToHost);
+  cudaMemcpy(bottom_JTJ_host, bottom_JTJ.data<float>(), num_channels * num_channels * sizeof(float), cudaMemcpyDeviceToHost);
+
+  Eigen::Matrix<float,6,1> J_eigen;
+  Eigen::Matrix<float,6,6> JTJ_eigen;
+  for (int i = 0; i < num_channels; i++)
+  {
+    J_eigen(i) = bottom_diff_host[i];
+    for (int j = 0; j < num_channels; j++)
+      JTJ_eigen(i, j) = bottom_JTJ_host[i * num_channels + j];
+    JTJ_eigen(i, i) += regularization_host[i];
+  }
+  Eigen::Matrix<float,6,1> dalpha = JTJ_eigen.ldlt().solve(J_eigen);
+
+  auto bottom_delta = at::zeros({num_channels}, points.options());
+  cudaMemcpy(bottom_delta.data<float>(), dalpha.data(), num_channels * sizeof(float), cudaMemcpyHostToDevice);
+
+  return {top_data, top_values, top_se3, bottom_delta, bottom_diff};
 }
 
 

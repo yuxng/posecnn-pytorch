@@ -6,17 +6,17 @@ import posecnn_cuda
 
 class SDFLossFunction(Function):
     @staticmethod
-    def forward(ctx, pose_delta, pose_init, sdf_grids, sdf_limits, points):
-        outputs = posecnn_cuda.sdf_loss_forward(pose_delta, pose_init, sdf_grids, sdf_limits, points)
+    def forward(ctx, pose_delta, pose_init, sdf_grids, sdf_limits, points, regularization):
+        outputs = posecnn_cuda.sdf_loss_forward(pose_delta, pose_init, sdf_grids, sdf_limits, points, regularization)
         loss = outputs[0]
         sdf_values = outputs[1]
         se3 = outputs[2]
-        JTJ = outputs[3]
+        dalpha = outputs[3]
         J = outputs[4]
         variables = outputs[4:]
         ctx.save_for_backward(*variables)
 
-        return loss, sdf_values, se3, JTJ, J
+        return loss, sdf_values, se3, dalpha, J
 
     @staticmethod
     def backward(ctx, grad_loss, grad_sdf_values, grad_se3, grad_JTJ, grad_J):
@@ -30,5 +30,5 @@ class SDFLoss(nn.Module):
     def __init__(self):
         super(SDFLoss, self).__init__()
 
-    def forward(self, pose_delta, pose_init, sdf_grids, sdf_limits, points):
-        return SDFLossFunction.apply(pose_delta, pose_init, sdf_grids, sdf_limits, points)
+    def forward(self, pose_delta, pose_init, sdf_grids, sdf_limits, points, regularization):
+        return SDFLossFunction.apply(pose_delta, pose_init, sdf_grids, sdf_limits, points, regularization)

@@ -228,7 +228,8 @@ std::vector<at::Tensor> sdf_loss_cuda_forward(
     at::Tensor pose_init,
     at::Tensor sdf_grids,
     at::Tensor sdf_limits,
-    at::Tensor points);
+    at::Tensor points,
+    at::Tensor regularization);
 
 std::vector<at::Tensor> sdf_loss_cuda_backward(
     at::Tensor grad_loss,
@@ -239,15 +240,17 @@ std::vector<at::Tensor> sdf_loss_forward(
     at::Tensor pose_init,
     at::Tensor sdf_grids,
     at::Tensor sdf_limits,
-    at::Tensor points)
+    at::Tensor points,
+    at::Tensor regularization)
 {
   CHECK_INPUT(pose_delta);
   CHECK_INPUT(pose_init);
   CHECK_INPUT(sdf_grids);
   CHECK_INPUT(sdf_limits);
   CHECK_INPUT(points);
+  CHECK_INPUT(regularization);
 
-  return sdf_loss_cuda_forward(pose_delta, pose_init, sdf_grids, sdf_limits, points);
+  return sdf_loss_cuda_forward(pose_delta, pose_init, sdf_grids, sdf_limits, points, regularization);
 }
 
 std::vector<at::Tensor> sdf_loss_backward(

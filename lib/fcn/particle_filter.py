@@ -35,6 +35,7 @@ class particle_filter():
         self.roi_assign = None
         self.num_lost = 0
         self.num_tracked = 0
+        self.cls_id = -1
         self.need_filter = True
         self.graspable = False
         self.pose = None

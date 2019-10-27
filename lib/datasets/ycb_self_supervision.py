@@ -76,11 +76,17 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
 
         # select a subset of classes
         self._classes = [self._classes_all[i] for i in cfg.TRAIN.CLASSES]
+        self._classes_test = [self._classes_all[i] for i in cfg.TEST.CLASSES]
         self._num_classes = len(self._classes)
         self._class_colors = [self._class_colors_all[i] for i in cfg.TRAIN.CLASSES]
+        self._class_colors_test = [self._class_colors_all[i] for i in cfg.TEST.CLASSES]
         self._symmetry = np.array(cfg.TRAIN.SYMMETRY).astype(np.float32)
+        self._symmetry_test = np.array(cfg.TEST.SYMMETRY).astype(np.float32)
         self._extents = self._extents_all[cfg.TRAIN.CLASSES]
-        self._points, self._points_all, self._point_blob, self._points_clamp = self._load_object_points()
+        self._extents_test = self._extents_all[cfg.TEST.CLASSES]
+        self._points, self._points_all, self._point_blob, self._points_clamp = self._load_object_points(self._classes, self._extents, self._symmetry)
+        self._points_test, self._points_all_test, self._point_blob_test, self._points_clamp_test = \
+            self._load_object_points(self._classes_test, self._extents_test, self._symmetry_test)
         self._pixel_mean = torch.tensor(cfg.PIXEL_MEANS / 255.0).cuda().float()
 
         self._classes_other = []
@@ -832,30 +838,31 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
         return image_index
 
 
-    def _load_object_points(self):
+    def _load_object_points(self, classes, extents, symmetry):
 
-        points = [[] for _ in xrange(len(self._classes))]
+        points = [[] for _ in range(len(classes))]
         num = np.inf
-
-        for i in xrange(1, len(self._classes)):
-            point_file = os.path.join(self._ycb_self_supervision_path, 'models', self._classes[i], 'points.xyz')
+        num_classes = len(classes)
+        for i in range(1, num_classes):
+            point_file = os.path.join(self._ycb_self_supervision_path, 'models', classes[i], 'points.xyz')
+            print(point_file)
             assert os.path.exists(point_file), 'Path does not exist: {}'.format(point_file)
             points[i] = np.loadtxt(point_file)
             if points[i].shape[0] < num:
                 num = points[i].shape[0]
 
-        points_all = np.zeros((self._num_classes, num, 3), dtype=np.float32)
-        for i in xrange(1, len(self._classes)):
+        points_all = np.zeros((num_classes, num, 3), dtype=np.float32)
+        for i in range(1, num_classes):
             points_all[i, :, :] = points[i][:num, :]
 
         # rescale the points
         point_blob = points_all.copy()
-        for i in xrange(1, self._num_classes):
+        for i in range(1, num_classes):
             # compute the rescaling factor for the points
-            weight = 10.0 / np.amax(self._extents[i, :])
+            weight = 10.0 / np.amax(extents[i, :])
             if weight < 10:
                 weight = 10
-            if self._symmetry[i] > 0:
+            if symmetry[i] > 0:
                 point_blob[i, :, :] = 4 * weight * point_blob[i, :, :]
             else:
                 point_blob[i, :, :] = weight * point_blob[i, :, :]

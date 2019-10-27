@@ -12,6 +12,7 @@ from fcn.config import cfg
 import cv2
 import scipy.ndimage.filters as sci_filter
 import numba
+import time
 from numba import jit
 
 from layers.roi_align import ROIAlign
@@ -244,26 +245,18 @@ def compensate_trans_R(translation, R):
 
 
 def trans_zoom_uvz_cuda(image, uvs, zs, pf_fu, pf_fv, target_distance=2.5, out_size=128):
-    image = image.permute(2, 0, 1).float().unsqueeze(0).cuda()
 
-    bbox_u = target_distance * (1 / zs) / cfg.PF.FU * pf_fu * out_size / image.size(3)
-    bbox_u = torch.from_numpy(bbox_u).cuda().float().squeeze(1)
-    bbox_v = target_distance * (1 / zs) / cfg.PF.FV * pf_fv * out_size / image.size(2)
-    bbox_v = torch.from_numpy(bbox_v).cuda().float().squeeze(1)
+    bbox_u = target_distance * (1 / zs) / cfg.PF.FU * pf_fu * out_size
+    bbox_v = target_distance * (1 / zs) / cfg.PF.FV * pf_fv * out_size
+    boxes = np.zeros((uvs.shape[0], 5), dtype=np.float32)
+    boxes[:, 1] = uvs[:, 0] - bbox_u[:, 0] / 2.0
+    boxes[:, 2] = uvs[:, 1] - bbox_v[:, 0] / 2.0
+    boxes[:, 3] = uvs[:, 0] + bbox_u[:, 0] / 2.0
+    boxes[:, 4] = uvs[:, 1] + bbox_v[:, 0] / 2.0
+    boxes = torch.from_numpy(boxes).cuda()
 
-    center_uvs = torch.from_numpy(uvs).cuda().float()
-
-    center_uvs[:, 0] /= image.size(3)
-    center_uvs[:, 1] /= image.size(2)
-
-    boxes = torch.zeros(center_uvs.size(0), 5).cuda()
-    boxes[:, 1] = (center_uvs[:, 0] - bbox_u/2) * float(image.size(3))
-    boxes[:, 2] = (center_uvs[:, 1] - bbox_v/2) * float(image.size(2))
-    boxes[:, 3] = (center_uvs[:, 0] + bbox_u/2) * float(image.size(3))
-    boxes[:, 4] = (center_uvs[:, 1] + bbox_v/2) * float(image.size(2))
-
+    image = image.permute(2, 0, 1).float().unsqueeze(0)
     out = CropAndResizeFunction(image, boxes)
-
     uv_scale = target_distance * (1 / zs) / cfg.PF.FU * pf_fu
 
     '''
