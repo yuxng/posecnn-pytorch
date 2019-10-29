@@ -11,8 +11,8 @@ TRAIN:
   SCALES_BASE: !!python/tuple [1.0]
   IMS_PER_BATCH: 128
   NUM_UNITS: 128
-  CLASSES: !!python/tuple [27]
-  SNAPSHOT_INFIX: ycb_object_block_green
+  CLASSES: !!python/tuple [30]
+  SNAPSHOT_INFIX: ycb_object_block_red_small
   SNAPSHOT_EPOCHS: 10
   SNAPSHOT_PREFIX: encoder
   USE_FLIPPED: False

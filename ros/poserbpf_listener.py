@@ -239,13 +239,13 @@ class ImageListener:
                     msg = PoseStamped()
                     msg.header.stamp = rospy.Time.now()
                     msg.header.frame_id = self.target_frame
-                    msg.pose.orientation.x = self.pose_rbpf.rbpfs[i].pose[1]
-                    msg.pose.orientation.y = self.pose_rbpf.rbpfs[i].pose[2]
-                    msg.pose.orientation.z = self.pose_rbpf.rbpfs[i].pose[3]
-                    msg.pose.orientation.w = self.pose_rbpf.rbpfs[i].pose[0]
-                    msg.pose.position.x = self.pose_rbpf.rbpfs[i].pose[4]
-                    msg.pose.position.y = self.pose_rbpf.rbpfs[i].pose[5]
-                    msg.pose.position.z = self.pose_rbpf.rbpfs[i].pose[6]
+                    msg.pose.orientation.x = q_bo[1]
+                    msg.pose.orientation.y = q_bo[2]
+                    msg.pose.orientation.z = q_bo[3]
+                    msg.pose.orientation.w = q_bo[0]
+                    msg.pose.position.x = t_bo[0]
+                    msg.pose.position.y = t_bo[1]
+                    msg.pose.position.z = t_bo[2]
                     cls = self.pose_rbpf.rbpfs[i].cls_id
                     pub = self.pubs[cls-1]
                     pub.publish(msg)

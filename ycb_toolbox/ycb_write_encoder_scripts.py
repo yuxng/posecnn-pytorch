@@ -4,13 +4,17 @@ import os.path as osp
 classes = ('002_master_chef_can', '003_cracker_box', '004_sugar_box', '005_tomato_soup_can', '006_mustard_bottle', \
            '007_tuna_fish_can', '008_pudding_box', '009_gelatin_box', '010_potted_meat_can', '011_banana', '019_pitcher_base', \
            '021_bleach_cleanser', '024_bowl', '025_mug', '035_power_drill', '036_wood_block', '037_scissors', '040_large_marker', \
-           '051_large_clamp', '052_extra_large_clamp', '061_foam_brick', 'block_red', 'block_green', 'block_blue', 'block_yellow')
+           '051_large_clamp', '052_extra_large_clamp', '061_foam_brick', 'block_red_big', 'block_green_big', 'block_blue_big', 'block_yellow_big', \
+           'block_red_small', 'block_green_small', 'block_blue_small', 'block_yellow_small',
+           'block_red_median', 'block_green_median', 'block_blue_median', 'block_yellow_median')
 
 classes_all = ('__background__', '002_master_chef_can', '003_cracker_box', '004_sugar_box', '005_tomato_soup_can', '006_mustard_bottle', \
                '007_tuna_fish_can', '008_pudding_box', '009_gelatin_box', '010_potted_meat_can', '011_banana', '019_pitcher_base', \
                '021_bleach_cleanser', '024_bowl', '025_mug', '035_power_drill', '036_wood_block', '037_scissors', '040_large_marker', \
                '051_large_clamp', '052_extra_large_clamp', '061_foam_brick', 'holiday_cup1', 'holiday_cup2', 'sanning_mug', \
-               '001_chips_can', 'block_red', 'block_green', 'block_blue', 'block_yellow')
+               '001_chips_can', 'block_red_big', 'block_green_big', 'block_blue_big', 'block_yellow_big', \
+               'block_red_small', 'block_green_small', 'block_blue_small', 'block_yellow_small', \
+               'block_red_median', 'block_green_median', 'block_blue_median', 'block_yellow_median')
 
 this_dir = osp.dirname(__file__)
 root_path = osp.join(this_dir, '..')
@@ -115,7 +119,7 @@ for i in range(len(classes)):
         f.write('    "command": "cd /nfs/Projects/posecnn-pytorch; ls; sh ./experiments/scripts/ycb_encoder_train_' + cls + '.sh",\n')
         f.write('    "resources": {\n')
         f.write('      "cpuCores": 8,\n')
-        f.write('      "gpus": 1,\n')
+        f.write('      "gpus": 2,\n')
         f.write('      "systemMemory": 64\n')
         f.write('    },\n')
         f.write('    "jobDataLocations": [\n')

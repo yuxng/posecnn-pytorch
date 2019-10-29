@@ -12,7 +12,7 @@ TRAIN:
   IMS_PER_BATCH: 128
   NUM_UNITS: 128
   CLASSES: !!python/tuple [29]
-  SNAPSHOT_INFIX: ycb_object_block_yellow
+  SNAPSHOT_INFIX: ycb_object_block_yellow_big
   SNAPSHOT_EPOCHS: 10
   SNAPSHOT_PREFIX: encoder
   USE_FLIPPED: False
