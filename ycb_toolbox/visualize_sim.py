@@ -20,9 +20,6 @@ if __name__ == '__main__':
     models = ['003_cracker_box', '004_sugar_box', '005_tomato_soup_can', '006_mustard_bottle', '010_potted_meat_can']
     colors = [[0, 1, 0], [0, 0, 1], [1, 1, 0], [1, 0, 1], [0.5, 0.5, 0]]
 
-    # models = ['003_cracker_box']
-    # colors = [[0, 1, 0]]
-
     obj_paths = [
         '{}/models_sim/{}/meshes/{}.obj'.format(model_path, item, item) for item in models]
     texture_paths = [

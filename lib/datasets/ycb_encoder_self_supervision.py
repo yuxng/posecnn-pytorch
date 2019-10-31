@@ -100,13 +100,16 @@ class YCBEncoderSelfSupervision(data.Dataset, datasets.imdb):
                          '007_tuna_fish_can', '008_pudding_box', '009_gelatin_box', '010_potted_meat_can', '011_banana', '019_pitcher_base', \
                          '021_bleach_cleanser', '024_bowl', '025_mug', '035_power_drill', '036_wood_block', '037_scissors', '040_large_marker', \
                          '051_large_clamp', '052_extra_large_clamp', '061_foam_brick', 'holiday_cup1', 'holiday_cup2', 'sanning_mug', \
-                         '001_chips_can', 'block_red', 'block_green', 'block_blue', 'block_yellow')
+                         '001_chips_can', 'block_red_big', 'block_green_big', 'block_blue_big', 'block_yellow_big', \
+                         'block_red_small', 'block_green_small', 'block_blue_small', 'block_yellow_small', \
+                         'block_red_median', 'block_green_median', 'block_blue_median', 'block_yellow_median')
         self._num_classes_all = len(self._classes_all)
         self._class_colors_all = [(255, 255, 255), (255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (255, 0, 255), (0, 255, 255), \
                               (0, 0, 128), (0, 128, 0), (128, 0, 0), (128, 128, 0), (128, 0, 128), (0, 128, 128), \
                               (0, 64, 0), (64, 0, 0), (0, 0, 64), (64, 64, 0), (64, 0, 64), (0, 64, 64), \
                               (192, 0, 0), (0, 192, 0), (0, 0, 192), (192, 192, 0), (192, 0, 192), (0, 192, 192), (32, 0, 0), \
-                              (150, 0, 0), (0, 150, 0), (0, 0, 150), (150, 150, 0)]
+                              (150, 0, 0), (0, 150, 0), (0, 0, 150), (150, 150, 0), (255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), \
+                              (200, 0, 0), (0, 200, 0), (0, 0, 200), (200, 200, 0)]
         self._extents_all = self._load_object_extents()
 
         self._width = 128
@@ -569,23 +572,17 @@ class YCBEncoderSelfSupervision(data.Dataset, datasets.imdb):
 
 
     def trans_zoom_uvz_cuda(self, image, uvs, zs, pf_fu, pf_fv, target_distance=2.5, out_size=128):
+
+        bbox_u = target_distance * (1 / zs) / self._intrinsic_matrix[0, 0] * pf_fu * out_size
+        bbox_v = target_distance * (1 / zs) / self._intrinsic_matrix[1, 1] * pf_fv * out_size
+        boxes = np.zeros((uvs.shape[0], 5), dtype=np.float32)
+        boxes[:, 1] = uvs[:, 0] - bbox_u[:, 0] / 2.0
+        boxes[:, 2] = uvs[:, 1] - bbox_v[:, 0] / 2.0
+        boxes[:, 3] = uvs[:, 0] + bbox_u[:, 0] / 2.0
+        boxes[:, 4] = uvs[:, 1] + bbox_v[:, 0] / 2.0
+        boxes = torch.from_numpy(boxes).cuda()
+
         image = image.permute(2, 0, 1).float().unsqueeze(0).cuda()
-
-        bbox_u = target_distance * (1 / zs) / self._intrinsic_matrix[0, 0] * pf_fu * out_size / image.size(3)
-        bbox_u = torch.from_numpy(bbox_u).cuda().float().squeeze(1)
-        bbox_v = target_distance * (1 / zs) / self._intrinsic_matrix[1, 1] * pf_fv * out_size / image.size(2)
-        bbox_v = torch.from_numpy(bbox_v).cuda().float().squeeze(1)
-
-        center_uvs = torch.from_numpy(uvs).cuda().float()
-        center_uvs[:, 0] /= image.size(3)
-        center_uvs[:, 1] /= image.size(2)
-
-        boxes = torch.zeros(center_uvs.size(0), 5).cuda()
-        boxes[:, 1] = (center_uvs[:, 0] - bbox_u/2) * float(image.size(3))
-        boxes[:, 2] = (center_uvs[:, 1] - bbox_v/2) * float(image.size(2))
-        boxes[:, 3] = (center_uvs[:, 0] + bbox_u/2) * float(image.size(3))
-        boxes[:, 4] = (center_uvs[:, 1] + bbox_v/2) * float(image.size(2))
-
         out = self.CropAndResizeFunction(image, boxes)
         uv_scale = target_distance * (1 / zs) / self._intrinsic_matrix[0, 0] * pf_fu
 
@@ -699,10 +696,15 @@ class YCBEncoderSelfSupervision(data.Dataset, datasets.imdb):
         """
         Construct an image path from the image's "index" identifier.
         """
+        image_path_jpg = os.path.join(self._data_path, index + '_color.jpg')
+        image_path_png = os.path.join(self._data_path, index + '_color.png')
+        if os.path.exists(image_path_jpg):
+            return image_path_jpg
+        elif os.path.exists(image_path_png):
+            return image_path_png
 
-        image_path = os.path.join(self._data_path, index + '_color' + self._image_ext)
-        assert os.path.exists(image_path), \
-                'Path does not exist: {}'.format(image_path)
+        assert os.path.exists(image_path_jpg) or os.path.exists(image_path_png), \
+                'Path does not exist: {} or {}'.format(image_path_jpg, image_path_png)
         return image_path
 
     # depth

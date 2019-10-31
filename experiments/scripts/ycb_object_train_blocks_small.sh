@@ -10,7 +10,7 @@ export PYTHON_EGG_CACHE=/nfs
 ./tools/train_net.py \
   --network posecnn \
   --pretrained data/checkpoints/vgg16-397923af.pth \
-  --dataset ycb_object_train \
+  --dataset ycb_self_supervision_train_block_small_sim \
   --cfg experiments/cfgs/ycb_object_blocks_small.yml \
   --solver sgd \
   --epochs 16

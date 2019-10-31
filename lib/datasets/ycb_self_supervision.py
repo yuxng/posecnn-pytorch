@@ -53,13 +53,16 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
                          '007_tuna_fish_can', '008_pudding_box', '009_gelatin_box', '010_potted_meat_can', '011_banana', '019_pitcher_base', \
                          '021_bleach_cleanser', '024_bowl', '025_mug', '035_power_drill', '036_wood_block', '037_scissors', '040_large_marker', \
                          '051_large_clamp', '052_extra_large_clamp', '061_foam_brick', 'holiday_cup1', 'holiday_cup2', 'sanning_mug', \
-                         '001_chips_can', 'block_red', 'block_green', 'block_blue', 'block_yellow')
+                         '001_chips_can', 'block_red_big', 'block_green_big', 'block_blue_big', 'block_yellow_big', \
+                         'block_red_small', 'block_green_small', 'block_blue_small', 'block_yellow_small', \
+                         'block_red_median', 'block_green_median', 'block_blue_median', 'block_yellow_median')
         self._num_classes_all = len(self._classes_all)
         self._class_colors_all = [(255, 255, 255), (255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (255, 0, 255), (0, 255, 255), \
                               (0, 0, 128), (0, 128, 0), (128, 0, 0), (128, 128, 0), (128, 0, 128), (0, 128, 128), \
                               (0, 64, 0), (64, 0, 0), (0, 0, 64), (64, 64, 0), (64, 0, 64), (0, 64, 64), \
                               (192, 0, 0), (0, 192, 0), (0, 0, 192), (192, 192, 0), (192, 0, 192), (0, 192, 192), (32, 0, 0), \
-                              (150, 0, 0), (0, 150, 0), (0, 0, 150), (150, 150, 0)]
+                              (150, 0, 0), (0, 150, 0), (0, 0, 150), (150, 150, 0), (255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), \
+                              (200, 0, 0), (0, 200, 0), (0, 0, 200), (200, 200, 0)]
         self._extents_all = self._load_object_extents()
 
         self._width = cfg.TRAIN.SYN_WIDTH
@@ -677,6 +680,18 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
                 label_blob[i, I[0], I[1]] = 1.0
                 label_blob[0, I[0], I[1]] = 0.0
 
+        '''
+        import matplotlib.pyplot as plt
+        fig = plt.figure()
+        ax = fig.add_subplot(1, 2, 1)
+        plt.imshow(im_label)
+        for i in range(num):
+            plt.plot(centers[i, 0], centers[i, 1], 'yo')
+        ax = fig.add_subplot(1, 2, 2)
+        plt.imshow(im_label_all)
+        plt.show()
+        #'''
+
         # foreground mask
         seg = torch.from_numpy((im_label != 0).astype(np.float32))
         mask = seg.unsqueeze(0).repeat((3, 1, 1)).float().cuda()
@@ -899,10 +914,15 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
         Construct an image path from the image's "index" identifier.
         """
 
-        image_path = os.path.join(self._data_path, index + '_color' + self._image_ext)
-        assert os.path.exists(image_path), \
-                'Path does not exist: {}'.format(image_path)
-        return image_path
+        image_path_jpg = os.path.join(self._data_path, index + '_color.jpg')
+        image_path_png = os.path.join(self._data_path, index + '_color.png')
+        if os.path.exists(image_path_jpg):
+            return image_path_jpg
+        elif os.path.exists(image_path_png):
+            return image_path_png
+
+        assert os.path.exists(image_path_jpg) or os.path.exists(image_path_png), \
+                'Path does not exist: {} or {}'.format(image_path_jpg, image_path_png)
 
     # depth
     def depth_path_at(self, i):
