@@ -17,6 +17,7 @@ cp lib/*.py $DST/lib
 
 cp experiments/cfgs/*.yml $DST/experiments/cfgs
 cp experiments/scripts/*.sh $DST/experiments/scripts
+cp msg/* $DST/msg
 
 cp ros/*.py $DST/ros
 cp tools/*.py $DST/tools
@@ -27,4 +28,3 @@ cp ycb_render/cpp/*.cpp $DST/ycb_render/cpp
 cp ycb_render/glutils/*.py $DST/ycb_render/glutils
 cp ycb_render/robotPose/*.py $DST/ycb_render/robotPose
 cp ycb_render/robotPose/panda_arm_models/* $DST/ycb_render/robotPose/panda_arm_models
-
