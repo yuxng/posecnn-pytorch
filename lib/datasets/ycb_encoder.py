@@ -161,11 +161,11 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         self.model_colors_target = [np.array(self._class_colors_all[i]) / 255.0 for i in cfg.TRAIN.CLASSES[1:]]
         self.model_mesh_paths_target = []
         for cls in self._classes[1:]:
-            filename = '{}/models/{}/textured_simple.obj'.format(self._ycb_object_path, cls)
+            filename = '{}/models/{}/textured_simple.ply'.format(self._ycb_object_path, cls)
             if os.path.exists(filename):
                 self.model_mesh_paths_target.append(filename)
                 continue
-            filename = '{}/models/{}/textured_simple.ply'.format(self._ycb_object_path, cls)
+            filename = '{}/models/{}/textured_simple.obj'.format(self._ycb_object_path, cls)
             if os.path.exists(filename):
                 self.model_mesh_paths_target.append(filename)
 

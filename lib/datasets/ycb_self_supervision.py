@@ -109,11 +109,11 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
 
         self.model_mesh_paths = []
         for cls in self._classes_all[1:]:
-            filename = '{}/models/{}/textured_simple.obj'.format(self._ycb_self_supervision_path, cls)
+            filename = '{}/models/{}/textured_simple.ply'.format(self._ycb_self_supervision_path, cls)
             if osp.exists(filename):
                 self.model_mesh_paths.append(filename)
                 continue
-            filename = '{}/models/{}/textured_simple.ply'.format(self._ycb_self_supervision_path, cls)
+            filename = '{}/models/{}/textured_simple.obj'.format(self._ycb_self_supervision_path, cls)
             if osp.exists(filename):
                 self.model_mesh_paths.append(filename)
 
