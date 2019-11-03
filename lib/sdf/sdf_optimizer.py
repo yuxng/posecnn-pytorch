@@ -3,6 +3,7 @@ import cv2
 import time
 from sdf_utils import *
 import _init_paths
+from fcn.config import cfg
 from layers.sdf_matching_loss import SDFLoss
 
 class sdf_optimizer():
@@ -161,7 +162,9 @@ class sdf_optimizer():
 
         self.dpose.data[:3] *= 0
         self.dpose.data[3:] = self.dpose.data[3:] * 0 + 1e-12
-        regularization = torch.tensor([100, 100, 100, 0.001, 0.001, 0.001], dtype=torch.float32, requires_grad=False, device=0)
+        treg = cfg.TEST.SDF_TRANSLATION_REG
+        rreg = cfg.TEST.SDF_ROTATION_REG
+        regularization = torch.tensor([treg, treg, treg, rreg, rreg, rreg], dtype=torch.float32, requires_grad=False, device=0)
 
         start = time.time()
         for i in range(steps):

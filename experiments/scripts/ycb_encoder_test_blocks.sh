@@ -3,7 +3,9 @@
 export PYTHONUNBUFFERED="True"
 export CUDA_VISIBLE_DEVICES=1
 
-declare -a arr=("block_green" "block_red" "block_yellow")
+declare -a arr=("block_blue_big" "block_green_big" "block_red_big" "block_yellow_big" \
+                "block_blue_median" "block_green_median" "block_red_median" "block_yellow_median" \
+                "block_blue_small" "block_green_small" "block_red_small" "block_yellow_small")
 
 for i in "${arr[@]}"
 do

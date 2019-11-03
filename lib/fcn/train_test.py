@@ -1386,7 +1386,7 @@ def refine_pose(im_label, im_depth, rois, poses, meta_data, dataset):
         mask_depth_meas = np.ma.getmaskarray(np.ma.masked_not_equal(depth_meas_roi, 0))
         mask_depth_render = np.ma.getmaskarray(np.ma.masked_greater(depth_render_roi, 0))
         mask_depth_vis = np.ma.getmaskarray(np.ma.masked_less(np.abs(depth_render_roi - depth_meas_roi), delta))
-        mask = mask_label * mask_depth_valid * mask_depth_meas * mask_depth_render * mask_depth_vis
+        mask = mask_label * mask_depth_valid * mask_depth_meas # * mask_depth_render * mask_depth_vis
         index_p = mask.flatten().nonzero()[0]
 
         poses[i, 4] *= poses[i, 6]
