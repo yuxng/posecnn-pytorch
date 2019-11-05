@@ -19,7 +19,7 @@ TRAIN:
   HOUGH_SKIP_PIXELS: 10
   FG_THRESH: 0.5
   FG_THRESH_POSE: 0.5
-  CLASSES: !!python/tuple [0, 26, 27, 28, 29]
+  CLASSES: !!python/tuple [0, 34, 35, 36, 37]
   SYMMETRY: !!python/tuple [0, 1, 1, 1, 1]
   SNAPSHOT_INFIX: ycb_object_slim
   SNAPSHOT_EPOCHS: 1
@@ -61,5 +61,5 @@ TEST:
 #  ROS_CAMERA: D415
 #  ROS_CAMERA: ISAAC_SIM
   ROS_CAMERA: Azure
-  CLASSES: !!python/tuple [0, 26, 27, 28, 29]
+  CLASSES: !!python/tuple [0, 34, 35, 36, 37]
   SYMMETRY: !!python/tuple [0, 1, 1, 1, 1]
