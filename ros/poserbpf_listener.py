@@ -644,8 +644,8 @@ class ImageListener:
         # convert depth to unit16
         depth_save = np.array(depth * factor_depth, dtype=np.uint16)
 
-        save_name_rgb = self.save_dir + 'scene_{:02}/'.format(self.scene) + '{:08}_color.png'.format(self.step)
-        save_name_rgb_render = self.save_dir + 'scene_{:02}/'.format(self.scene) + '{:08}_color_render.png'.format(self.step)
+        save_name_rgb = self.save_dir + 'scene_{:02}/'.format(self.scene) + '{:08}_color.jpg'.format(self.step)
+        save_name_rgb_render = self.save_dir + 'scene_{:02}/'.format(self.scene) + '{:08}_color_render.jpg'.format(self.step)
         save_name_depth = self.save_dir + 'scene_{:02}/'.format(self.scene) + '{:08}_depth.png'.format(self.step)
         cv2.imwrite(save_name_rgb, rgb_save)
         cv2.imwrite(save_name_rgb_render, rgb_render_save)
