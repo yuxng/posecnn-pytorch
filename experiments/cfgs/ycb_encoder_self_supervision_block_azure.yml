@@ -11,8 +11,8 @@ TRAIN:
   SCALES_BASE: !!python/tuple [1.0]
   IMS_PER_BATCH: 64
   NUM_UNITS: 128
-  CLASSES: !!python/tuple [26, 27, 28, 29]
-  SNAPSHOT_INFIX: ycb_object_self_supervision_train_block_azure
+  CLASSES: !!python/tuple [34, 35, 36, 37]
+  SNAPSHOT_INFIX: ycb_object_self_supervision_train_block_median_azure
   SNAPSHOT_EPOCHS: 10
   SNAPSHOT_PREFIX: encoder
   USE_FLIPPED: False
