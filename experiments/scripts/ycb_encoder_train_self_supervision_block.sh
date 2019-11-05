@@ -8,7 +8,7 @@ export PYTHON_EGG_CACHE=/nfs
 ./tools/train_encoders_self_supervision.py \
   --network autoencoder \
   --pretrained data/checkpoints/encoder_ycb_object_cls_epoch_200.checkpoint.pth \
-  --dataset ycb_encoder_self_supervision_train_block \
+  --dataset ycb_encoder_self_supervision_train_block_median \
   --cfg experiments/cfgs/ycb_encoder_self_supervision_block.yml \
   --solver adam \
   --epochs 60
