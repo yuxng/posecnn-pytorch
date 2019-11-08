@@ -391,7 +391,7 @@ def mat2pdf_np(matrix, mean, std):
 def rotm2viewpoint(Rco):
     Roc = Rco.transpose()
     z_axis = Roc[:3, 2]
-    elevation = np.arcsin(-z_axis[2])
+    elevation = np.arcsin(np.clip(-z_axis[2], -1, 1))
     azimuth = np.arctan2(-z_axis[1], -z_axis[0])
     y_c = np.cross(z_axis, np.array([0, 0, 1], dtype=np.float32))
     x_c = np.cross(y_c, z_axis)

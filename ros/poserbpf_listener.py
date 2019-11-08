@@ -206,6 +206,31 @@ class ImageListener:
         return True
 
 
+    def make_fake_detection(self, name):
+
+        # create pose msg
+        msg = PoseStamped()
+        msg.header.stamp = rospy.Time.now()
+        msg.header.frame_id = self.target_frame
+        msg.pose.orientation.x = 1
+        msg.pose.orientation.y = 0
+        msg.pose.orientation.z = 0
+        msg.pose.orientation.w = 0
+        msg.pose.position.x = 0
+        msg.pose.position.y = 0
+        msg.pose.position.z = 0
+
+        detection = Detection()
+        detection.name = name
+        detection.score = -1
+        detection.roi.x1 = 0
+        detection.roi.y1 = 0
+        detection.roi.x2 = 0
+        detection.roi.y2 = 0
+        detection.pose = msg
+        return detection
+
+
     # publish poses
     def tf_thread_func(self):
         while not self.stop_event.is_set() and not rospy.is_shutdown():
@@ -217,10 +242,14 @@ class ImageListener:
                     name = 'poserbpf/' + self.pose_rbpf.rbpfs[i].name
                     if self.grasp_mode and self.pose_rbpf.rbpfs[i].cls_id != self.grasp_cls:
                         self.br.sendTransform([0, 0, 0], [1, 0, 0, 0], rospy.Time.now(), name, self.base_frame)
+                        detection = self.make_fake_detection(name)
+                        detections.detections.append(detection)
                         continue
 
                     if self.reset or (self.grasp_mode and not self.pose_rbpf.rbpfs[i].graspable) or not self.pose_rbpf.rbpfs[i].status:
                         self.br.sendTransform([0, 0, 0], [1, 0, 0, 0], rospy.Time.now(), name, self.base_frame)
+                        detection = self.make_fake_detection(name)
+                        detections.detections.append(detection)
                         continue
 
                     if self.grasp_mode:
