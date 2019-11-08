@@ -892,12 +892,87 @@ def test_image(network, pose_rbpf, dataset, im_color, im_depth=None):
 
     im_pose, im_pose_refine, im_label = render_image(dataset, im_color, rois, poses, poses_refined, labels.cpu().numpy(), cls_render_ids)
     if cfg.TEST.VISUALIZE:
-        vis_test(dataset, im, im_depth, labels.cpu().numpy(), out_vertex, rois, poses, poses_refined, im_pose, im_pose_refine)
+        vis_test(dataset, im, im_depth, labels.cpu().numpy(), rois, poses, poses_refined, im_pose, im_pose_refine, out_vertex)
 
     if cfg.TEST.POSE_REFINE and im_depth is not None:
         return im_pose_refine, im_label, rois, poses_refined
     else:
         return im_pose, im_label, rois, poses
+
+
+def test_image_with_mask(pose_rbpf, dataset, im_color, mask, im_depth=None):
+    """test on a single image"""
+
+    # compute image blob
+    im = im_color.astype(np.float32, copy=True)
+    height = im.shape[0]
+    width = im.shape[1]
+    im /= 255.0
+
+    K = dataset._intrinsic_matrix
+    K[2, 2] = 1
+    Kinv = np.linalg.pinv(K)
+    meta_data = np.zeros((1, 18), dtype=np.float32)
+    meta_data[0, 0:9] = K.flatten()
+    meta_data[0, 9:18] = Kinv.flatten()
+    meta_data = torch.from_numpy(meta_data).cuda()
+
+    # prepare labels
+    mask[mask == 255] = 1
+    labels = torch.from_numpy(mask).cuda()
+
+    # transfer to GPU
+    image_tensor = torch.from_numpy(im).cuda()
+    depth_tensor = torch.from_numpy(im_depth).cuda()
+    mask_tensor = torch.from_numpy(mask).cuda()
+
+    # extract roi
+    I = np.where(mask == 1)
+    x1 = np.min(I[1])
+    y1 = np.min(I[0])
+    x2 = np.max(I[1])
+    y2 = np.max(I[0])
+    rois = np.zeros((1, 7), dtype=np.float32)
+    rois[0, 1] = 1
+    rois[0, 2] = x1
+    rois[0, 3] = y1
+    rois[0, 4] = x2
+    rois[0, 5] = y2
+    rois[0, 6] = 1.0
+
+    # run poseRBPF
+    n_init_samples = cfg.PF.N_PROCESS
+    uv_init = np.zeros((2, ), dtype=np.float32)
+
+    if len(pose_rbpf.rbpfs) == 0:
+        pose_rbpf.rbpfs.append(particle_filter(cfg.PF, n_particles=cfg.PF.N_PROCESS))
+
+    cls = int(rois[0, 1])
+    intrinsic_matrix = dataset._intrinsic_matrix
+    fx = intrinsic_matrix[0, 0]
+    fy = intrinsic_matrix[1, 1]
+    px = intrinsic_matrix[0, 2]
+    py = intrinsic_matrix[1, 2]
+    uv_init[0] = (x1 + x2) / 2.0
+    uv_init[1] = (y1 + y2) / 2.0
+
+    poses = pose_rbpf.initialize(0, image_tensor, uv_init, n_init_samples, cfg.TRAIN.CLASSES[cls], rois[0], intrinsic_matrix, depth_tensor, mask_tensor)
+    poses = np.expand_dims(poses, axis=0)
+
+    # optimize depths
+    cls_render_ids = None
+    if cfg.TEST.POSE_REFINE and im_depth is not None:
+        poses, poses_refined, cls_render_ids = refine_pose(labels, im_depth, rois, poses, meta_data, dataset)
+
+    im_pose, im_pose_refine, im_label = render_image(dataset, im_color, rois, poses, poses_refined, labels.cpu().numpy(), cls_render_ids)
+    if cfg.TEST.VISUALIZE:
+        im = im_color.astype(np.float32, copy=True)
+        im -= cfg.PIXEL_MEANS
+        im = np.transpose(im / 255.0, (2, 0, 1))
+        im = im[np.newaxis, :, :, :]
+        vis_test(dataset, im, im_depth, labels.cpu().numpy(), rois, poses, poses_refined, im_pose, im_pose_refine)
+
+    return im_pose, im_pose_refine, im_label, rois, poses, poses_refined
 
 
 #************************************#
@@ -1386,7 +1461,7 @@ def refine_pose(im_label, im_depth, rois, poses, meta_data, dataset):
         mask_depth_meas = np.ma.getmaskarray(np.ma.masked_not_equal(depth_meas_roi, 0))
         mask_depth_render = np.ma.getmaskarray(np.ma.masked_greater(depth_render_roi, 0))
         mask_depth_vis = np.ma.getmaskarray(np.ma.masked_less(np.abs(depth_render_roi - depth_meas_roi), delta))
-        mask = mask_label * mask_depth_valid * mask_depth_meas # * mask_depth_render * mask_depth_vis
+        mask = mask_label * mask_depth_valid * mask_depth_meas * mask_depth_render * mask_depth_vis
         index_p = mask.flatten().nonzero()[0]
 
         poses[i, 4] *= poses[i, 6]
@@ -2195,7 +2270,7 @@ def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, poses_refined,
 
 
 
-def vis_test(dataset, im, im_depth, label, out_vertex, rois, poses, poses_refined, im_pose, im_pose_refine):
+def vis_test(dataset, im, im_depth, label, rois, poses, poses_refined, im_pose, im_pose_refine, out_vertex=None):
 
     """Visualize a testing results."""
     import matplotlib.pyplot as plt
@@ -2205,9 +2280,11 @@ def vis_test(dataset, im, im_depth, label, out_vertex, rois, poses, poses_refine
     class_colors = dataset._class_colors_test
     points = dataset._points_all_test
     intrinsic_matrix = dataset._intrinsic_matrix
-    vertex_pred = out_vertex.detach().cpu().numpy()
     height = label.shape[0]
     width = label.shape[1]
+
+    if out_vertex is not None:
+        vertex_pred = out_vertex.detach().cpu().numpy()
 
     fig = plt.figure()
     # show image
@@ -2284,27 +2361,28 @@ def vis_test(dataset, im, im_depth, label, out_vertex, rois, poses, poses_refine
             plt.imshow(im)
             ax.set_title('input depth') 
 
-        # show predicted vertex targets
-        vertex_target = vertex_pred[0, :, :, :]
-        center = np.zeros((3, height, width), dtype=np.float32)
+        if out_vertex is not None:
+            # show predicted vertex targets
+            vertex_target = vertex_pred[0, :, :, :]
+            center = np.zeros((3, height, width), dtype=np.float32)
 
-        for j in range(1, dataset._num_classes):
-            index = np.where(label == j)
-            if len(index[0]) > 0:
-                center[0, index[0], index[1]] = vertex_target[3*j, index[0], index[1]]
-                center[1, index[0], index[1]] = vertex_target[3*j+1, index[0], index[1]]
-                center[2, index[0], index[1]] = np.exp(vertex_target[3*j+2, index[0], index[1]])
+            for j in range(1, dataset._num_classes):
+                index = np.where(label == j)
+                if len(index[0]) > 0:
+                    center[0, index[0], index[1]] = vertex_target[3*j, index[0], index[1]]
+                    center[1, index[0], index[1]] = vertex_target[3*j+1, index[0], index[1]]
+                    center[2, index[0], index[1]] = np.exp(vertex_target[3*j+2, index[0], index[1]])
 
-        ax = fig.add_subplot(3, 3, 5)
-        plt.imshow(center[0,:,:])
-        ax.set_title('predicted center x') 
+            ax = fig.add_subplot(3, 3, 5)
+            plt.imshow(center[0,:,:])
+            ax.set_title('predicted center x') 
 
-        ax = fig.add_subplot(3, 3, 6)
-        plt.imshow(center[1,:,:])
-        ax.set_title('predicted center y')
+            ax = fig.add_subplot(3, 3, 6)
+            plt.imshow(center[1,:,:])
+            ax.set_title('predicted center y')
 
-        ax = fig.add_subplot(3, 3, 7)
-        plt.imshow(center[2,:,:])
-        ax.set_title('predicted z')
+            ax = fig.add_subplot(3, 3, 7)
+            plt.imshow(center[2,:,:])
+            ax.set_title('predicted z')
 
     plt.show()
