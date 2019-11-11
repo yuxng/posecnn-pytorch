@@ -12,5 +12,4 @@ time ./ros/start_poserbpf.py --gpu $1 \
   --pretrained data/checkpoints/encoder_ycb_object_self_supervision_train_block_median_azure_cls_epoch_60.checkpoint.pth \
   --codebook data/codebooks/codebook_ycb_encoder_test_cls \
   --dataset ycb_object_test \
-  --cfg experiments/cfgs/ycb_object_blocks_azure.yml \
-  --gen_data
+  --cfg experiments/cfgs/ycb_object_blocks_azure.yml

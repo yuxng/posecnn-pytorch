@@ -191,6 +191,8 @@ class PoseRBPF:
             if grasp_mode and self.rbpfs[i].graspable and self.rbpfs[i].status:
                 continue
 
+            if self.rbpfs[i].pose_prev is not None:
+                self.rbpfs[i].pose_prev = self.rbpfs[i].pose.copy()
             if self.rbpfs[i].need_filter:
                 cls_id = self.rbpfs[i].cls_id
                 autoencoder = self.autoencoders[cls_id]
@@ -275,7 +277,7 @@ class PoseRBPF:
                 self.rbpfs[i].graspable = True
                 self.rbpfs[i].need_filter = False
 
-            print('Tracking {}, Sim obs: {:.2}, Depth Err: {:.3}, Vis Ratio: {:.2}, lost: {}, tracked {}'.format(self.rbpfs[i].name, \
+            print('Tracking {}, Sim obs: {}, Depth Err: {:.3}, Vis Ratio: {:.2}, lost: {}, tracked {}'.format(self.rbpfs[i].name, \
                 sim, depth_error, vis_ratio, self.rbpfs[i].num_lost, self.rbpfs[i].num_tracked))
 
             if cfg.TEST.VISUALIZE:
@@ -283,6 +285,26 @@ class PoseRBPF:
                 im_render = self.render_image(self.dataset, intrinsics, cls_render, self.rbpfs[i].pose)
                 self.visualize(image, im_render, out_image, in_image, box_center, box_size, box)
         print('pose evaluation time %.2f' % (time.time() - end))
+
+        # check pose difference
+        if save:
+            same_pose = True
+            for i in range(self.num_rbpfs):
+                if self.rbpfs[i].pose_prev is None:
+                    self.rbpfs[i].pose_prev = self.rbpfs[i].pose.copy()
+                    same_pose = False
+                    break
+                q1 = self.rbpfs[i].pose_prev[:4]
+                q2 = self.rbpfs[i].pose[:4]
+                theta = np.arccos(2 * np.dot(q1,q2)**2 - 1) * 180 / np.pi
+                t1 = self.rbpfs[i].pose_prev[4:]
+                t2 = self.rbpfs[i].pose[4:]
+                d = np.linalg.norm(t1 - t2)
+                if theta > 5.0 or d > 0.01:
+                    same_pose = False
+                    break
+            if same_pose:
+                save = False
         return save
 
 
@@ -870,7 +892,7 @@ class PoseRBPF:
             mask_depth_render = depth_render > 0
             mask_depth_valid = torch.isfinite(image_depth)
             mask_depth_meas = image_depth > 0
-            mask_depth_vis = torch.abs(image_depth - image_depth) < 0.05
+            mask_depth_vis = torch.abs(image_depth - depth_render) < 0.05
             visibility_mask = mask_label * mask_depth_valid * mask_depth_meas * mask_depth_render * mask_depth_vis
 
             # visibility_mask = np.logical_and(np.logical_and(mask == cls_id, depth_render > 0), estimate_visib_mask_numba(image_depth, image_depth, 0.05))

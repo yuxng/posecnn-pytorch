@@ -63,7 +63,6 @@ class ImageListener:
         self.objects = []
         self.frame_names = []
         self.frame_lost = []
-        self.num_lost = 50
         self.queue_size = 10
         self.gen_data = gen_data
 
@@ -88,6 +87,7 @@ class ImageListener:
         # thread for publish poses
         self.tf_thread = None
         self.stop_event = None
+        self.stop_event_base_camera = None
 
         # initialize a node
         rospy.init_node('poserbpf_image_listener' + self.suffix)
@@ -113,6 +113,12 @@ class ImageListener:
             self.target_frame = self.base_frame
             self.camera_frame = 'camera_color_optical_frame'
             self.forward_kinematics = True
+
+            self.T_delta = np.array([[0.99911077, 0.04145749, -0.00767817, 0.003222],  # -0.003222, -0.013222 (left plus and right minus)
+                                     [-0.04163608, 0.99882554, -0.02477858, 0.01589],  # -0.00289, 0.01089 (close plus and far minus)
+                                     [0.0066419, 0.02507623, 0.99966348, 0.003118],
+                                     [0., 0., 0., 1.]], dtype=np.float32)
+
         elif cfg.TEST.ROS_CAMERA == 'Azure':
             rgb_sub = message_filters.Subscriber('/k4a/rgb/image_raw', Image, queue_size=1)
             depth_sub = message_filters.Subscriber('/k4a/depth_to_rgb/image_raw', Image, queue_size=1)
@@ -138,6 +144,8 @@ class ImageListener:
             self.Tbr_prev = np.eye(4, dtype=np.float32)
             self.Trc = np.load('./data/cameras/extrinsics_{}.npy'.format(self.camera_type))
         self.Tbc_now = np.eye(4, dtype=np.float32)
+        self.camera_distance = 0
+        self.camera_steady = False
         self.pose_rbpf.forward_kinematics = self.forward_kinematics
 
         # service for reset poserbpf
@@ -190,6 +198,7 @@ class ImageListener:
 
         # start pose thread
         self.start_publishing_tf()
+        self.start_publishing_base_to_camera()
 
 
     def start_publishing_tf(self):
@@ -204,6 +213,12 @@ class ImageListener:
         self.stop_event.set()
         self.tf_thread.join()
         return True
+
+
+    def start_publishing_base_to_camera(self):
+        self.stop_event_base_camera = threading.Event()
+        self.base_camera_thread = threading.Thread(target=self.base_camera_thread_func)
+        self.base_camera_thread.start()
 
 
     def make_fake_detection(self, name):
@@ -231,6 +246,33 @@ class ImageListener:
         return detection
 
 
+    # update camera to base transformation
+    def base_camera_thread_func(self):
+        while not self.stop_event_base_camera.is_set() and not rospy.is_shutdown():
+            source_frame = self.camera_frame
+            target_frame = self.base_frame
+            try:
+                trans, rot = self.listener.lookupTransform(target_frame, source_frame, rospy.Time(0))
+            except:
+                print('missing camera to base transformation')
+                continue
+
+            Tbc = ros_qt_to_rt(rot, trans)
+            #'''
+            if self.camera_type == 'D415':
+                Tbc = Tbc.dot(self.T_delta)
+            #'''
+            # compute camera distance
+            d = np.linalg.norm(Tbc[:3, 3] - self.Tbc_now[:3, 3])
+            self.camera_distance = d
+            if d < 0.01:
+                self.camera_steady = True
+            else:
+                self.camera_steady = False
+            self.Tbc_now = Tbc.copy()
+            self.stop_event_base_camera.wait(timeout=0.1)
+
+
     # publish poses
     def tf_thread_func(self):
         while not self.stop_event.is_set() and not rospy.is_shutdown():
@@ -240,13 +282,14 @@ class ImageListener:
                 for i in range(self.pose_rbpf.num_rbpfs):
 
                     name = 'poserbpf/' + self.pose_rbpf.rbpfs[i].name
-                    if self.grasp_mode and self.pose_rbpf.rbpfs[i].cls_id != self.grasp_cls:
+                    if self.grasp_mode and (self.pose_rbpf.rbpfs[i].cls_id != self.grasp_cls or not self.camera_steady):
                         self.br.sendTransform([0, 0, 0], [1, 0, 0, 0], rospy.Time.now(), name, self.base_frame)
                         detection = self.make_fake_detection(name)
                         detections.detections.append(detection)
                         continue
 
-                    if self.reset or (self.grasp_mode and not self.pose_rbpf.rbpfs[i].graspable) or not self.pose_rbpf.rbpfs[i].status:
+                    if self.reset or (self.grasp_mode and not self.pose_rbpf.rbpfs[i].graspable) or \
+                       (self.grasp_mode and self.pose_rbpf.rbpfs[i].num_tracked < 5) or not self.pose_rbpf.rbpfs[i].status:
                         self.br.sendTransform([0, 0, 0], [1, 0, 0, 0], rospy.Time.now(), name, self.base_frame)
                         detection = self.make_fake_detection(name)
                         detections.detections.append(detection)
@@ -257,8 +300,9 @@ class ImageListener:
                     Tco = np.eye(4, dtype=np.float32)
                     Tco[:3, :3] = quat2mat(self.pose_rbpf.rbpfs[i].pose[:4])
                     Tco[:3, 3] = self.pose_rbpf.rbpfs[i].pose[4:]
-                    # transform to base
+
                     Tbo = self.Tbc_now.dot(Tco)
+
                     # publish tf
                     t_bo = Tbo[:3, 3]
                     q_bo = mat2quat(Tbo[:3, :3])
@@ -290,9 +334,7 @@ class ImageListener:
                     detections.detections.append(detection)
 
                 self.detection_pub.publish(detections)
-
-        self.stop_event.wait(timeout=0.1)
-
+            self.stop_event.wait(timeout=0.1)
 
 
     # callback function to get images
@@ -415,38 +457,23 @@ class ImageListener:
             elif self.req.a == 2:
                 self.grasp_mode = True
                 self.grasp_cls = self.req.b
+                detections = DetectionList()
                 for i in range(self.pose_rbpf.num_rbpfs):
                     self.pose_rbpf.rbpfs[i].need_filter = True
                     name = 'poserbpf/' + self.pose_rbpf.rbpfs[i].name
                     self.br.sendTransform([0, 0, 0], [1, 0, 0, 0], rospy.Time.now(), name, self.target_frame)
+                    detection = self.make_fake_detection(name)
+                    detections.detections.append(detection)
+                self.detection_pub.publish(detections)
+
             elif self.req.a == 3:
                 self.grasp_mode = False
                 self.grasp_cls = -1
             self.reset = False
             self.pose_rbpf.reset = False
 
-        # subscribe the transformation
-        #try:
-        source_frame = self.camera_frame
-        target_frame = self.base_frame
-        try:
-            trans, rot = self.listener.lookupTransform(target_frame, source_frame, rospy.Time(0))
-        except:
-            print('missing camera to base transformation')
-            return
-
-        Tbc = ros_qt_to_rt(rot, trans)
-        #'''
-        if self.camera_type == 'D415':
-            T_delta = np.array([[0.99911077, 0.04145749, -0.00767817, -0.013222],  # -0.003222, -0.013222 (left plus and right minus)
-                                [-0.04163608, 0.99882554, -0.02477858, 0.002000],  # -0.00289, 0.01089 (close plus and far minus)
-                                [0.0066419, 0.02507623, 0.99966348, 0.003118],
-                                [0., 0., 0., 1.]], dtype=np.float32)
-            Tbc = Tbc.dot(T_delta)
-        #'''
-        self.Tbc_now = Tbc.copy()
         if self.forward_kinematics:
-            self.Tbr_now = Tbc.dot(np.linalg.inv(self.Trc))
+            self.Tbr_now = self.Tbc_now.dot(np.linalg.inv(self.Trc))
             if np.linalg.norm(self.Tbr_prev[:3, 3]) == 0:
                 self.pose_rbpf.T_c1c0 = np.eye(4, dtype=np.float32)
             else:
@@ -592,7 +619,7 @@ class ImageListener:
             cls = cfg.TEST.CLASSES[int(roi[1])]
             sim, depth_error, vis_ratio = self.pose_rbpf.evaluate_6d_pose(self.pose_rbpf.rbpfs[-1].roi, pose, cls, \
                 image_bgr, image_tensor, pcloud_tensor, depth, self.intrinsic_matrix, im_label)
-            print('Initialization : Object: {}, Sim obs: {:.2}, Depth Err: {:.3}, Vis Ratio: {:.2}'.format(i, sim, depth_error, vis_ratio))
+            print('Initialization : Object: {}, Sim obs: {}, Depth Err: {:.3}, Vis Ratio: {:.2}'.format(i, sim, depth_error, vis_ratio))
 
             if sim < cfg.PF.THRESHOLD_SIM or depth_error > cfg.PF.THRESHOLD_DEPTH or vis_ratio < cfg.PF.THRESHOLD_RATIO:
                 print('===================is NOT initialized!=================')

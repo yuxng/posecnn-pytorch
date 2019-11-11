@@ -39,6 +39,7 @@ class particle_filter():
         self.need_filter = True
         self.graspable = False
         self.pose = None
+        self.pose_prev = None
         self.status = False
 
         # star
