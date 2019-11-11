@@ -1,4 +1,4 @@
-EXP_DIR: ycb_object
+EXP_DIR: moped_object
 INPUT: COLOR
 TRAIN:
   TRAINABLE: True
@@ -11,8 +11,8 @@ TRAIN:
   SCALES_BASE: !!python/tuple [1.0]
   IMS_PER_BATCH: 128
   NUM_UNITS: 128
-  CLASSES: !!python/tuple [38]
-  SNAPSHOT_INFIX: ycb_object_fusion_duplo_dude
+  CLASSES: !!python/tuple [4]
+  SNAPSHOT_INFIX: moped_object_oatmeal_crumble
   SNAPSHOT_EPOCHS: 10
   SNAPSHOT_PREFIX: encoder
   USE_FLIPPED: False

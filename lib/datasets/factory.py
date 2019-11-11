@@ -13,6 +13,7 @@ import datasets.ycb_video
 import datasets.ycb_object
 import datasets.ycb_self_supervision
 import datasets.ycb_encoder
+import datasets.moped_encoder
 import datasets.linemod
 import datasets.isaac_sim
 import datasets.background
@@ -54,6 +55,13 @@ for split in ['train', 'test']:
     print name
     __sets[name] = (lambda split=split:
             datasets.YCBEncoder(split))
+
+# moped encoder dataset
+for split in ['train', 'test']:
+    name = 'moped_encoder_{}'.format(split)
+    print name
+    __sets[name] = (lambda split=split:
+            datasets.MOPEDEncoder(split))
 
 # isaac sim dataset
 for split in ['train', 'test']:

@@ -1,14 +1,14 @@
 import bpy
 import os.path as osp
 import numpy as np
-#from ycb_globals import ycb_video
 
 this_dir = osp.dirname(__file__)
-root_path = osp.join(this_dir, '..', 'data', 'YCB_Object')
-classes = ('fusion_duplo_dude', )
+root_path = osp.join(this_dir, '..', 'data', 'MOPED')
+classes = ('black_drill', 'duplo_dude', 'graphics_card', 'oatmeal_crumble', 'pouch', \
+           'rinse_aid', 'vegemite', 'cheezit', 'duster', 'honey', 'orange_drill', 'remote', 'toy_plane', 'vim_mug')
 
 # extent file
-filename = osp.join(root_path, 'models', 'extents_fusion.txt')
+filename = osp.join(root_path, 'extents.txt')
 fext = open(filename, "w")
 
 for i in range(len(classes)):
@@ -21,7 +21,7 @@ for i in range(len(classes)):
 
     cls = classes[i]
     print(cls)
-    filename = osp.join(root_path, 'models', cls, 'textured_simple.obj')
+    filename = osp.join(root_path, 'models', cls, 'reference', 'integrated_registered_processed.obj')
     print(filename)
 
     imported_object = bpy.ops.import_scene.obj(filepath=filename)
@@ -52,7 +52,7 @@ for i in range(len(classes)):
         factor = np.ceil(num / vertices.shape[0])
         pcloud = np.repeat(vertices, factor, axis=0)
 
-    filename = osp.join(root_path, 'models', cls, 'points.xyz')
+    filename = osp.join(root_path, 'models', cls, 'reference', 'points.xyz')
     f = open(filename, "w")
     for i in range(pcloud.shape[0]):
         f.write('%f %f %f\n' % (pcloud[i, 0], pcloud[i, 1], pcloud[i, 2]))

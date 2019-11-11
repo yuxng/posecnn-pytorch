@@ -10,6 +10,7 @@ from .ycb_video import YCBVideo
 from .ycb_self_supervision import YCBSelfSupervision
 from .ycb_encoder_self_supervision import YCBEncoderSelfSupervision
 from .ycb_encoder import YCBEncoder
+from .moped_encoder import MOPEDEncoder
 from .ycb_object import YCBObject
 from .background import BackgroundDataset
 from .linemod import linemod
