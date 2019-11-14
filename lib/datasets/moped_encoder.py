@@ -109,10 +109,17 @@ class MOPEDEncoder(data.Dataset, datasets.imdb):
 
         # select a subset of classes
         self._classes = [self._classes_all[i] for i in cfg.TRAIN.CLASSES]
+        self._classes_test = [self._classes_all[i] for i in cfg.TEST.CLASSES]
         self._num_classes = len(self._classes)
+        self._num_classes_test = len(self._classes_test)
         self._class_colors = [self._class_colors_all[i] for i in cfg.TRAIN.CLASSES]
+        self._class_colors_test = [self._class_colors_all[i] for i in cfg.TEST.CLASSES]
+        self._symmetry = np.array(cfg.TRAIN.SYMMETRY).astype(np.float32)
+        self._symmetry_test = np.array(cfg.TEST.SYMMETRY).astype(np.float32)
         self._extents = self._extents_all[cfg.TRAIN.CLASSES]
+        self._extents_test = self._extents_all[cfg.TEST.CLASSES]
         self._points = self._load_object_points()
+        self._points_test, self._points_all_test = self._load_object_points_test(self._classes_test, self._extents_test)
 
         # other classes as occluder
         self._classes_other = []
@@ -434,6 +441,25 @@ class MOPEDEncoder(data.Dataset, datasets.imdb):
 
         return points
 
+    def _load_object_points_test(self, classes, extents):
+
+        points = [[] for _ in range(len(classes))]
+        num = np.inf
+        num_classes = len(classes)
+        for i in range(1, num_classes):
+            point_file = os.path.join(self._moped_object_path, 'models', classes[i], 'reference', 'points.xyz')
+            print(point_file)
+            assert os.path.exists(point_file), 'Path does not exist: {}'.format(point_file)
+            points[i] = np.loadtxt(point_file)
+            if points[i].shape[0] < num:
+                num = points[i].shape[0]
+
+        points_all = np.zeros((num_classes, num, 3), dtype=np.float32)
+        for i in range(1, num_classes):
+            points_all[i, :, :] = points[i][:num, :]
+
+        return points, points_all
+
 
     def process_label_image(self, label_image):
         """
@@ -457,3 +483,15 @@ class MOPEDEncoder(data.Dataset, datasets.imdb):
                 labels[I[0], I[1]] = ind+1
 
         return labels, labels_all
+
+
+    def labels_to_image(self, labels):
+
+        height = labels.shape[0]
+        width = labels.shape[1]
+        im_label = np.zeros((height, width, 3), dtype=np.uint8)
+        for i in range(self._num_classes_test):
+            I = np.where(labels == i)
+            im_label[I[0], I[1], :] = self._class_colors_test[i]
+
+        return im_label

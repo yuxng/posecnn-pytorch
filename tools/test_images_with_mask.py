@@ -22,6 +22,7 @@ import numpy as np
 import cv2
 import scipy.io
 import glob
+import copy
 
 import _init_paths
 from fcn.train_test import test_image_with_mask
@@ -48,6 +49,9 @@ def parse_args():
                         default=None, type=str)
     parser.add_argument('--codebook', dest='codebook',
                         help='codebook',
+                        default=None, type=str)
+    parser.add_argument('--cls_name', dest='cls_name',
+                        help='class name',
                         default=None, type=str)
     parser.add_argument('--cfg', dest='cfg_file',
                         help='optional config file', default=None, type=str)
@@ -90,6 +94,10 @@ def parse_args():
     return args
 
 
+classes_all = ('__background__', 'black_drill', 'duplo_dude', 'graphics_card', 'oatmeal_crumble', 'pouch', \
+               'rinse_aid', 'vegemite', 'cheezit', 'duster', 'honey', 'orange_drill', 'remote', 'toy_plane', 'vim_mug')
+
+
 if __name__ == '__main__':
     args = parse_args()
 
@@ -99,8 +107,14 @@ if __name__ == '__main__':
     if args.cfg_file is not None:
         cfg_from_file(args.cfg_file)
 
-    if len(cfg.TEST.CLASSES) == 0:
-        cfg.TEST.CLASSES = cfg.TRAIN.CLASSES
+    if args.cls_name is not None:
+        for i, cls in enumerate(classes_all):
+            if args.cls_name == cls:
+                cls_index = i
+                cfg.TRAIN.CLASSES[0] = i
+                cfg.TEST.CLASSES[1] = i
+                break
+
     print('Using config:')
     pprint.pprint(cfg)
 
@@ -108,15 +122,16 @@ if __name__ == '__main__':
         # fix the random seeds (numpy and caffe) for reproducibility
         np.random.seed(cfg.RNG_SEED)
 
+    # dataset
+    cfg.MODE = 'TEST'
+    dataset = get_dataset(args.dataset_name)
+    cfg.TRAIN.CLASSES = cfg.TEST.CLASSES
+
     # device
     cfg.gpu_id = 0
     cfg.device = torch.device('cuda:{:d}'.format(cfg.gpu_id))
     cfg.instance_id = 0
     print('GPU device {:d}'.format(args.gpu_id))
-
-    # dataset
-    cfg.MODE = 'TEST'
-    dataset = get_dataset(args.dataset_name)
 
     # overwrite intrinsics
     if len(cfg.INTRINSICS) > 0:
@@ -159,9 +174,11 @@ if __name__ == '__main__':
         index_images = np.random.permutation(len(images_color))
     else:
         index_images = range(len(images_color))
-        resdir = args.imgdir + '_posecnn_results'
+        resdir = copy.copy(args.imgdir)
+        resdir = resdir.replace('data/MOPED/data', 'data/MOPED/poserbpf_results')
         if not os.path.exists(resdir):
             os.makedirs(resdir)
+        print(resdir)
 
     #'''
     print('loading 3D models')
@@ -193,6 +210,10 @@ if __name__ == '__main__':
 
     # run network
     for i in index_images:
+
+        if not osp.exists(images_color[i]) or not osp.exists(images_depth[i]) or not osp.exists(images_mask[i]):
+            continue
+
         im = pad_im(cv2.imread(images_color[i], cv2.IMREAD_COLOR), 16)
         if osp.exists(images_depth[i]):
             depth = pad_im(cv2.imread(images_depth[i], cv2.IMREAD_UNCHANGED), 16)
@@ -202,7 +223,10 @@ if __name__ == '__main__':
 
         # mask
         mask = pad_im(cv2.imread(images_mask[i], cv2.IMREAD_UNCHANGED), 16)
+        if len(mask.shape) == 3:
+            mask = mask[:, :, 0]
         print(images_color[i], images_depth[i], images_mask[i])
+        print(im.shape, depth.shape, mask.shape)
 
         # rescale image if necessary
         if cfg.TEST.SCALES_BASE[0] != 1:

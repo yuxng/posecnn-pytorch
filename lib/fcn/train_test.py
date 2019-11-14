@@ -956,8 +956,11 @@ def test_image_with_mask(pose_rbpf, dataset, im_color, mask, im_depth=None):
     uv_init[0] = (x1 + x2) / 2.0
     uv_init[1] = (y1 + y2) / 2.0
 
-    poses = pose_rbpf.initialize(0, image_tensor, uv_init, n_init_samples, cfg.TRAIN.CLASSES[cls], rois[0], intrinsic_matrix, depth_tensor, mask_tensor)
+    print(intrinsic_matrix)
+    poses = pose_rbpf.initialize(0, image_tensor, uv_init, n_init_samples, cfg.TEST.CLASSES[cls], rois[0], intrinsic_matrix, depth_tensor, mask_tensor)
     poses = np.expand_dims(poses, axis=0)
+    poses[0, 4] /= poses[0, 6]
+    poses[0, 5] /= poses[0, 6]
 
     # optimize depths
     cls_render_ids = None
