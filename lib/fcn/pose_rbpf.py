@@ -112,14 +112,19 @@ class PoseRBPF:
         self.rbpfs.append(particle_filter(cfg.PF, n_particles=cfg.PF.N_PROCESS))
         self.rbpfs[-1].object_id = object_id   
         self.rbpfs[-1].name = name
+
+        end = time.time()
         pose = self.initialize(self.num_rbpfs-1, image, uv_init, n_init_samples, cfg.TEST.CLASSES[cls], roi, intrinsic_matrix, im_depth, mask)
+        print('estimation initialize time %.2f' % (time.time() - end))
 
         # SDF refine
+        end = time.time()
         pose_refined, cls_render = self.refine_pose(im_label, im_depth, dpoints, roi, pose, \
             intrinsic_matrix, self.dataset, steps=cfg.TEST.NUM_SDF_ITERATIONS_INIT)
         self.rbpfs[-1].pose = pose_refined.flatten()
         box_refine = self.compute_box(self.dataset, intrinsic_matrix, int(roi[1]), pose_refined.flatten())
         self.rbpfs[-1].roi[2:6] = box_refine
+        print('estimation sdf time %.2f' % (time.time() - end))
 
         if cfg.TEST.VISUALIZE:
             im_render_refine = self.render_image(self.dataset, intrinsic_matrix, cls_render, pose_refined.flatten())
@@ -191,6 +196,10 @@ class PoseRBPF:
             if grasp_mode and self.rbpfs[i].graspable and self.rbpfs[i].status:
                 continue
 
+            # no detection for the target, do nothing
+            if self.rbpfs[i].roi_assign is None:
+                continue
+
             if self.rbpfs[i].pose_prev is not None:
                 self.rbpfs[i].pose_prev = self.rbpfs[i].pose.copy()
             if self.rbpfs[i].need_filter:
@@ -223,13 +232,13 @@ class PoseRBPF:
                 pose[4:] = self.rbpfs[i].trans_bar
                 pose[:4] = mat2quat(self.rbpfs[i].rot_bar)
                 self.rbpfs[i].pose = pose
+                print('filtering:', self.rbpfs[i].name)
 
             # SDF refine
             pose_refined, cls_render = self.refine_pose(im_label, im_depth, dpoints, \
                 self.rbpfs[i].roi, self.rbpfs[i].pose, intrinsics, self.dataset, steps=cfg.TEST.NUM_SDF_ITERATIONS_TRACKING)
             # self.rbpfs[i].pose = moving_average_pose(self.rbpfs[i].pose, pose_refined.flatten(), alpha=0.5)
             self.rbpfs[i].pose = pose_refined.flatten()
-            print('filtering:', self.rbpfs[i].name)
 
             # compute bounding box
             box = self.compute_box(self.dataset, intrinsics, int(self.rbpfs[i].roi[1]), self.rbpfs[i].pose)
@@ -244,6 +253,12 @@ class PoseRBPF:
                 return False
 
             if grasp_mode and self.rbpfs[i].cls_id != grasp_cls:
+                continue
+
+            # no detection for the target, do nothing
+            if self.rbpfs[i].roi_assign is None:
+                self.rbpfs[i].num_lost += 1
+                self.rbpfs[i].num_tracked = 0
                 continue
 
             cls = cfg.TEST.CLASSES[int(self.rbpfs[i].roi[1])]
@@ -268,6 +283,7 @@ class PoseRBPF:
                 self.rbpfs[i].num_lost = 0
                 self.rbpfs[i].num_tracked += 1
                 self.rbpfs[i].status = True
+            self.rbpfs[i].num_frame += 1
 
             # more strict threshold
             if sim < cfg.PF.THRESHOLD_SIM_GRASPING or torch.isnan(depth_error) or depth_error > cfg.PF.THRESHOLD_DEPTH_GRASPING or vis_ratio < cfg.PF.THRESHOLD_RATIO_GRASPING:
@@ -277,8 +293,8 @@ class PoseRBPF:
                 self.rbpfs[i].graspable = True
                 self.rbpfs[i].need_filter = False
 
-            print('Tracking {}, Sim obs: {}, Depth Err: {:.3}, Vis Ratio: {:.2}, lost: {}, tracked {}'.format(self.rbpfs[i].name, \
-                sim, depth_error, vis_ratio, self.rbpfs[i].num_lost, self.rbpfs[i].num_tracked))
+            print('Tracking {}, Sim obs: {}, Depth Err: {:.3}, Vis Ratio: {:.2}, lost: {}, tracked {}, graspable {}, status {}'.format(self.rbpfs[i].name, \
+                sim, depth_error, vis_ratio, self.rbpfs[i].num_lost, self.rbpfs[i].num_tracked, self.rbpfs[i].graspable, self.rbpfs[i].status))
 
             if cfg.TEST.VISUALIZE:
                 cls_render = cls - 1

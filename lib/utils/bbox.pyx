@@ -54,4 +54,3 @@ def bbox_overlaps(
                         )
                         overlaps[n, k] = iw * ih / ua
     return overlaps
-

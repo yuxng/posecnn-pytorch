@@ -33,6 +33,7 @@ class particle_filter():
         self.rot_filter.weight.requires_grad = False
         self.ele_pad = nn.ReplicationPad3d((0, 0, 0, 0, cfg_pf.ROT_GAUSSIAN_KERNEL_SZ//2, cfg_pf.ROT_GAUSSIAN_KERNEL_SZ//2))
         self.roi_assign = None
+        self.num_frame = 0
         self.num_lost = 0
         self.num_tracked = 0
         self.cls_id = -1

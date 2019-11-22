@@ -143,11 +143,13 @@ class ImageListener:
             rgb_sub = message_filters.Subscriber('/camera/color/image_raw', Image, queue_size=10)
             depth_sub = message_filters.Subscriber('/camera/aligned_depth_to_color/image_raw', Image, queue_size=10)
             msg = rospy.wait_for_message('/camera/color/camera_info', CameraInfo)
+            self.camera_frame = 'measured/camera_color_optical_frame'
             self.target_frame = 'measured/base_link'
         elif cfg.TEST.ROS_CAMERA == 'Azure':             
             rgb_sub = message_filters.Subscriber('/k4a/rgb/image_raw', Image, queue_size=10)
             depth_sub = message_filters.Subscriber('/k4a/depth_to_rgb/image_raw', Image, queue_size=10)
             msg = rospy.wait_for_message('/k4a/rgb/camera_info', CameraInfo)
+            self.camera_frame = 'rgb_camera_link'
             self.target_frame = 'measured/base_link'
 
         # update camera intrinsics
@@ -172,7 +174,7 @@ class ImageListener:
     def callback_rgbd(self, rgb, depth):
 
         if cfg.TEST.ROS_CAMERA == 'D415':
-            Tbr = get_relative_pose_from_tf(self.listener, 'camera_link', 'measured/base_link')
+            Tbr = get_relative_pose_from_tf(self.listener, self.camera_frame, self.target_frame)
 
         if depth.encoding == '32FC1':
             depth_cv = self.cv_bridge.imgmsg_to_cv2(depth)
