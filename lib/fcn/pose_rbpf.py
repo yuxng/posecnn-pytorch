@@ -604,7 +604,7 @@ class PoseRBPF:
         pc_cuda = torch.cuda.FloatTensor(height, width, 4)
 
         q_idx_unique, idx_inv = np.unique(q_idx, return_inverse=True)
-        pc_render_all = torch.cuda.FloatTensor(q_idx_unique.shape[0], 128, 128, 3)
+        depth_render_all = torch.cuda.FloatTensor(q_idx_unique.shape[0], 128, 128)
         q_render = codepose[q_idx_unique, 3:]
         for i in range(q_render.shape[0]):
             pose_v[:3] = [0, 0, render_dist]
@@ -616,53 +616,55 @@ class PoseRBPF:
                                                      np.array([[render_dist]]),
                                                      intrinsics[0, 0], intrinsics[1, 1],
                                                      render_dist)
-            pc_render_all[i] = render_roi_cuda[0, :3, :, :].permute(1, 2, 0)
+            depth_render_all[i] = render_roi_cuda[0, 2, :, :]
 
-        # evaluate every particle
-        for i in range(uv.shape[0]):
 
-            pc_render = pc_render_all[idx_inv[i]].clone()
-            depth_render = pc_render[:, :, 2]
-            depth_mask = depth_render > 0
-            depth_render[depth_mask] = depth_render[depth_mask] - render_dist + z[i][0]
-            depth_meas = depth_roi_cuda[i, 0, :, :]
+        # eval particles
+        # shift the rendered image
+        depth_invalid_mask = depth_render_all == 0
+        depth_shift_np = z[:, 0] - render_dist
+        depth_shift = torch.from_numpy(depth_shift_np).cuda().float().repeat(depth_render_all.size(1),
+                                                                             depth_render_all.size(2),
+                                                                             1).permute(2, 0, 1)
+        depth_render_all += depth_shift
+        depth_render_all[depth_invalid_mask] = 0
 
-            # compute visibility mask
-            if mask is None:
-                mask_depth_meas = depth_meas > 0
-                mask_depth_render = depth_render > 0
-                mask_depth_vis = torch.abs(depth_render - depth_meas) < delta
-                visibility_mask = mask_depth_meas * mask_depth_render * mask_depth_vis
-            else:
-                mask_label = mask_roi_cuda[i, 0, :, :] > 0
-                mask_depth_meas = depth_meas > 0
-                mask_depth_render = depth_render > 0
-                visibility_mask = mask_depth_meas * mask_depth_render * mask_label
+        # compute visibility mask
+        if mask is None:
+            mask_depth_meas = depth_meas_all > 0
+            mask_depth_render = depth_render_all > 0
+            mask_depth_vis = torch.abs(depth_render_all - depth_meas_all) < delta
+            visibility_mask = mask_depth_meas * mask_depth_render * mask_depth_vis
+        else:
+            mask_label = mask_roi_cuda[:, 0, :, :] > 0
+            mask_depth_meas = depth_meas_all > 0
+            mask_depth_render = depth_render_all > 0
+            visibility_mask = mask_depth_meas * mask_depth_render * mask_label
 
-            if torch.sum(visibility_mask) == 0:
-                continue
+        # compute scores
+        # depth errors
+        depth_error = torch.ones_like(depth_render_all).cuda()
+        depth_error[visibility_mask] = torch.abs(depth_meas_all[visibility_mask] -
+                                                 depth_render_all[visibility_mask]) / tau
+        depth_error = torch.clamp(depth_error, 0, 1.0)
+        depth_error_mean = torch.mean(depth_error, (2, 1))
 
-            # compute depth error
-            depth_error = torch.abs(depth_meas[visibility_mask] - depth_render[visibility_mask])
-            depth_error /= tau
-            depth_error[depth_error > 1] = 1
+        # visible ratio
+        total_pixels = torch.sum(depth_render_all > 0, (2, 1)).float()
+        total_pixels[total_pixels == 0] = 10000
+        vis_ratio = torch.sum(visibility_mask, (2, 1)).float() / total_pixels
 
-            # score computation
-            total_pixels = torch.sum(depth_render > 0).float()
-            if total_pixels is not 0:
-                vis_ratio = torch.sum(visibility_mask).float() / total_pixels
-                s = (1 - torch.mean(depth_error)) * vis_ratio
-                score[i] = s.cpu().numpy()
-            else:
-                score[i] = 0
+        # scores
+        score = (torch.ones_like(depth_error_mean) - depth_error_mean) * vis_ratio
+        return score.unsqueeze(1)
 
-        return score
 
     # evaluate particles according to depth measurements
     def evaluate_depths_tracking(self, rbpf, depth, uv, z, q_idx, intrinsics, render_dist, codepose, delta=0.03, tau=0.05, mask=None, pcloud_tensor=None):
 
         # crop rois
         depth_roi_cuda, _ = trans_zoom_uvz_cuda(depth.detach(), uv, z, intrinsics[0, 0], intrinsics[1, 1], render_dist)
+        depth_meas_all = depth_roi_cuda[:, 0, :, :]
 
         if mask is not None:
             mask_roi_cuda, _ = trans_zoom_uvz_cuda(mask.detach(), uv, z, intrinsics[0, 0], intrinsics[1, 1], render_dist)
@@ -676,48 +678,46 @@ class PoseRBPF:
         uv_crop = np.expand_dims(uv_crop, axis=0)
         z_crop = np.array([rbpf.trans_bar[2]], dtype=np.float32).reshape((1, 1))
         render_roi_cuda, _ = trans_zoom_uvz_cuda(pcloud_tensor, uv_crop, z_crop, intrinsics[0, 0], intrinsics[1, 1], render_dist)
-        pc_render_all = render_roi_cuda[:, :3, :, :].permute(0, 2, 3, 1)
+        depth_render_all = render_roi_cuda[:, 2, :, :]
 
-        # evaluate every particle
-        score = np.zeros_like(z)
-        for i in range(uv.shape[0]):
+        # eval particles
+        # shift the rendered image
+        depth_invalid_mask = depth_render_all == 0
+        depth_shift_np = z[:, 0] - rbpf.trans_bar[2]
+        depth_shift = torch.from_numpy(depth_shift_np).cuda().float().repeat(depth_render_all.size(1),
+                                                                             depth_render_all.size(2),
+                                                                             1).permute(2, 0, 1)
+        depth_render_all += depth_shift
+        depth_render_all[depth_invalid_mask] = 0
 
-            pc_render = pc_render_all[0].clone()
-            depth_render = pc_render[:, :, 2]
-            depth_mask = depth_render > 0
-            depth_render[depth_mask] = depth_render[depth_mask] - rbpf.trans_bar[2] + z[i][0]
-            depth_meas = depth_roi_cuda[i, 0, :, :]
+        # compute visibility mask
+        if mask is None:
+            mask_depth_meas = depth_meas_all > 0
+            mask_depth_render = depth_render_all > 0
+            mask_depth_vis = torch.abs(depth_render_all - depth_meas_all) < delta
+            visibility_mask = mask_depth_meas * mask_depth_render * mask_depth_vis
+        else:
+            mask_label = mask_roi_cuda[:, 0, :, :] > 0
+            mask_depth_meas = depth_meas_all > 0
+            mask_depth_render = depth_render_all > 0
+            visibility_mask = mask_depth_meas * mask_depth_render * mask_label
 
-            # compute visibility mask
-            if mask is None:
-                mask_depth_meas = depth_meas > 0
-                mask_depth_render = depth_render > 0
-                mask_depth_vis = torch.abs(depth_render - depth_meas) < delta
-                visibility_mask = mask_depth_meas * mask_depth_render * mask_depth_vis
-            else:
-                mask_label = mask_roi_cuda[i, 0, :, :] > 0
-                mask_depth_meas = depth_meas > 0
-                mask_depth_render = depth_render > 0
-                visibility_mask = mask_depth_meas * mask_depth_render * mask_label
+        # compute scores
+        # depth errors
+        depth_error = torch.ones_like(depth_render_all).cuda()
+        depth_error[visibility_mask] = torch.abs(depth_meas_all[visibility_mask] -
+                                                 depth_render_all[visibility_mask]) / tau
+        depth_error = torch.clamp(depth_error, 0, 1.0)
+        depth_error_mean = torch.mean(depth_error, (2, 1))
 
-            if torch.sum(visibility_mask) == 0:
-                continue
+        # visible ratio
+        total_pixels = torch.sum(depth_render_all > 0, (2, 1)).float()
+        total_pixels[total_pixels == 0] = 10000
+        vis_ratio = torch.sum(visibility_mask, (2, 1)).float() / total_pixels
 
-            # compute depth error
-            depth_error = torch.abs(depth_meas[visibility_mask] - depth_render[visibility_mask])
-            depth_error /= tau
-            depth_error[depth_error > 1] = 1
-
-            # score computation
-            total_pixels = torch.sum(depth_render > 0).float()
-            if total_pixels != 0:
-                vis_ratio = torch.sum(visibility_mask).float() / total_pixels
-                s = (1 - torch.mean(depth_error)) * vis_ratio
-                score[i] = s.cpu().numpy()
-            else:
-                score[i] = 0
-
-        return score
+        # scores
+        score = (torch.ones_like(depth_error_mean) - depth_error_mean) * vis_ratio
+        return score.unsqueeze(1)
 
 
     # run SDF pose refine
