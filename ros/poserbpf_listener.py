@@ -110,7 +110,6 @@ class ImageListener:
         # thread for publish poses
         self.tf_thread = None
         self.stop_event = None
-        self.stop_event_base_camera = None
 
         # initialize a node
         rospy.init_node('poserbpf_image_listener' + self.suffix)
@@ -170,7 +169,6 @@ class ImageListener:
             self.Tbr_prev = np.eye(4, dtype=np.float32)
             self.Trc = np.load('./data/cameras/extrinsics_{}.npy'.format(self.camera_type))
         self.Tbc_now = np.eye(4, dtype=np.float32)
-        self.Tbc_detection = None
         self.Tbc_prev = np.eye(4, dtype=np.float32)
         self.camera_distance = 0
         self.camera_steady = False
@@ -226,7 +224,6 @@ class ImageListener:
 
         # start pose thread
         self.start_publishing_tf()
-        self.start_publishing_base_to_camera()
 
 
     def start_publishing_tf(self):
@@ -241,12 +238,6 @@ class ImageListener:
         self.stop_event.set()
         self.tf_thread.join()
         return True
-
-
-    def start_publishing_base_to_camera(self):
-        self.stop_event_base_camera = threading.Event()
-        self.base_camera_thread = threading.Thread(target=self.base_camera_thread_func)
-        self.base_camera_thread.start()
 
 
     def make_fake_detection(self, name):
@@ -317,10 +308,6 @@ class ImageListener:
         rate = rospy.Rate(30.)
         while not self.stop_event.is_set() and not rospy.is_shutdown():
 
-            if self.Tbc_detection is None:
-                rospy.sleep(0.1)
-                continue
-
             # publish pose
             with lock_tf:
                 detections = DetectionList()
@@ -341,11 +328,8 @@ class ImageListener:
 
                     if self.grasp_mode:
                         print('***************publish****************', name)
-                    Tco = np.eye(4, dtype=np.float32)
-                    Tco[:3, :3] = quat2mat(self.pose_rbpf.rbpfs[i].pose[:4])
-                    Tco[:3, 3] = self.pose_rbpf.rbpfs[i].pose[4:]
 
-                    Tbo = self.Tbc_detection.dot(Tco)
+                    Tbo = self.pose_rbpf.rbpfs[i].T_in_base
                     if cfg.TEST.ALIGN_Z_AXIS:
                         Tbo = self.align_z_axis(Tbo)
 
@@ -493,7 +477,6 @@ class ImageListener:
             input_depth = self.input_depth.copy()
             input_seg = self.input_seg.copy()
             input_Tbc = self.Tbc_now.copy()
-        self.Tbc_detection = input_Tbc
 
         if self.reset:
             if self.req.a == 0:
@@ -523,6 +506,15 @@ class ImageListener:
             self.reset = False
             self.pose_rbpf.reset = False
 
+        # compute camera distance
+        d = np.linalg.norm(input_Tbc[:3, 3] - self.pose_rbpf.Tbc[:3, 3])
+        self.pose_rbpf.Tbc = input_Tbc
+        # moving camera, need filtering
+        if d > 0.01:
+            for i in range(self.pose_rbpf.num_rbpfs):
+                self.pose_rbpf.rbpfs[i].need_filter = True
+
+        # set poserbpf transformation matrices
         if self.forward_kinematics:
             self.Tbr_now = input_Tbc.dot(np.linalg.inv(self.Trc))
             if np.linalg.norm(self.Tbr_prev[:3, 3]) == 0:
@@ -714,6 +706,7 @@ class ImageListener:
         # filter all the objects
         print('Filtering objects')
         save = self.pose_rbpf.filtering_poserbpf(self.intrinsic_matrix, image_bgr, depth, dpoints, im_label, self.grasp_mode, self.grasp_cls)
+        print('*********full time %.2f' % (rospy.Time.now() - start_time).to_sec())
 
         # non-maximum suppression within class
         num = self.pose_rbpf.num_rbpfs

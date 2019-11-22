@@ -41,6 +41,7 @@ class particle_filter():
         self.graspable = False
         self.pose = None
         self.pose_prev = None
+        self.T_in_base = np.eye(4, dtype=np.float32)
         self.status = False
 
         # star

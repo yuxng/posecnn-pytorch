@@ -74,6 +74,7 @@ class PoseRBPF:
         self.Tbr1 = np.eye(4, dtype=np.float32)
         self.Tbr0 = np.eye(4, dtype=np.float32)
         self.Trc = np.eye(4, dtype=np.float32)
+        self.Tbc = np.eye(4, dtype=np.float32)
 
         # initialize the particle filters
         self.reset = False
@@ -124,6 +125,11 @@ class PoseRBPF:
         self.rbpfs[-1].pose = pose_refined.flatten()
         box_refine = self.compute_box(self.dataset, intrinsic_matrix, int(roi[1]), pose_refined.flatten())
         self.rbpfs[-1].roi[2:6] = box_refine
+
+        Tco = np.eye(4, dtype=np.float32)
+        Tco[:3, :3] = quat2mat(pose_refined[:4])
+        Tco[:3, 3] = pose_refined[4:]
+        self.rbpfs[-1].T_in_base = self.Tbc.dot(Tco)
         print('estimation sdf time %.2f' % (time.time() - end))
 
         if cfg.TEST.VISUALIZE:
@@ -239,6 +245,11 @@ class PoseRBPF:
                 self.rbpfs[i].roi, self.rbpfs[i].pose, intrinsics, self.dataset, steps=cfg.TEST.NUM_SDF_ITERATIONS_TRACKING)
             # self.rbpfs[i].pose = moving_average_pose(self.rbpfs[i].pose, pose_refined.flatten(), alpha=0.5)
             self.rbpfs[i].pose = pose_refined.flatten()
+
+            Tco = np.eye(4, dtype=np.float32)
+            Tco[:3, :3] = quat2mat(pose_refined[:4])
+            Tco[:3, 3] = pose_refined[4:]
+            self.rbpfs[i].T_in_base = self.Tbc.dot(Tco)
 
             # compute bounding box
             box = self.compute_box(self.dataset, intrinsics, int(self.rbpfs[i].roi[1]), self.rbpfs[i].pose)
@@ -593,6 +604,7 @@ class PoseRBPF:
 
         # crop rois
         depth_roi_cuda, _ = trans_zoom_uvz_cuda(depth.detach(), uv, z, intrinsics[0, 0], intrinsics[1, 1], render_dist)
+        depth_meas_all = depth_roi_cuda[:, 0, :, :]
 
         if mask is not None:
             mask_roi_cuda, _ = trans_zoom_uvz_cuda(mask.detach(), uv, z, intrinsics[0, 0], intrinsics[1, 1], render_dist)
@@ -604,7 +616,8 @@ class PoseRBPF:
         pc_cuda = torch.cuda.FloatTensor(height, width, 4)
 
         q_idx_unique, idx_inv = np.unique(q_idx, return_inverse=True)
-        depth_render_all = torch.cuda.FloatTensor(q_idx_unique.shape[0], 128, 128)
+        depth_render_all = torch.cuda.FloatTensor(q_idx.shape[0], 128, 128)
+        depth_render_all_unique = torch.cuda.FloatTensor(q_idx_unique.shape[0], 128, 128)
         q_render = codepose[q_idx_unique, 3:]
         for i in range(q_render.shape[0]):
             pose_v[:3] = [0, 0, render_dist]
@@ -616,8 +629,10 @@ class PoseRBPF:
                                                      np.array([[render_dist]]),
                                                      intrinsics[0, 0], intrinsics[1, 1],
                                                      render_dist)
-            depth_render_all[i] = render_roi_cuda[0, 2, :, :]
+            depth_render_all_unique[i] = render_roi_cuda[0, 2, :, :]
 
+        for i in range(q_idx.shape[0]):
+            depth_render_all[i] = depth_render_all_unique[idx_inv[i]]
 
         # eval particles
         # shift the rendered image
@@ -656,7 +671,7 @@ class PoseRBPF:
 
         # scores
         score = (torch.ones_like(depth_error_mean) - depth_error_mean) * vis_ratio
-        return score.unsqueeze(1)
+        return score.unsqueeze(1).cpu().numpy()
 
 
     # evaluate particles according to depth measurements
@@ -675,8 +690,8 @@ class PoseRBPF:
         pose_v[3:] = mat2quat(rbpf.rot_bar)
 
         uv_crop = project(rbpf.trans_bar, intrinsics)
-        uv_crop = np.expand_dims(uv_crop, axis=0)
-        z_crop = np.array([rbpf.trans_bar[2]], dtype=np.float32).reshape((1, 1))
+        uv_crop = np.repeat(np.expand_dims(uv_crop, axis=0), uv.shape[0], axis=0)
+        z_crop = np.ones_like(z) * rbpf.trans_bar[2]
         render_roi_cuda, _ = trans_zoom_uvz_cuda(pcloud_tensor, uv_crop, z_crop, intrinsics[0, 0], intrinsics[1, 1], render_dist)
         depth_render_all = render_roi_cuda[:, 2, :, :]
 
@@ -717,7 +732,7 @@ class PoseRBPF:
 
         # scores
         score = (torch.ones_like(depth_error_mean) - depth_error_mean) * vis_ratio
-        return score.unsqueeze(1)
+        return score.unsqueeze(1).cpu().numpy()
 
 
     # run SDF pose refine
@@ -779,7 +794,7 @@ class PoseRBPF:
         index_p = torch.nonzero(mask)
 
         pose_refined = pose.copy()
-        if index_p.shape[0] > 10:
+        if index_p.shape[0] > 100:
             points = im_pcloud[index_p[:, 0], index_p[:, 1], :]
             points = torch.cat((points, torch.ones((points.size(0), 1), dtype=torch.float32).cuda()), dim=1)
             RT = np.zeros((4, 4), dtype=np.float32)
