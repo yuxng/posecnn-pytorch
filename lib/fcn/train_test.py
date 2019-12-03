@@ -1572,7 +1572,6 @@ def render_image_detection(dataset, im, rois, labels):
 
     for i in range(num):
         cls = int(rois[i, 1])
-        print(dataset._classes[cls], rois[i, -1])
         if rois[i, -1] > cfg.TEST.DET_THRESHOLD:
             # draw roi
             x1 = rois[i, 2]

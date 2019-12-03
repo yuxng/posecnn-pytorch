@@ -373,17 +373,14 @@ def depth_im_to_dist_im(depth_im, K):
     dist_im = np.linalg.norm(np.dstack((Xs, Ys, depth_im)), axis=2)
     return dist_im
 
+
 def mat2pdf(distance_matrix, mean, std):
-    coeff = torch.ones_like(distance_matrix) * (1/(np.sqrt(2*np.pi) * std))
-    mean = torch.ones_like(distance_matrix) * mean
-    std = torch.ones_like(distance_matrix) * std
+    coeff = 1/(np.sqrt(2*np.pi) * std)
     pdf = coeff * torch.exp(- (distance_matrix - mean)**2 / (2 * std**2))
     return pdf
 
 def mat2pdf_np(matrix, mean, std):
-    coeff = np.ones_like(matrix) * (1/(np.sqrt(2*np.pi) * std))
-    mean = np.ones_like(matrix) * mean
-    std = np.ones_like(matrix) * std
+    coeff = 1/(np.sqrt(2*np.pi) * std)
     pdf = coeff * np.exp(- (matrix - mean)**2 / (2 * std**2))
     return pdf
 

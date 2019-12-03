@@ -1,0 +1,12 @@
+ROIAlign_cuda.cu
+hard_label_kernel.cu
+hough_voting_kernel.cu
+point_matching_loss_kernel.cu
+posecnn_layers.cpp
+roi_pooling_kernel.cu
+sdf_matching_loss_kernel.cu
+setup.py
+posecnn.egg-info/PKG-INFO
+posecnn.egg-info/SOURCES.txt
+posecnn.egg-info/dependency_links.txt
+posecnn.egg-info/top_level.txt

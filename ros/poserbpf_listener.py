@@ -1,3 +1,4 @@
+import time
 import rospy
 import tf
 import message_filters
@@ -9,10 +10,10 @@ import threading
 import sys
 import scipy.io
 import random
-import time
 import datetime
 import tf.transformations as tra
 import matplotlib.pyplot as plt
+import posecnn_cuda
 
 from Queue import Queue
 from random import shuffle
@@ -55,6 +56,7 @@ def get_relative_pose_from_tf(listener, source_frame, target_frame):
     first_time = True
     while True:
         try:
+            stamp = rospy.Time.now()
             init_trans, init_rot = listener.lookupTransform(target_frame, source_frame, rospy.Time(0))
             break
         except Exception as e:
@@ -62,7 +64,7 @@ def get_relative_pose_from_tf(listener, source_frame, target_frame):
                 print(str(e))
                 first_time = False
             continue
-    return ros_qt_to_rt(init_rot, init_trans)
+    return ros_qt_to_rt(init_rot, init_trans), stamp
 
 
 def rotation_matrix_from_vectors(A, B):
@@ -163,15 +165,10 @@ class ImageListener:
             msg = rospy.wait_for_message('/%s/rgb/camera_info' % (cfg.TEST.ROS_CAMERA), CameraInfo)
             self.forward_kinematics = False
 
-        if self.forward_kinematics:
-            # forward kinematics (base to camera link transformation)
-            self.Tbr_now = np.eye(4, dtype=np.float32)
-            self.Tbr_prev = np.eye(4, dtype=np.float32)
-            self.Trc = np.load('./data/cameras/extrinsics_{}.npy'.format(self.camera_type))
+        # camera to base transformation
         self.Tbc_now = np.eye(4, dtype=np.float32)
         self.Tbc_prev = np.eye(4, dtype=np.float32)
         self.camera_distance = 0
-        self.camera_steady = False
         self.pose_rbpf.forward_kinematics = self.forward_kinematics
 
         # service for reset poserbpf
@@ -201,6 +198,7 @@ class ImageListener:
         self.Tco_kf_list = []
         self.record = False
         self.Tbr_save = np.eye(4, dtype=np.float32)
+        self.image_disp = None
 
         # create pose publisher for each known object class
         self.pubs = []
@@ -263,33 +261,6 @@ class ImageListener:
         detection.roi.y2 = 0
         detection.pose = msg
         return detection
-
-
-    # update camera to base transformation to check if camera moving or not
-    def base_camera_thread_func(self):
-        while not self.stop_event_base_camera.is_set() and not rospy.is_shutdown():
-            source_frame = self.camera_frame
-            target_frame = self.base_frame
-            try:
-                trans, rot = self.listener.lookupTransform(target_frame, source_frame, rospy.Time(0))
-            except:
-                print('missing camera to base transformation')
-                continue
-
-            Tbc = ros_qt_to_rt(rot, trans)
-            #'''
-            if self.camera_type == 'D415':
-                Tbc = Tbc.dot(self.T_delta)
-            #'''
-            # compute camera distance
-            d = np.linalg.norm(Tbc[:3, 3] - self.Tbc_prev[:3, 3])
-            self.camera_distance = d
-            if d < 0.01:
-                self.camera_steady = True
-            else:
-                self.camera_steady = False
-            self.Tbc_prev = Tbc.copy()
-            self.stop_event_base_camera.wait(timeout=0.1)
 
 
     def align_z_axis(self, pose):
@@ -371,7 +342,7 @@ class ImageListener:
     # callback function to get images
     def callback(self, rgb, depth, label):
 
-        self.Tbc_now = get_relative_pose_from_tf(self.listener, self.camera_frame, self.base_frame)
+        self.Tbc_now, self.Tbc_stamp = get_relative_pose_from_tf(self.listener, self.camera_frame, self.base_frame)
 
         # decode image
         if depth is not None:
@@ -477,6 +448,7 @@ class ImageListener:
             input_depth = self.input_depth.copy()
             input_seg = self.input_seg.copy()
             input_Tbc = self.Tbc_now.copy()
+            input_Tbc_stamp = self.Tbc_stamp
 
         if self.reset:
             if self.req.a == 0:
@@ -494,6 +466,7 @@ class ImageListener:
                 detections = DetectionList()
                 for i in range(self.pose_rbpf.num_rbpfs):
                     self.pose_rbpf.rbpfs[i].need_filter = True
+                    self.pose_rbpf.rbpfs[i].status = False
                     name = 'poserbpf/' + self.pose_rbpf.rbpfs[i].name
                     self.br.sendTransform([0, 0, 0], [1, 0, 0, 0], rospy.Time.now(), name, self.target_frame)
                     detection = self.make_fake_detection(name)
@@ -505,25 +478,6 @@ class ImageListener:
                 self.grasp_cls = -1
             self.reset = False
             self.pose_rbpf.reset = False
-
-        # compute camera distance
-        d = np.linalg.norm(input_Tbc[:3, 3] - self.pose_rbpf.Tbc[:3, 3])
-        self.pose_rbpf.Tbc = input_Tbc
-        # moving camera, need filtering
-        if d > 0.01:
-            for i in range(self.pose_rbpf.num_rbpfs):
-                self.pose_rbpf.rbpfs[i].need_filter = True
-
-        # set poserbpf transformation matrices
-        if self.forward_kinematics:
-            self.Tbr_now = input_Tbc.dot(np.linalg.inv(self.Trc))
-            if np.linalg.norm(self.Tbr_prev[:3, 3]) == 0:
-                self.pose_rbpf.T_c1c0 = np.eye(4, dtype=np.float32)
-            else:
-                Tbc0 = np.matmul(self.Tbr_prev, self.Trc)
-                Tbc1 = np.matmul(self.Tbr_now, self.Trc)
-                self.pose_rbpf.T_c1c0 = np.matmul(np.linalg.inv(Tbc1), Tbc0)
-            self.Tbr_prev = self.Tbr_now.copy()
 
         # detection information of the target object
         rois_est = np.zeros((0, 7), dtype=np.float32)
@@ -547,7 +501,7 @@ class ImageListener:
                     n = trans[0]
                     secs = trans[1]
                     now = rospy.Time.now()
-                    if abs(now.secs - secs) > 2.0:
+                    if abs(now.secs - secs) > 1.0:
                         print 'posecnn pose for %s time out %f %f' % (source_frame, now.secs, secs)
                         continue
                     roi = np.zeros((1, 7), dtype=np.float32)
@@ -579,14 +533,58 @@ class ImageListener:
                 distance = np.multiply(cx - width / 2.0, cx - width / 2.0) + np.multiply(cy - height / 2.0, cy - height / 2.0)
                 index = np.argmin(distance)
                 rois_est = rois_est[index, :].reshape((1, 7))
-            
+
+        # compute camera distance
+        d = np.linalg.norm(input_Tbc[:3, 3] - self.pose_rbpf.Tbc[:3, 3])
+        self.pose_rbpf.Tbc = input_Tbc
+        # moving camera, need filtering
+        if d > 0.005:
+            for i in range(self.pose_rbpf.num_rbpfs):
+                # self.pose_rbpf.rbpfs[i].need_filter = True
+                T_bo = self.pose_rbpf.rbpfs[i].T_in_base
+                RT = np.matmul(np.linalg.inv(input_Tbc), T_bo)
+                self.pose_rbpf.rbpfs[i].pose[:4] = mat2quat(RT[:3, :3])
+                self.pose_rbpf.rbpfs[i].pose[4:] = RT[:3, 3]
+                roi = self.pose_rbpf.rbpfs[i].roi
+                self.pose_rbpf.rbpfs[i].roi[2:6] = self.pose_rbpf.compute_box(self.dataset, self.intrinsic_matrix, int(roi[1]), self.pose_rbpf.rbpfs[i].pose)
+
+            # if self.image_disp is not None:
+            if cfg.TEST.VISUALIZE:
+                print('image time stamp', input_stamp.to_sec())
+                print('Tbc time stamp', input_Tbc_stamp.to_sec())
+
+                fig = plt.figure()
+                ax = fig.add_subplot(2, 2, 1)
+                plt.imshow(self.image_disp)
+                ax.set_title('previous result')
+                image_tensor, pcloud_tensor = self.pose_rbpf.render_image_all(self.intrinsic_matrix, self.grasp_mode, self.grasp_cls)
+                im = (0.4 * input_rgb.astype(np.float32) / 255.0 + 0.6 * image_tensor.cpu().numpy()) * 255
+                im = np.clip(im, 0, 255)
+                im = im.astype(np.uint8)
+                ax = fig.add_subplot(2, 2, 2)
+                plt.imshow(im)
+                ax.set_title('current result')
+                ax = fig.add_subplot(2, 2, 4)
+                plt.imshow(input_seg)
+                # draw roi
+                for i in range(rois_est.shape[0]):
+                    roi = rois_est[i, 2:6]
+                    cls = int(rois_est[i, 1])
+                    color = np.array(self.dataset._class_colors_test[cls])/255.0
+                    x1 = roi[0]
+                    y1 = roi[1]
+                    x2 = roi[2]
+                    y2 = roi[3]
+                    plt.gca().add_patch(plt.Rectangle((x1, y1), x2-x1, y2-y1, fill=False, edgecolor=color, linewidth=3, clip_on=False))
+                ax.set_title('current label')
+                plt.show()
 
         # differentiate objects with different sizes
         if cfg.TEST.CHECK_SIZE:
             rois_est, input_seg = self.check_object_size(input_rgb, input_depth, input_seg, rois_est)
 
         # call pose estimation function
-        save = self.process_image_multi_obj(input_rgb, input_depth, input_seg, rois_est)
+        save, image_disp = self.process_image_multi_obj(input_rgb, input_depth, input_seg, rois_est)
 
         if self.grasp_mode:
             print('****************************Grasping Mode (%s) ****************************' % (self.dataset._classes_all[cfg.TEST.CLASSES[self.grasp_cls]]))
@@ -594,19 +592,15 @@ class ImageListener:
             print('****************************Tracking Mode**********************************')
 
         # visualization
-        #'''
-        image_tensor, _ = self.pose_rbpf.render_image_all(self.intrinsic_matrix)
-        image_disp = image_tensor.cpu().numpy()
-        image_disp = np.clip(image_disp, 0, 1) * 255
-        image_disp = 0.4 * input_rgb.astype(np.float32) + 0.6 * image_disp.astype(np.float32)
-        image_disp = image_disp.astype(np.uint8)
-        image_disp = np.clip(image_disp, 0, 255)
-        pose_msg = self.cv_bridge.cv2_to_imgmsg(image_disp)
-        pose_msg.header.stamp = rospy.Time.now()
-        pose_msg.header.frame_id = self.input_frame_id
-        pose_msg.encoding = 'rgb8'
-        self.pose_pub.publish(pose_msg)
-        #'''
+        # '''
+        if image_disp is not None:
+            pose_msg = self.cv_bridge.cv2_to_imgmsg(image_disp)
+            pose_msg.header.stamp = rospy.Time.now()
+            pose_msg.header.frame_id = self.input_frame_id
+            pose_msg.encoding = 'rgb8'
+            self.pose_pub.publish(pose_msg)
+            self.image_disp = image_disp
+        # '''
 
         # save data
         if save and self.gen_data:
@@ -615,15 +609,20 @@ class ImageListener:
 
     # function for pose etimation and tracking
     def process_image_multi_obj(self, rgb, depth, im_label, rois):
+
         image_rgb = rgb.astype(np.float32) / 255.0
         image_bgr = image_rgb[:, :, (2, 1, 0)]
         image_bgr = torch.from_numpy(image_bgr).cuda()
         im_label = torch.from_numpy(im_label).cuda()
 
         # backproject depth
-        dpoints = backproject(depth, self.intrinsic_matrix)
-        dpoints = torch.from_numpy(dpoints).float().cuda()
-        depth = torch.from_numpy(depth).float().cuda()
+        depth = torch.from_numpy(depth).cuda()
+        fx = self.intrinsic_matrix[0, 0]
+        fy = self.intrinsic_matrix[1, 1]
+        px = self.intrinsic_matrix[0, 2]
+        py = self.intrinsic_matrix[1, 2]
+        # dpoints = backproject(depth, self.intrinsic_matrix)
+        im_pcloud = posecnn_cuda.backproject_forward(fx, fy, px, py, depth)[0]
 
         # collect rois from rbpfs
         num_rbpfs = self.pose_rbpf.num_rbpfs
@@ -663,7 +662,7 @@ class ImageListener:
                             assigned_rois[index[j]] = 1
 
         elif num_rbpfs == 0 and num_rois == 0:
-            return False
+            return False, None
 
         # initialize new object
         if num_rois > 0:
@@ -675,19 +674,20 @@ class ImageListener:
         for i in range(num_rois):
             if assigned_rois[i]:
                 continue
+
             roi = rois[i]
             print('Initializing detection {} ... '.format(i))
             print(roi)
-            pose = self.pose_rbpf.estimation_poserbpf(roi, self.intrinsic_matrix, image_bgr, depth, dpoints, im_label)
+            self.pose_rbpf.estimation_poserbpf(roi, self.intrinsic_matrix, image_bgr, depth, im_pcloud, im_label, self.grasp_mode, self.grasp_cls)
 
             # pose evaluation
-            image_tensor, pcloud_tensor = self.pose_rbpf.render_image_all(self.intrinsic_matrix)
+            image_tensor, pcloud_tensor = self.pose_rbpf.render_image_all(self.intrinsic_matrix, self.grasp_mode, self.grasp_cls)
             cls = cfg.TEST.CLASSES[int(roi[1])]
-            sim, depth_error, vis_ratio = self.pose_rbpf.evaluate_6d_pose(self.pose_rbpf.rbpfs[-1].roi, pose, cls, \
+            sim, depth_error, vis_ratio = self.pose_rbpf.evaluate_6d_pose(self.pose_rbpf.rbpfs[-1].roi, self.pose_rbpf.rbpfs[-1].pose, cls, \
                 image_bgr, image_tensor, pcloud_tensor, depth, self.intrinsic_matrix, im_label)
             print('Initialization : Object: {}, Sim obs: {}, Depth Err: {:.3}, Vis Ratio: {:.2}'.format(i, sim, depth_error, vis_ratio))
 
-            if sim < cfg.PF.THRESHOLD_SIM or depth_error > cfg.PF.THRESHOLD_DEPTH or vis_ratio < cfg.PF.THRESHOLD_RATIO:
+            if sim < cfg.PF.THRESHOLD_SIM or torch.isnan(depth_error) or depth_error > cfg.PF.THRESHOLD_DEPTH or vis_ratio < cfg.PF.THRESHOLD_RATIO:
                 print('===================is NOT initialized!=================')
                 self.pose_rbpf.num_objects_per_class[self.pose_rbpf.rbpfs[-1].cls_id, self.pose_rbpf.rbpfs[-1].object_id] = 0
                 with lock_tf:
@@ -701,12 +701,12 @@ class ImageListener:
                         self.pose_rbpf.rbpfs[-1].graspable = True
                         self.pose_rbpf.rbpfs[-1].status = True
                         self.pose_rbpf.rbpfs[-1].need_filter = False
-        print('initialization time %.2f' % (rospy.Time.now() - start_time).to_sec())
+        print('initialization time %.6f' % (rospy.Time.now() - start_time).to_sec())
 
         # filter all the objects
         print('Filtering objects')
-        save = self.pose_rbpf.filtering_poserbpf(self.intrinsic_matrix, image_bgr, depth, dpoints, im_label, self.grasp_mode, self.grasp_cls)
-        print('*********full time %.2f' % (rospy.Time.now() - start_time).to_sec())
+        save, image_tensor = self.pose_rbpf.filtering_poserbpf(self.intrinsic_matrix, image_bgr, depth, im_pcloud, im_label, self.grasp_mode, self.grasp_cls)
+        print('*********full time %.6f' % (rospy.Time.now() - start_time).to_sec())
 
         # non-maximum suppression within class
         num = self.pose_rbpf.num_rbpfs
@@ -730,7 +730,15 @@ class ImageListener:
 
         if self.pose_rbpf.num_rbpfs == 0:
             save = False
-        return save & good_initial
+
+        # image to publish for visualization
+        if image_tensor is not None:
+            image_disp = (0.4 * image_bgr[:, :, (2, 1, 0)] + 0.6 * image_tensor) * 255
+        else:
+            image_disp = 0.4 * image_bgr[:, :, (2, 1, 0)] * 255
+        image_disp = torch.clamp(image_disp, 0, 255).byte().cpu().numpy()
+
+        return save & good_initial, image_disp
 
 
     # save data

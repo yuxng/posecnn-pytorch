@@ -13,49 +13,36 @@ import torch
 import torch.nn.parallel
 import torch.backends.cudnn as cudnn
 import torch.utils.data
-
 import tf
 import rosnode
 import message_filters
 import cv2
 import torch.nn as nn
 import threading
-
 import argparse
 import pprint
 import time, os, sys
 import os.path as osp
 import numpy as np
-
 import _init_paths
-from fcn.train_test import test, test_image
-from cv_bridge import CvBridge, CvBridgeError
-from fcn.config import cfg, cfg_from_file, get_output_dir, write_selected_class_file
-from datasets.factory import get_dataset
+import posecnn_cuda
 import networks
 import rospy
-#from listener import ImageListener
-from ycb_renderer import YCBRenderer
+import matplotlib.pyplot as plt
+import copy
 
-from fcn.config import cfg
-from fcn.train_test import test_image, test_image_simple
 from cv_bridge import CvBridge, CvBridgeError
+from fcn.config import cfg, cfg_from_file, get_output_dir
+from datasets.factory import get_dataset
+from fcn.train_test import render_image_detection
 from std_msgs.msg import String
 from sensor_msgs.msg import Image, CameraInfo
-from transforms3d.quaternions import mat2quat, quat2mat, qmult
-from scipy.optimize import minimize
-from utils.blob import pad_im, chromatic_transform, add_noise
 from geometry_msgs.msg import PoseStamped
-from ycb_renderer import YCBRenderer
+from visualization_msgs.msg import MarkerArray, Marker
+from transforms3d.quaternions import mat2quat, quat2mat, qmult
 from utils.se3 import *
 from utils.nms import *
 from utils.blob import pad_im
-from Queue import Queue
-from sdf.sdf_optimizer import *
-from fcn.pose_rbpf import *
-import matplotlib.pyplot as plt
-from rospy_tutorials.srv import *
-import copy
 
 lock = threading.Lock()
 
@@ -68,24 +55,23 @@ def ros_qt_to_rt(rot, trans):
     obj_T = np.eye(4)
     obj_T[:3, :3] = quat2mat(qt)
     obj_T[:3, 3] = trans
-
     return obj_T
+
 
 def get_relative_pose_from_tf(listener, source_frame, target_frame):
     first_time = True
     while True:
         try:
+            stamp = rospy.Time.now()
             init_trans, init_rot = listener.lookupTransform(target_frame, source_frame, rospy.Time(0))
             break
         except Exception as e:
             if first_time:
                 print(str(e))
-                # first_time = False
+                first_time = False
             continue
+    return ros_qt_to_rt(init_rot, init_trans), stamp
 
-    # print('got relative pose between {} and {}'.format(source_frame, target_frame))
-
-    return ros_qt_to_rt(init_rot, init_trans)
 
 class ImageListener:
 
@@ -94,14 +80,11 @@ class ImageListener:
         self.net = network
         self.dataset = dataset
         self.cv_bridge = CvBridge()
-        self.renders = dict()
 
         self.im = None
         self.depth = None
         self.rgb_frame_id = None
         self.rgb_frame_stamp = None
-        self.q_br = None
-        self.t_br = None
 
         suffix = '_%02d' % (cfg.instance_id)
         prefix = '%02d_' % (cfg.instance_id)
@@ -119,7 +102,6 @@ class ImageListener:
         self.label_pub = rospy.Publisher('posecnn_label' + fusion_type + suffix, Image, queue_size=10)
         self.rgb_pub = rospy.Publisher('posecnn_rgb' + fusion_type + suffix, Image, queue_size=10)
         self.depth_pub = rospy.Publisher('posecnn_depth' + fusion_type + suffix, Image, queue_size=10)
-        self.fk_pub = rospy.Publisher('posecnn/T_br' + fusion_type + suffix, PoseStamped, queue_size=10)  # gripper in base
         self.posecnn_pub = rospy.Publisher('posecnn_detection' + fusion_type + suffix, Image, queue_size=10)
 
         # create pose publisher for each known object class
@@ -132,25 +114,31 @@ class ImageListener:
             cls = cls + fusion_type
             self.pubs.append(rospy.Publisher('/objects/prior_pose/' + cls, PoseStamped, queue_size=10))
 
+        self.base_frame = 'measured/base_link'
         if cfg.TEST.ROS_CAMERA == 'ISAAC_SIM':
             # ISAAC SIM
             rgb_sub = message_filters.Subscriber('/sim/left_color_camera/image', Image, queue_size=10)
             depth_sub = message_filters.Subscriber('/sim/left_depth_camera/image', Image, queue_size=10)
             msg = rospy.wait_for_message('/sim/left_color_camera/camera_info', CameraInfo)
-            self.target_frame = 'measured/base_link'
+            self.target_frame = self.base_frame
         elif cfg.TEST.ROS_CAMERA == 'D415':
             # use RealSense D435
             rgb_sub = message_filters.Subscriber('/camera/color/image_raw', Image, queue_size=10)
             depth_sub = message_filters.Subscriber('/camera/aligned_depth_to_color/image_raw', Image, queue_size=10)
             msg = rospy.wait_for_message('/camera/color/camera_info', CameraInfo)
             self.camera_frame = 'measured/camera_color_optical_frame'
-            self.target_frame = 'measured/base_link'
+            self.target_frame = self.base_frame
+            self.viz_pub = rospy.Publisher('/obj/mask_estimates/realsense', MarkerArray, queue_size=1)
         elif cfg.TEST.ROS_CAMERA == 'Azure':             
             rgb_sub = message_filters.Subscriber('/k4a/rgb/image_raw', Image, queue_size=10)
             depth_sub = message_filters.Subscriber('/k4a/depth_to_rgb/image_raw', Image, queue_size=10)
             msg = rospy.wait_for_message('/k4a/rgb/camera_info', CameraInfo)
             self.camera_frame = 'rgb_camera_link'
-            self.target_frame = 'measured/base_link'
+            self.target_frame = self.base_frame
+            self.viz_pub = rospy.Publisher('/obj/mask_estimates/azure', MarkerArray, queue_size=1)
+
+        # camera to base transformation
+        self.Tbc_now = np.eye(4, dtype=np.float32)
 
         # update camera intrinsics
         K = np.array(msg.K).reshape(3, 3)
@@ -162,19 +150,32 @@ class ImageListener:
         ts = message_filters.ApproximateTimeSynchronizer([rgb_sub, depth_sub], queue_size, slop_seconds)
         ts.registerCallback(self.callback_rgbd)
 
-        # posecnn service (based on the predefined service in the tutorial)
-        self.run_posecnn_flag = False
-        s = rospy.Service('run_posecnn', AddTwoInts, self.set_run_posecnn_flag)
+        # use fake label blob
+        num_classes = dataset.num_classes
+        height = cfg.TRAIN.SYN_HEIGHT
+        width = cfg.TRAIN.SYN_WIDTH
+        label_blob = np.zeros((1, num_classes, height, width), dtype=np.float32)
+        pose_blob = np.zeros((1, num_classes, 9), dtype=np.float32)
+        gt_boxes = np.zeros((1, num_classes, 5), dtype=np.float32)
 
-    def set_run_posecnn_flag(self, req):
-        print("run posecnn on current image ! ")
-        self.run_posecnn_flag = bool(req.a)
-        return self.run_posecnn_flag
+        # construct the meta data
+        Kinv = np.linalg.pinv(K)
+        meta_data_blob = np.zeros((1, 18), dtype=np.float32)
+        meta_data_blob[0, 0:9] = K.flatten()
+        meta_data_blob[0, 9:18] = Kinv.flatten()
+
+        self.label_blob = torch.from_numpy(label_blob).cuda()
+        self.meta_data_blob = torch.from_numpy(meta_data_blob).cuda()
+        self.extents_blob = torch.from_numpy(dataset._extents).cuda()
+        self.gt_boxes_blob = torch.from_numpy(gt_boxes).cuda()
+        self.poses_blob = torch.from_numpy(pose_blob).cuda()
+        self.points_blob = torch.from_numpy(dataset._point_blob).cuda()
+        self.symmetry_blob = torch.from_numpy(dataset._symmetry).cuda()
+
 
     def callback_rgbd(self, rgb, depth):
 
-        if cfg.TEST.ROS_CAMERA == 'D415':
-            Tbr = get_relative_pose_from_tf(self.listener, self.camera_frame, self.target_frame)
+        self.Tbc_now, self.Tbc_stamp = get_relative_pose_from_tf(self.listener, self.camera_frame, self.base_frame)
 
         if depth.encoding == '32FC1':
             depth_cv = self.cv_bridge.imgmsg_to_cv2(depth)
@@ -200,41 +201,76 @@ class ImageListener:
             self.depth = depth_cv.copy()
             self.rgb_frame_id = rgb.header.frame_id
             self.rgb_frame_stamp = rgb.header.stamp
-            if cfg.TEST.ROS_CAMERA == 'D415':
-                self.q_br = mat2quat(Tbr[:3, :3]).copy()
-                self.t_br = Tbr[:3, 3].copy()
+
 
     def run_network(self):
 
         with lock:
             if listener.im is None:
               return
-            im = self.im.copy()
+            im_color = self.im.copy()
             depth_cv = self.depth.copy()
             rgb_frame_id = self.rgb_frame_id
             rgb_frame_stamp = self.rgb_frame_stamp
-            if cfg.TEST.ROS_CAMERA == 'D415':
-                q_br = self.q_br.copy()
-                t_br = self.t_br.copy()
+            input_Tbc = self.Tbc_now.copy()
+            input_Tbc_stamp = self.Tbc_stamp
 
         print('===========================================')
-        rois, seg_im, poses, im_label = test_image_simple(self.net, self.dataset, im, depth_cv)
-        self.run_posecnn_flag = False
+
+        # compute image blob
+        im = im_color.astype(np.float32, copy=True)
+        im -= cfg.PIXEL_MEANS
+        height = im.shape[0]
+        width = im.shape[1]
+        im = np.transpose(im / 255.0, (2, 0, 1))
+        im = im[np.newaxis, :, :, :]
+        inputs = torch.from_numpy(im).cuda()
+
+        # tranform to gpu
+        Tbc = torch.from_numpy(input_Tbc).cuda().float()
+
+        # backproject depth
+        depth = torch.from_numpy(depth_cv).cuda()
+        fx = self.dataset._intrinsic_matrix[0, 0]
+        fy = self.dataset._intrinsic_matrix[1, 1]
+        px = self.dataset._intrinsic_matrix[0, 2]
+        py = self.dataset._intrinsic_matrix[1, 2]
+        im_pcloud = posecnn_cuda.backproject_forward(fx, fy, px, py, depth)[0]
+
+        # compare the depth
+        depth_meas_roi = im_pcloud[:, :, 2]
+        mask_depth_meas = depth_meas_roi > 0
+        mask_depth_valid = torch.isfinite(depth_meas_roi)
+
+        # forward
+        cfg.TRAIN.POSE_REG = False
+        out_label, out_vertex, rois, out_pose = self.net(inputs, self.label_blob, self.meta_data_blob, 
+                                                         self.extents_blob, self.gt_boxes_blob, self.poses_blob, self.points_blob, self.symmetry_blob)
+        label_tensor = out_label[0]
+        labels = label_tensor.detach().cpu().numpy()
+
+        # filter out detections
+        rois = rois.detach().cpu().numpy()
+        index = np.where(rois[:, -1] > cfg.TEST.DET_THRESHOLD)[0]
+        rois = rois[index, :]
+
+        # non-maximum suppression within class
+        index = nms(rois, 0.5)
+        rois = rois[index, :]
+
+        # render output image
+        im_label = render_image_detection(self.dataset, im_color, rois, labels)
         rgb_msg = self.cv_bridge.cv2_to_imgmsg(im_label, 'rgb8')
         rgb_msg.header.stamp = rgb_frame_stamp
         rgb_msg.header.frame_id = rgb_frame_id
         self.posecnn_pub.publish(rgb_msg)
 
         # publish segmentation mask
-        label_msg = self.cv_bridge.cv2_to_imgmsg(seg_im.astype(np.uint8))
+        label_msg = self.cv_bridge.cv2_to_imgmsg(labels.astype(np.uint8))
         label_msg.header.stamp = rgb_frame_stamp
         label_msg.header.frame_id = rgb_frame_id
         label_msg.encoding = 'mono8'
         self.label_pub.publish(label_msg)
-
-        # forward kinematics
-        if cfg.TEST.ROS_CAMERA == 'D415':
-            self.br.sendTransform(t_br, [q_br[1], q_br[2], q_br[3], q_br[0]], rgb_frame_stamp, 'posecnn_camera_link', 'measured/base_link')
 
         if not rois.shape[0]:
             return
@@ -245,30 +281,127 @@ class ImageListener:
         indexes = np.zeros((self.dataset.num_classes, ), dtype=np.int32)
         index = np.argsort(rois[:, 2])
         rois = rois[index, :]
-        poses = poses[index, :]
+        now = rospy.Time.now()
+        markers = []
         for i in range(rois.shape[0]):
-            cls = int(rois[i, 1])
-            if cls > 0 and rois[i, -1] > cfg.TEST.DET_THRESHOLD:
-                if not np.any(poses[i, 4:]):
-                    continue
+            roi = rois[i]
+            cls = int(roi[1])
+            cls_name = self.dataset._classes_test[cls]
+            if cls > 0 and roi[-1] > cfg.TEST.DET_THRESHOLD:
 
+                # compute mask translation
+                w = roi[4] - roi[2]
+                h = roi[5] - roi[3]
+                x1 = max(int(roi[2]), 0)
+                y1 = max(int(roi[3]), 0)
+                x2 = min(int(roi[4]), width - 1)
+                y2 = min(int(roi[5]), height - 1)
+
+                labels = torch.zeros_like(label_tensor)
+                labels[y1:y2, x1:x2] = label_tensor[y1:y2, x1:x2]
+                mask_label = labels == cls
+                mask = mask_label * mask_depth_meas * mask_depth_valid
+                pix_index = torch.nonzero(mask)
+                n = pix_index.shape[0]
+                print('[%s] points : %d' % (cls_name, n))
+                if n == 0:
+                    '''
+                    fig = plt.figure()
+                    ax = fig.add_subplot(1, 2, 1)
+                    plt.imshow(depth.cpu().numpy())
+                    ax.set_title('depth')
+
+                    ax = fig.add_subplot(1, 2, 2)
+                    plt.imshow(im_label.cpu().numpy())
+                    plt.gca().add_patch(plt.Rectangle((x1, y1), x2-x1, y2-y1, fill=False, edgecolor='g', linewidth=3, clip_on=False))
+                    ax.set_title('label')
+                    plt.show()
+                    '''
+                    continue
+                points = im_pcloud[pix_index[:, 0], pix_index[:, 1], :]
+
+                # filter points
+                m = torch.mean(points, dim=0, keepdim=True)
+                mpoints = m.repeat(n, 1)
+                distance = torch.norm(points - mpoints, dim=1)
+                extent = np.mean(self.dataset._extents_test[cls, :])
+                points = points[distance < 1.5 * extent, :]
+                if points.shape[0] == 0:
+                    continue
+            
+                # transform points to base
+                ones = torch.ones((points.shape[0], 1), dtype=torch.float32, device=0)
+                points = torch.cat((points, ones), dim=1)
+                points = torch.mm(Tbc, points.t())
+                location = torch.mean(points[:3, :], dim=1).cpu().numpy()
+                if location[2] > 2.5:
+                    continue
+                print('[%s] detection score: %f' % (cls_name, roi[-1]))
+                print('[%s] location mean: %f, %f, %f' % (cls_name, location[0], location[1], location[2]))
+
+                # extend the location away from camera a bit
+                c = Tbc[:3, 3].cpu().numpy()
+                d = location - c
+                d = d / np.linalg.norm(d)
+                location = location + (extent / 2) * d
+
+                # publish tf raw
+                self.br.sendTransform(location, [0, 0, 0, 1], now, self.prefix + cls_name + '_raw', self.target_frame)
+
+                # project location to base plane
+                location[2] = extent / 2
+                print('[%s] location mean on table: %f, %f, %f' % (cls_name, location[0], location[1], location[2]))
+                print('-------------------------------------------')
+
+                # publish tf
+                self.br.sendTransform(location, [0, 0, 0, 1], now, self.prefix + cls_name, self.target_frame)
+
+                # publish tf detection
                 if self.dataset.classes[cls][3] == '_':
-                    name = self.prefix + self.dataset.classes[cls][4:]
+                    name = self.prefix + cls_name[4:]
                 else:
-                    name = self.prefix + self.dataset.classes[cls]
+                    name = self.prefix + cls_name
                 name = name + fusion_type
                 indexes[cls] += 1
                 name = name + '_%02d' % (indexes[cls])
                 tf_name = os.path.join("posecnn", name)
 
                 # send another transformation as bounding box (mis-used)
-                n = np.linalg.norm(rois[i, 2:6])
-                x1 = rois[i, 2] / n
-                y1 = rois[i, 3] / n
-                x2 = rois[i, 4] / n
-                y2 = rois[i, 5] / n
-                now = rospy.Time.now()
-                self.br.sendTransform([n, now.secs, rois[i, 6]], [x1, y1, x2, y2], now, tf_name + '_roi', self.target_frame)
+                n = np.linalg.norm(roi[2:6])
+                x1 = roi[2] / n
+                y1 = roi[3] / n
+                x2 = roi[4] / n
+                y2 = roi[5] / n
+                self.br.sendTransform([n, now.secs, roi[6]], [x1, y1, x2, y2], now, tf_name + '_roi', self.target_frame)
+
+                # publish marker
+                marker = Marker()
+                marker.header.frame_id = self.target_frame
+                marker.header.stamp = now
+                marker.id = cls
+                marker.type = Marker.SPHERE;
+                marker.action = Marker.ADD;
+                marker.pose.position.x = location[0]
+                marker.pose.position.y = location[1]
+                marker.pose.position.z = location[2]
+                marker.pose.orientation.x = 0.
+                marker.pose.orientation.y = 0.
+                marker.pose.orientation.z = 0.
+                marker.pose.orientation.w = 1.
+                marker.scale.x = .05
+                marker.scale.y = .05
+                marker.scale.z = .05
+
+                if cfg.TEST.ROS_CAMERA == 'Azure':
+                    marker.color.a = .3
+                elif cfg.TEST.ROS_CAMERA == 'D415':
+                    marker.color.a = 1.
+                marker.color.r = self.dataset._class_colors_test[cls][0] / 255.0
+                marker.color.g = self.dataset._class_colors_test[cls][1] / 255.0
+                marker.color.b = self.dataset._class_colors_test[cls][2] / 255.0
+                markers.append(marker)
+        self.viz_pub.publish(MarkerArray(markers))
+
 
 def parse_args():
     """

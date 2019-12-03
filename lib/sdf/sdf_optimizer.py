@@ -7,59 +7,69 @@ from fcn.config import cfg
 from layers.sdf_matching_loss import SDFLoss
 
 class sdf_optimizer():
-    def __init__(self, sdf_file, lr=0.01, optimizer='Adam', use_gpu=True):
+    def __init__(self, classes, sdf_files, lr=0.01, optimizer='Adam', use_gpu=True):
 
-        self.sdf_file = sdf_file
+        self.classes = classes
+        self.sdf_files = sdf_files
         self.use_gpu = use_gpu
-        print(' start loading sdf from {} ... '.format(sdf_file))
+        num = len(sdf_files)
+        self.xmins = np.zeros((num, ), dtype=np.float32)
+        self.ymins = np.zeros((num, ), dtype=np.float32)
+        self.zmins = np.zeros((num, ), dtype=np.float32)
+        self.xmaxs = np.zeros((num, ), dtype=np.float32)
+        self.ymaxs = np.zeros((num, ), dtype=np.float32)
+        self.zmaxs = np.zeros((num, ), dtype=np.float32)
 
-        if sdf_file[-3:] == 'sdf':
-            sdf_info = read_sdf(sdf_file)
-            sdf = sdf_info[0]
-            min_coords = sdf_info[1]
-            delta = sdf_info[2]
-            max_coords = min_coords + delta * np.array(sdf.shape)
-            self.xmin, self.ymin, self.zmin = min_coords
-            self.xmax, self.ymax, self.zmax = max_coords
-            self.sdf_torch = torch.from_numpy(sdf).float()
-        elif sdf_file[-3:] == 'pth':
-            sdf_info = torch.load(sdf_file)
-            min_coords = sdf_info['min_coords']
-            max_coords = sdf_info['max_coords']
-            self.xmin, self.ymin, self.zmin = min_coords
-            self.xmax, self.ymax, self.zmax = max_coords
-            self.sdf_torch = sdf_info['sdf_torch'][0, 0].permute(1, 0, 2)
+        sdf_torch_list = []
+        for i in range(len(sdf_files)):
+            sdf_file = sdf_files[i]
+            print(' start loading sdf from {} ... '.format(sdf_file))
+
+            if sdf_file[-3:] == 'sdf':
+                sdf_info = read_sdf(sdf_file)
+                sdf = sdf_info[0]
+                min_coords = sdf_info[1]
+                delta = sdf_info[2]
+                max_coords = min_coords + delta * np.array(sdf.shape)
+                self.xmins[i], self.ymins[i], self.zmins[i] = min_coords
+                self.xmaxs[i], self.ymaxs[i], self.zmaxs[i] = max_coords
+                sdf_torch_list.append(torch.from_numpy(sdf).float())
+            elif sdf_file[-3:] == 'pth':
+                sdf_info = torch.load(sdf_file)
+                min_coords = sdf_info['min_coords']
+                max_coords = sdf_info['max_coords']
+                self.xmins[i], self.ymins[i], self.zmins[i] = min_coords
+                self.xmaxs[i], self.ymaxs[i], self.zmaxs[i] = max_coords
+                sdf_torch_list.append(sdf_info['sdf_torch'][0, 0].permute(1, 0, 2))
+
+            print('     minimal coordinate = ({:.4f}, {:.4f}, {:.4f}) cm'.format(self.xmins[i] * 100, self.ymins[i] * 100, self.zmins[i] * 100))
+            print('     maximal coordinate = ({:.4f}, {:.4f}, {:.4f}) cm'.format(self.xmaxs[i] * 100, self.ymaxs[i] * 100, self.zmaxs[i] * 100))
+            print(' finished loading sdf ! ')
+
+        # combine sdfs
+        max_shape = np.array([sdf.shape for sdf in sdf_torch_list]).max(axis=0)
+        self.sdf_torch = torch.ones((num, max_shape[0], max_shape[1], max_shape[2]), dtype=torch.float32)
+        self.sdf_limits = np.zeros((num, 9), dtype=np.float32)
+        for i in range(num):
+            size = sdf_torch_list[i].shape
+            self.sdf_torch[i, :size[0], :size[1], :size[2]] = sdf_torch_list[i]
+            self.sdf_limits[i, 0] = self.xmins[i]
+            self.sdf_limits[i, 1] = self.ymins[i]
+            self.sdf_limits[i, 2] = self.zmins[i]
+            self.sdf_limits[i, 3] = self.xmaxs[i]
+            self.sdf_limits[i, 4] = self.ymaxs[i]
+            self.sdf_limits[i, 5] = self.zmaxs[i]
+            self.sdf_limits[i, 6] = size[0]
+            self.sdf_limits[i, 7] = size[1]
+            self.sdf_limits[i, 8] = size[2]
+        self.sdf_limits = torch.from_numpy(self.sdf_limits)
 
         if self.use_gpu:
             self.sdf_torch = self.sdf_torch.cuda()
-
-        print('     minimal coordinate = ({:.4f}, {:.4f}, {:.4f}) cm'.format(self.xmin * 100, self.ymin * 100, self.zmin * 100))
-        print('     maximal coordinate = ({:.4f}, {:.4f}, {:.4f}) cm'.format(self.xmax * 100, self.ymax * 100, self.zmax * 100))
-        print(' finished loading sdf ! ')
-
-        if use_gpu:
-            self.dpose = torch.tensor([0, 0, 0, 1e-12, 1e-12, 1e-12], dtype=torch.float32, requires_grad=True, device=0)
-            self.sdf_limits = torch.tensor([self.xmin, self.ymin, self.zmin, self.xmax, self.ymax, self.zmax], \
-                                           dtype=torch.float32, requires_grad=False, device=0)
-        else:
-            self.dpose = torch.tensor([0, 0, 0, 1e-12, 1e-12, 1e-12], dtype=torch.float32, requires_grad=True)
-            self.sdf_limits = torch.tensor([self.xmin, self.ymin, self.zmin, self.xmax, self.ymax, self.zmax], \
-                                           dtype=torch.float32, requires_grad=False)
+            self.sdf_limits = self.sdf_limits.cuda()
 
         self.sdf_loss = SDFLoss()
-        self.optimizer = optim.Adam([self.dpose], lr=lr)
 
-        self.optimizer_type = optimizer
-        if optimizer == 'Adam':
-            self.optimizer = optim.Adam([self.dpose], lr=lr)
-            self.loss = nn.MSELoss(reduction='sum')
-        elif optimizer == 'LBFGS':
-            self.optimizer = optim.LBFGS([self.dpose], lr=0.05, max_iter=10)
-            self.loss = nn.L1Loss(reduction='sum')
-
-        self.dist = None
-        if use_gpu:
-            self.loss = self.loss.cuda()
 
     def look_up(self, samples_x, samples_y, samples_z):
         samples_x = torch.clamp(samples_x, self.xmin, self.xmax)
@@ -148,20 +158,17 @@ class sdf_optimizer():
         return T_co_opt, dist
 
 
-    def refine_pose_layer(self, T_co_0, points, steps=100):
-        # input T_co_0: 4x4
+    def refine_pose_layer(self, T_oc_0, points, steps=100):
+        # input T_co_0: mx4x4, m is the number of objects
         #       points: nx3 in camera
 
         # construct initial pose
-        T_oc_0 = np.linalg.inv(T_co_0)
+        pose_init = torch.from_numpy(T_oc_0).cuda()
 
-        if self.use_gpu:
-            pose_init = torch.from_numpy(T_oc_0).cuda()
-        else:
-            pose_init = torch.from_numpy(T_oc_0)
-
-        self.dpose.data[:3] *= 0
-        self.dpose.data[3:] = self.dpose.data[3:] * 0 + 1e-12
+        m = T_oc_0.shape[0]
+        dpose = torch.zeros((m, 6), dtype=torch.float32, requires_grad=True, device=0)
+        dpose.data[:, :3] *= 0
+        dpose.data[:, 3:] = dpose.data[:, 3:] * 0 + 1e-12
         treg = cfg.TEST.SDF_TRANSLATION_REG
         rreg = cfg.TEST.SDF_ROTATION_REG
         regularization = torch.tensor([treg, treg, treg, rreg, rreg, rreg], dtype=torch.float32, requires_grad=False, device=0)
@@ -170,7 +177,7 @@ class sdf_optimizer():
         for i in range(steps):
 
             # self.optimizer.zero_grad()
-            loss, sdf_values, T_oc_opt, dalpha, J = self.sdf_loss(self.dpose, pose_init, self.sdf_torch, self.sdf_limits, points, regularization)
+            loss, sdf_values, T_oc_opt, dalpha, J = self.sdf_loss(dpose, pose_init, self.sdf_torch, self.sdf_limits, points, regularization)
             # print(loss)
             # loss.backward()
             # self.optimizer.step()
@@ -178,13 +185,10 @@ class sdf_optimizer():
             # JTJ = JTJ.cpu().detach().numpy() + np.diag([100, 100, 100, 0.001, 0.001, 0.001]).astype(np.float32)
             # J = J.cpu().detach().numpy()
             # dalpha = torch.from_numpy(np.matmul(np.linalg.inv(JTJ), J)).cuda()
-            self.dpose = self.dpose - dalpha
-            # print('step', i, dalpha)
+            dpose = dpose - dalpha
 
             # self.dpose = self.dpose - 0.001 * J
 
         end = time.time()
         print('sdf refinement iterations %d, time %f' % (steps, end - start))
-
-        T_co_opt = np.linalg.inv(T_oc_opt.cpu().detach().numpy())
-        return T_co_opt, sdf_values
+        return T_oc_opt.cpu().detach().numpy()

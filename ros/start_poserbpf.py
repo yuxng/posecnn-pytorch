@@ -27,7 +27,6 @@ def parse_args():
     Parse input arguments
     """
     parser = argparse.ArgumentParser(description='Start PoseRBPF ROS Node with Multiple Object Models')
-    parser = argparse.ArgumentParser(description='Test a PoseCNN network')
     parser.add_argument('--gpu', dest='gpu_id', help='GPU id to use',
                         default=0, type=int)
     parser.add_argument('--instance', dest='instance_id', help='PoseCNN instance id to use',
@@ -112,9 +111,10 @@ if __name__ == '__main__':
 
     # load sdfs
     print('loading SDFs')
-    cfg.sdf_optimizers = []
+    sdf_files = []
     for i in cfg.TEST.CLASSES[1:]:
-        cfg.sdf_optimizers.append(sdf_optimizer(dataset.model_sdf_paths[i-1]))
+        sdf_files.append(dataset.model_sdf_paths[i-1])
+    cfg.sdf_optimizer = sdf_optimizer(cfg.TEST.CLASSES[1:], sdf_files)
 
     # prepare autoencoder and codebook
     pose_rbpf = PoseRBPF(dataset, args.pretrained, args.codebook)

@@ -86,10 +86,17 @@ inline __device__ __host__ float3 getGradientInterpolated(const float3 & pGrid, 
 }
 
 
+/*******************************************/
+/* pose_delta: num_objects x 6             */
+/* pose_init: num_objects x 4 x 4          */
+/* sdf_grid: num_classes x c x h x w       */
+/* sdf_limits: num_classes x 9             */
+/* points: num_points x 5                  */
+/*******************************************/
 template <typename Dtype>
 __global__ void SDFdistanceForward(const int nthreads, const Dtype* pose_delta, const Dtype* pose_init,
     const Dtype* sdf_grids, const Dtype* sdf_limits, const Dtype* points, 
-    const int num_points, const int d0, const int d1, const int d2, Dtype* losses, Dtype* top_values, 
+    const int num_points, Dtype* losses, Dtype* top_values, 
     Dtype* diffs, Dtype* JTJ, Dtype* top_se3) 
 {
   typedef Sophus::SE3<Dtype> SE3;
@@ -98,47 +105,60 @@ __global__ void SDFdistanceForward(const int nthreads, const Dtype* pose_delta, 
   // index is the index of point
   CUDA_1D_KERNEL_LOOP(index, nthreads) 
   {
+    int cls_index = int(points[5 * index + 3]);
+    int obj_index = int(points[5 * index + 4]);
+    int start_index;
+
     // convert delta pose
     Eigen::Matrix<Dtype,6,1> deltaPose;
-    deltaPose << pose_delta[0], pose_delta[1], pose_delta[2], pose_delta[3], pose_delta[4], pose_delta[5];
+    start_index = 6 * obj_index;
+    deltaPose << pose_delta[start_index + 0], pose_delta[start_index + 1], pose_delta[start_index + 2], 
+                 pose_delta[start_index + 3], pose_delta[start_index + 4], pose_delta[start_index + 5];
     SE3 deltaPoseMatrix = SE3::exp(deltaPose);
 
     // convert initial pose
     Eigen::Matrix<Dtype,4,4> initialPose;
-    initialPose << pose_init[0], pose_init[1], pose_init[2], pose_init[3],
-                   pose_init[4], pose_init[5], pose_init[6], pose_init[7],
-                   pose_init[8], pose_init[9], pose_init[10], pose_init[11],
-                   pose_init[12], pose_init[13], pose_init[14], pose_init[15];
+    start_index = 16 * obj_index;
+    initialPose << pose_init[start_index + 0], pose_init[start_index + 1], pose_init[start_index + 2], pose_init[start_index + 3],
+                   pose_init[start_index + 4], pose_init[start_index + 5], pose_init[start_index + 6], pose_init[start_index + 7],
+                   pose_init[start_index + 8], pose_init[start_index + 9], pose_init[start_index + 10], pose_init[start_index + 11],
+                   pose_init[start_index + 12], pose_init[start_index + 13], pose_init[start_index + 14], pose_init[start_index + 15];
     SE3 initialPoseMatrix = SE3(initialPose);
 
-    if (index == 0)
+    // start point of a new object
+    if (index == 0 || int(points[5 * (index-1) + 4]) != obj_index)
     {
       SE3 pose = deltaPoseMatrix * initialPoseMatrix;
       Eigen::Matrix<Dtype,3,4> matrix = pose.matrix3x4();
       int count = 0;
+      start_index = 16 * obj_index;
       for (int i = 0; i < 3; i++)
       {
         for (int j = 0; j < 4; j++)
-          top_se3[count++] = matrix(i, j);
+          top_se3[start_index + count++] = matrix(i, j);
       }
-      top_se3[15] = 1.0;
+      top_se3[start_index + 15] = 1.0;
     }
 
     // convert point
     Vec3 point;
-    point << points[3 * index], points[3 * index + 1], points[3 * index + 2];
+    point << points[5 * index], points[5 * index + 1], points[5 * index + 2];
 
     // transform the point
     const Vec3 updatedPoint = deltaPoseMatrix * initialPoseMatrix * point;
 
     // obtain sdf value
-    float px = (updatedPoint(0) - sdf_limits[0]) / (sdf_limits[3] - sdf_limits[0]) * d0;
-    float py = (updatedPoint(1) - sdf_limits[1]) / (sdf_limits[4] - sdf_limits[1]) * d1;
-    float pz = (updatedPoint(2) - sdf_limits[2]) / (sdf_limits[5] - sdf_limits[2]) * d2;
+    start_index = 9 * cls_index;
+    int d0 = int(sdf_limits[start_index + 6]);
+    int d1 = int(sdf_limits[start_index + 7]);
+    int d2 = int(sdf_limits[start_index + 8]);
+    float px = (updatedPoint(0) - sdf_limits[start_index + 0]) / (sdf_limits[start_index + 3] - sdf_limits[start_index + 0]) * d0;
+    float py = (updatedPoint(1) - sdf_limits[start_index + 1]) / (sdf_limits[start_index + 4] - sdf_limits[start_index + 1]) * d1;
+    float pz = (updatedPoint(2) - sdf_limits[start_index + 2]) / (sdf_limits[start_index + 5] - sdf_limits[start_index + 2]) * d2;
 
     float3 pGrid = make_float3(px, py, pz);
     int3 dim = make_int3(d0, d1, d2);
-    Dtype value = getValueInterpolated(pGrid, dim, sdf_grids);
+    Dtype value = getValueInterpolated(pGrid, dim, sdf_grids + cls_index * d0 * d1 * d2);
 
     // L2 loss
     int flag = 1;
@@ -149,13 +169,13 @@ __global__ void SDFdistanceForward(const int nthreads, const Dtype* pose_delta, 
     losses[index] = 0.5 * value * value;
     top_values[index] = losses[index];
 
-    // L2 penalty on translation#include <Eigen/Dense>
+    // L2 penalty on translation
 
     // float lambda = 0.1;
     // losses[index] += 0.5 * lambda * (pose_delta[0] * pose_delta[0] + pose_delta[1] * pose_delta[1] + pose_delta[2] * pose_delta[2]);
 
     // compute gradient
-    float3 grad = getGradientInterpolated(pGrid, dim, sdf_grids);
+    float3 grad = getGradientInterpolated(pGrid, dim, sdf_grids + cls_index * d0 * d1 * d2);
     Vec3 sdfUpdate;
     sdfUpdate << grad.x, grad.y, grad.z;
 
@@ -186,29 +206,27 @@ __global__ void SDFdistanceForward(const int nthreads, const Dtype* pose_delta, 
 }
 
 /* diffs: num_points x num_channels */
-/* bottom_diff: num_channels */
+/* bottom_diff: num_objects x num_channels */
 template <typename Dtype>
-__global__ void sum_gradients(const int nthreads, const Dtype* diffs, const int num_points, Dtype* bottom_diff) 
+__global__ void sum_gradients(const int nthreads, const Dtype* diffs, const int num_channels, const Dtype* points, Dtype* bottom_diff) 
 {
   CUDA_1D_KERNEL_LOOP(index, nthreads) 
   {
-    bottom_diff[index] = 0;
-    int num_channels = nthreads;
-    for (int p = 0; p < num_points; p++)
-    {
-      int index_diff = p * num_channels + index;
-      bottom_diff[index] += diffs[index_diff];
-    }
+    int p = index / num_channels;
+    int c = index % num_channels;
+    int obj_index = int(points[5 * p + 4]);
+    atomicAdd(bottom_diff + obj_index * num_channels + c, diffs[index]);
   }
 }
 
 
-/***************************/
-/* pose_delta: 1 x 6       */
-/* pose_init: 4 x 4        */
-/* sdf_grid: c x h x w     */
-/* points: n x 3           */
-/***************************/
+/*******************************************/
+/* pose_delta: num_objects x 6             */
+/* pose_init: num_objects x 4 x 4          */
+/* sdf_grid: num_classes x c x h x w       */
+/* sdf_limits: num_classes x 9             */
+/* points: num_points x 5                  */
+/*******************************************/
 std::vector<at::Tensor> sdf_loss_cuda_forward(
     at::Tensor pose_delta,
     at::Tensor pose_init,
@@ -222,27 +240,29 @@ std::vector<at::Tensor> sdf_loss_cuda_forward(
   const int kThreadsPerBlock = 512;
   const int num_channels = 6;
   int output_size;
-#include <Eigen/Dense>
+
+  // sizes
+  const int num_objects = pose_delta.size(0);
+  const int num_classes = sdf_grids.size(0);
+  const int num_points = points.size(0);
 
   // temp losses
-  const int num_points = points.size(0); 
-  const int3 dim = make_int3(sdf_grids.size(0), sdf_grids.size(1), sdf_grids.size(2));
   auto losses = at::zeros({num_points}, points.options());
   auto top_values = at::zeros({num_points}, points.options());
   auto top_data = at::zeros({1}, points.options());
-  auto top_se3 = at::zeros({4, 4}, points.options());
+  auto top_se3 = at::zeros({num_objects, 4, 4}, points.options());
 
   // temp diffs
   auto diffs = at::zeros({num_points, num_channels}, points.options());
   auto JTJ = at::zeros({num_points, num_channels, num_channels}, points.options());
-  auto bottom_diff = at::zeros({num_channels}, points.options());
-  auto bottom_JTJ = at::zeros({num_channels, num_channels}, points.options());
+  auto bottom_diff = at::zeros({num_objects, num_channels}, points.options());
+  auto bottom_JTJ = at::zeros({num_objects, num_channels, num_channels}, points.options());
 
   // compute the losses and gradients
   output_size = num_points;
   SDFdistanceForward<<<(output_size + kThreadsPerBlock - 1) / kThreadsPerBlock, kThreadsPerBlock>>>(
       output_size, pose_delta.data<float>(), pose_init.data<float>(), sdf_grids.data<float>(), sdf_limits.data<float>(),
-      points.data<float>(), num_points, dim.x, dim.y, dim.z, losses.data<float>(), top_values.data<float>(), 
+      points.data<float>(), num_points, losses.data<float>(), top_values.data<float>(), 
       diffs.data<float>(), JTJ.data<float>(), top_se3.data<float>());
   cudaDeviceSynchronize();
 
@@ -254,12 +274,13 @@ std::vector<at::Tensor> sdf_loss_cuda_forward(
   }
 
   // sum the diffs
-  output_size = num_channels;
+  output_size = num_points * num_channels;
   sum_gradients<<<(output_size + kThreadsPerBlock - 1) / kThreadsPerBlock, kThreadsPerBlock>>>(
-      output_size, diffs.data<float>(), num_points, bottom_diff.data<float>());
-  output_size = num_channels * num_channels;
+      output_size, diffs.data<float>(), num_channels, points.data<float>(), bottom_diff.data<float>());
+
+  output_size = num_points * num_channels * num_channels;
   sum_gradients<<<(output_size + kThreadsPerBlock - 1) / kThreadsPerBlock, kThreadsPerBlock>>>(
-      output_size, JTJ.data<float>(), num_points, bottom_JTJ.data<float>());
+      output_size, JTJ.data<float>(), num_channels * num_channels, points.data<float>(), bottom_JTJ.data<float>());
   cudaDeviceSynchronize();
 
   // sum the loss
@@ -275,26 +296,36 @@ std::vector<at::Tensor> sdf_loss_cuda_forward(
   }
 
   // compute Gauss Newton update
-  float* bottom_diff_host = (float*)malloc(num_channels * sizeof(float));
+  float* bottom_diff_host = (float*)malloc(num_objects * num_channels * sizeof(float));
   float* regularization_host = (float*)malloc(num_channels * sizeof(float));
-  float* bottom_JTJ_host = (float*)malloc(num_channels * num_channels * sizeof(float));
-  cudaMemcpy(bottom_diff_host, bottom_diff.data<float>(), num_channels * sizeof(float), cudaMemcpyDeviceToHost);
+  float* bottom_JTJ_host = (float*)malloc(num_objects * num_channels * num_channels * sizeof(float));
+  cudaMemcpy(bottom_diff_host, bottom_diff.data<float>(), num_objects * num_channels * sizeof(float), cudaMemcpyDeviceToHost);
   cudaMemcpy(regularization_host, regularization.data<float>(), num_channels * sizeof(float), cudaMemcpyDeviceToHost);
-  cudaMemcpy(bottom_JTJ_host, bottom_JTJ.data<float>(), num_channels * num_channels * sizeof(float), cudaMemcpyDeviceToHost);
+  cudaMemcpy(bottom_JTJ_host, bottom_JTJ.data<float>(), num_objects * num_channels * num_channels * sizeof(float), cudaMemcpyDeviceToHost);
 
   Eigen::Matrix<float,6,1> J_eigen;
   Eigen::Matrix<float,6,6> JTJ_eigen;
-  for (int i = 0; i < num_channels; i++)
+  float* dalpha_all = (float*)malloc(num_objects * num_channels * sizeof(float));
+  for (int k = 0; k < num_objects; k++)
   {
-    J_eigen(i) = bottom_diff_host[i];
-    for (int j = 0; j < num_channels; j++)
-      JTJ_eigen(i, j) = bottom_JTJ_host[i * num_channels + j];
-    JTJ_eigen(i, i) += regularization_host[i];
+    for (int i = 0; i < num_channels; i++)
+    {
+      J_eigen(i) = bottom_diff_host[k * num_channels + i];
+      for (int j = 0; j < num_channels; j++)
+        JTJ_eigen(i, j) = bottom_JTJ_host[k * num_channels * num_channels + i * num_channels + j];
+      JTJ_eigen(i, i) += regularization_host[i];
+    }
+    Eigen::Matrix<float,6,1> dalpha = JTJ_eigen.ldlt().solve(J_eigen);
+    for (int i = 0; i < num_channels; i++)
+      dalpha_all[k * num_channels + i] = dalpha(i);
   }
-  Eigen::Matrix<float,6,1> dalpha = JTJ_eigen.ldlt().solve(J_eigen);
 
-  auto bottom_delta = at::zeros({num_channels}, points.options());
-  cudaMemcpy(bottom_delta.data<float>(), dalpha.data(), num_channels * sizeof(float), cudaMemcpyHostToDevice);
+  auto bottom_delta = at::zeros({num_objects, num_channels}, points.options());
+  cudaMemcpy(bottom_delta.data<float>(), dalpha_all, num_objects * num_channels * sizeof(float), cudaMemcpyHostToDevice);
+  free(bottom_diff_host);
+  free(regularization_host);
+  free(bottom_JTJ_host);
+  free(dalpha_all);
 
   return {top_data, top_values, top_se3, bottom_delta, bottom_diff};
 }
@@ -319,9 +350,10 @@ std::vector<at::Tensor> sdf_loss_cuda_backward(
   const int kThreadsPerBlock = 512;
   int output_size;
   const int batch_size = bottom_diff.size(0);
-  auto grad_pose = at::zeros({batch_size}, bottom_diff.options());
+  const int num_channels = bottom_diff.size(1);
+  auto grad_pose = at::zeros({batch_size, num_channels}, bottom_diff.options());
 
-  output_size = batch_size;
+  output_size = batch_size * num_channels;
   SDFdistanceBackward<<<(output_size + kThreadsPerBlock - 1) / kThreadsPerBlock, kThreadsPerBlock>>>(
       output_size, grad_loss.data<float>(), bottom_diff.data<float>(), grad_pose.data<float>());
 
