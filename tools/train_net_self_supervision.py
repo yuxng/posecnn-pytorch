@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 # --------------------------------------------------------
 # FCN
@@ -27,7 +27,7 @@ import _init_paths
 import datasets
 import networks
 from fcn.config import cfg, cfg_from_file, get_output_dir, write_selected_class_file
-from fcn.train_test import train, train_autoencoder
+from fcn.train import train, train_autoencoder
 from datasets.factory import get_dataset
 from ycb_renderer import YCBRenderer
 
@@ -101,7 +101,7 @@ if __name__ == '__main__':
         if cfg.TRAIN.SYN_BACKGROUND_SPECIFIC:
             background_dataset = get_dataset('background_nvidia')
         else:
-            background_dataset = get_dataset('background_pascal')
+            background_dataset = get_dataset('background_coco')
     else:
         background_dataset = get_dataset('background_rgbd')
     background_loader = torch.utils.data.DataLoader(background_dataset, batch_size=cfg.TRAIN.IMS_PER_BATCH,
@@ -174,5 +174,5 @@ if __name__ == '__main__':
             print(filename)
 
         # update data loader
-        dataset = get_dataset(args.dataset_name)
-        dataloader = torch.utils.data.DataLoader(dataset, batch_size=cfg.TRAIN.IMS_PER_BATCH, shuffle=True, num_workers=0)
+        # dataset = get_dataset(args.dataset_name)
+        # dataloader = torch.utils.data.DataLoader(dataset, batch_size=cfg.TRAIN.IMS_PER_BATCH, shuffle=True, num_workers=0)

@@ -25,7 +25,7 @@ import glob
 import copy
 
 import _init_paths
-from fcn.train_test import test_image_with_mask
+from fcn.test_imageset import test_image_with_mask
 from fcn.config import cfg, cfg_from_file, get_output_dir, write_selected_class_file
 from datasets.factory import get_dataset
 import networks

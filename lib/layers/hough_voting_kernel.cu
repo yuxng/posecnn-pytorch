@@ -31,6 +31,36 @@ __device__ inline float angle_distance(int cx, int cy, int x, int y, float u, fl
 }
 
 
+__device__ inline float angle_distance_label(int cx, int cy, int x, int y, float u, float v,
+  int cls, const int height, const int width, const int* labelmap)
+{
+  float dx = cx - x;
+  float dy = cy - y;
+  float n1 = sqrt(u * u + v * v);
+  float n2 = sqrt(dx * dx + dy * dy);
+  float dot = u * dx + v * dy;
+  float distance = dot / (n1 * n2);
+
+  int num = 10;
+  int count = 0;
+  for (int i = 1; i <= num; i++)
+  {
+    float step = float(i) / float(num);
+    int px = int(x + step * dx);
+    int py = int(y + step * dy);
+    if (px >= 0 && px < width && py >= 0 && py < height)
+    {
+      if (labelmap[py * width + px] == cls)
+        count++;
+    }
+  }
+  if ((float)count / float(num) < 0.5)
+    distance = 0;
+
+  return distance;
+}
+
+
 __device__ inline void project_box(int cls, const float* extents, const float* meta_data, float distance, float factor, float* threshold)
 {
   float xHalf = extents[cls * 3 + 0] * 0.5;
@@ -119,7 +149,7 @@ __global__ void compute_hough_kernel(const int nthreads, float* hough_space, flo
       float d = exp(vertmap[offset]);
 
       // vote
-      if (angle_distance(cx, cy, x, y, u, v) > inlierThreshold)
+      if (angle_distance_label(cx, cy, x, y, u, v, cls, height, width, labelmap) > inlierThreshold)
       {
         project_box(cls, extents, meta_data, d, 0.6, &threshold);
         float dx = fabsf(x - cx);
@@ -152,7 +182,7 @@ __global__ void compute_hough_kernel(const int nthreads, float* hough_space, flo
         float v = vertmap[offset];
 
         // vote
-        if (angle_distance(cx, cy, x, y, u, v) > inlierThreshold)
+        if (angle_distance_label(cx, cy, x, y, u, v, cls, height, width, labelmap) > inlierThreshold)
         {
           project_box(cls, extents, meta_data, distance, 0.6, &threshold);
           float dx = fabsf(x - cx);
@@ -518,8 +548,10 @@ std::vector<at::Tensor> hough_voting_cuda_forward(
     int num_max_host;
     cudaMemcpy(&num_max_host, num_max.data<int>(), sizeof(int), cudaMemcpyDeviceToHost);
     if (num_max_host >= index_size)
+    {
+      printf("hough voting num_max: %d exceeds capacity %d\n", num_max_host, index_size);
       num_max_host = index_size;
-    // printf("num_max: %d\n", num_max_host);
+    }
     if (num_max_host > 0)
     {
       output_size = num_max_host;

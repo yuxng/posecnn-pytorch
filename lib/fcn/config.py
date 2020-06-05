@@ -22,6 +22,11 @@ import numpy as np
 import math
 # `pip install easydict` if you don't have it
 from easydict import EasyDict as edict
+import logging
+
+Log = logging.getLogger('trimesh')
+level = logging.getLevelName('ERROR')
+Log.setLevel(level)
 
 __C = edict()
 # Consumers can get config by:
@@ -50,6 +55,8 @@ __C.ANCHOR_SCALES = (8,16,32)
 __C.ANCHOR_RATIOS = (0.5,1,2)
 
 __C.FEATURE_STRIDE = 16
+__C.gpu_id = 0
+__C.instance_id = 0
 
 #
 # Training options
@@ -63,8 +70,8 @@ __C.TRAIN.SEGMENTATION = True
 __C.TRAIN.ITERNUM = 4
 __C.TRAIN.HEATUP = 4
 __C.TRAIN.GPUNUM = 1
-__C.TRAIN.CLASSES = (1,2,3)
-__C.TRAIN.SYMMETRY = (0,0,0)
+__C.TRAIN.CLASSES = (0,1,2,3)
+__C.TRAIN.SYMMETRY = (0,0,0,0)
 
 __C.TRAIN.SLIM = False
 __C.TRAIN.SINGLE_FRAME = False
@@ -93,6 +100,7 @@ __C.TRAIN.AFFINE = False
 __C.TRAIN.HOUGH_LABEL_THRESHOLD = 100
 __C.TRAIN.HOUGH_VOTING_THRESHOLD = -1
 __C.TRAIN.HOUGH_SKIP_PIXELS = -1
+__C.TRAIN.HOUGH_INLIER_THRESHOLD = 0.9
 
 # synthetic training
 __C.TRAIN.SYNTHESIZE = False
@@ -110,6 +118,8 @@ __C.TRAIN.SYN_TNEAR = 0.5
 __C.TRAIN.SYN_TFAR = 2.0
 __C.TRAIN.SYN_BACKGROUND_SPECIFIC = False
 __C.TRAIN.SYN_BACKGROUND_SUBTRACT_MEAN = False
+__C.TRAIN.SYN_BACKGROUND_CONSTANT_PROB = 0.1
+__C.TRAIN.SYN_BACKGROUND_AFFINE = False
 __C.TRAIN.SYN_SAMPLE_OBJECT = True
 __C.TRAIN.SYN_SAMPLE_POSE = True
 __C.TRAIN.SYN_STD_ROTATION = 15
@@ -120,6 +130,9 @@ __C.TRAIN.SYN_TNEAR = 0.5
 __C.TRAIN.SYN_TFAR = 2.0
 __C.TRAIN.SYN_BOUND = 0.4
 __C.TRAIN.SYN_SAMPLE_DISTRACTOR = True
+__C.TRAIN.SYN_CROP = False
+__C.TRAIN.SYN_CROP_SIZE = 224
+__C.TRAIN.SYN_TABLE_PROB = 0.8
 
 # autoencoder
 __C.TRAIN.BOOSTRAP_PIXELS = 20
@@ -238,11 +251,68 @@ __C.TRAIN.BBOX_NORMALIZE_MEANS = (0.0, 0.0, 0.0, 0.0)
 
 __C.TRAIN.BBOX_NORMALIZE_STDS = (0.1, 0.1, 0.2, 0.2)
 
+
+# embedding learning
+__C.TRAIN.EMBEDDING_ALPHA = 0.02
+__C.TRAIN.EMBEDDING_DELTA = 0.5
+__C.TRAIN.EMBEDDING_LAMBDA_INTRA = 1.0
+__C.TRAIN.EMBEDDING_LAMBDA_INTER = 1.0
+__C.TRAIN.EMBEDDING_CONTRASTIVE = False
+__C.TRAIN.EMBEDDING_PIXELWISE = False
+__C.TRAIN.EMBEDDING_PROTOTYPE = False
+__C.TRAIN.EMBEDDING_METRIC = 'euclidean'
+__C.TRAIN.EMBEDDING_NORMALIZATION = True
+__C.TRAIN.EMBEDDING_LOSS_WEIGHT_MATCH = 1.0
+__C.TRAIN.EMBEDDING_LOSS_WEIGHT_NONMATCH = 1.0
+__C.TRAIN.EMBEDDING_LOSS_WEIGHT_BACKGROUND = 1.0
+
+# region refinement network data processing
+__C.TRAIN.max_augmentation_tries = 10
+
+# Padding
+__C.TRAIN.padding_alpha = 1.0
+__C.TRAIN.padding_beta = 4.0
+__C.TRAIN.min_padding_percentage = 0.05
+
+# Erosion/Dilation
+__C.TRAIN.rate_of_morphological_transform = 0.9
+__C.TRAIN.label_dilation_alpha = 1.0
+__C.TRAIN.label_dilation_beta = 19.0
+__C.TRAIN.morphology_max_iters = 3
+
+# Translation
+__C.TRAIN.rate_of_translation = 0.7
+__C.TRAIN.translation_alpha = 1.0
+__C.TRAIN.translation_beta = 19.0
+__C.TRAIN.translation_percentage_min = 0.05
+
+# Rotation
+__C.TRAIN.rate_of_rotation = 0.7
+__C.TRAIN.rotation_angle_max = 10
+
+# ADD
+__C.TRAIN.rate_of_label_adding = 0.5
+__C.TRAIN.add_percentage_min = 0.1
+__C.TRAIN.add_percentage_max = 0.4
+
+# CUTTING
+__C.TRAIN.rate_of_label_cutting = 0.3
+__C.TRAIN.cut_percentage_min = 0.25
+__C.TRAIN.cut_percentage_max = 0.5
+
+# Ellipses
+__C.TRAIN.rate_of_ellipses = 0.8
+__C.TRAIN.num_ellipses_mean = 3
+__C.TRAIN.ellipse_gamma_base_shape = 1.0
+__C.TRAIN.ellipse_gamma_base_scale = 1.0
+__C.TRAIN.ellipse_size_percentage = 0.1
+
 #
 # Testing options
 #
 
 __C.TEST = edict()
+__C.TEST.GLOBAL_SEARCH = False
 __C.TEST.SEGMENTATION = True
 __C.TEST.SINGLE_FRAME = False
 __C.TEST.VERTEX_REG_2D = False
@@ -258,22 +328,24 @@ __C.TEST.SYNTHESIZE = False
 __C.TEST.ROS_CAMERA = 'camera'
 __C.TEST.DET_THRESHOLD = 0.5
 __C.TEST.BUILD_CODEBOOK = False
-__C.TEST.IMS_PER_BATCH = 2
+__C.TEST.IMS_PER_BATCH = 1
 __C.TEST.MEAN_SHIFT = False
 __C.TEST.CHECK_SIZE = False
 __C.TEST.NUM_SDF_ITERATIONS_INIT = 100
 __C.TEST.NUM_SDF_ITERATIONS_TRACKING = 50
-__C.TEST.SDF_TRANSLATION_REG = 100.0
-__C.TEST.SDF_ROTATION_REG = 0.001
+__C.TEST.SDF_TRANSLATION_REG = 10.0
+__C.TEST.SDF_ROTATION_REG = 0.1
 __C.TEST.NUM_LOST = 3
 __C.TEST.ALIGN_Z_AXIS = False
+__C.TEST.GEN_DATA = False
 
 # Hough voting
 __C.TEST.HOUGH_LABEL_THRESHOLD = 100
 __C.TEST.HOUGH_VOTING_THRESHOLD = -1
 __C.TEST.HOUGH_SKIP_PIXELS = -1
-__C.TEST.CLASSES = ()
-__C.TEST.SYMMETRY = (0,0,0)
+__C.TEST.HOUGH_INLIER_THRESHOLD = 0.9
+__C.TEST.CLASSES = (0,1,2,3)
+__C.TEST.SYMMETRY = (0,0,0,0)
 
 
 __C.TEST.ITERNUM = 4
@@ -387,9 +459,9 @@ def _merge_a_into_b(a, b):
     if type(a) is not edict:
         return
 
-    for k, v in a.iteritems():
+    for k, v in a.items():
         # a must specify keys that are in b
-        if not b.has_key(k):
+        if k not in b:
             raise KeyError('{} is not a valid config key'.format(k))
 
         # the types must match, too
@@ -415,6 +487,14 @@ def cfg_from_file(filename):
         yaml_cfg = edict(yaml.load(f))
 
     _merge_a_into_b(yaml_cfg, __C)
+
+
+def yaml_from_file(filename):
+    """Load a config file and merge it into the default options."""
+    import yaml
+    with open(filename, 'r') as f:
+        yaml_cfg = edict(yaml.load(f))
+    return yaml_cfg
 
 
 def write_selected_class_file(filename, index):

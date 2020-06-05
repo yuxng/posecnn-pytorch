@@ -26,27 +26,21 @@ import pprint
 import time, os, sys
 import os.path as osp
 import numpy as np
-
+import networks
+import rospy
 import _init_paths
-from fcn.train_test import test, test_image
+
 from cv_bridge import CvBridge, CvBridgeError
 from fcn.config import cfg, cfg_from_file, get_output_dir, write_selected_class_file
 from datasets.factory import get_dataset
-import networks
-import rospy
-#from listener import ImageListener
 from ycb_renderer import YCBRenderer
-
-from fcn.config import cfg
-from fcn.train_test import test_image, test_image_simple
-from cv_bridge import CvBridge, CvBridgeError
+from fcn.test_imageset import test_image, test_image_simple
 from std_msgs.msg import String
 from sensor_msgs.msg import Image, CameraInfo
 from transforms3d.quaternions import mat2quat, quat2mat, qmult
 from scipy.optimize import minimize
 from utils.blob import pad_im, chromatic_transform, add_noise
 from geometry_msgs.msg import PoseStamped
-from ycb_renderer import YCBRenderer
 from utils.se3 import *
 from utils.nms import *
 from Queue import Queue

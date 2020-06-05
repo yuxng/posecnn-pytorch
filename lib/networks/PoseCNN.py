@@ -12,6 +12,7 @@ from layers.point_matching_loss import PMLoss
 from layers.roi_target_layer import roi_target_layer
 from layers.pose_target_layer import pose_target_layer
 from fcn.config import cfg
+from networks.utils import log_softmax_high_dimension, softmax_high_dimension
 
 __all__ = [
     'posecnn', 'posecnn_rgbd',
@@ -39,36 +40,6 @@ def fc(in_planes, out_planes, relu=True):
 
 def upsample(scale_factor):
     return nn.Upsample(scale_factor=scale_factor, mode='bilinear')
-
-
-def log_softmax_high_dimension(input):
-    num_classes = input.size()[1]
-    m = torch.max(input, dim=1, keepdim=True)[0]
-    if input.dim() == 4:
-        d = input - m.repeat(1, num_classes, 1, 1)
-    else:
-        d = input - m.repeat(1, num_classes)
-    e = torch.exp(d)
-    s = torch.sum(e, dim=1, keepdim=True)
-    if input.dim() == 4:
-        output = d - torch.log(s.repeat(1, num_classes, 1, 1))
-    else:
-        output = d - torch.log(s.repeat(1, num_classes))
-    return output
-
-def softmax_high_dimension(input):
-    num_classes = input.size()[1]
-    m = torch.max(input, dim=1, keepdim=True)[0]
-    if input.dim() == 4:
-        e = torch.exp(input - m.repeat(1, num_classes, 1, 1))
-    else:
-        e = torch.exp(input - m.repeat(1, num_classes))
-    s = torch.sum(e, dim=1, keepdim=True)
-    if input.dim() == 4:
-        output = torch.div(e, s.repeat(1, num_classes, 1, 1))
-    else:
-        output = torch.div(e, s.repeat(1, num_classes))
-    return output
 
 
 class PoseCNN(nn.Module):
@@ -179,14 +150,16 @@ class PoseCNN(nn.Module):
             # hough voting
             if self.training:
                 self.hough_voting.is_train = 1
-                self.hough_voting.label_threshold=cfg.TRAIN.HOUGH_LABEL_THRESHOLD
-                self.hough_voting.voting_threshold=cfg.TRAIN.HOUGH_VOTING_THRESHOLD
-                self.hough_voting.skip_pixels=cfg.TRAIN.HOUGH_SKIP_PIXELS
+                self.hough_voting.label_threshold = cfg.TRAIN.HOUGH_LABEL_THRESHOLD
+                self.hough_voting.voting_threshold = cfg.TRAIN.HOUGH_VOTING_THRESHOLD
+                self.hough_voting.skip_pixels = cfg.TRAIN.HOUGH_SKIP_PIXELS
+                self.hough_voting.inlier_threshold = cfg.TRAIN.HOUGH_INLIER_THRESHOLD
             else:
                 self.hough_voting.is_train = 0
-                self.hough_voting.label_threshold=cfg.TEST.HOUGH_LABEL_THRESHOLD
-                self.hough_voting.voting_threshold=cfg.TEST.HOUGH_VOTING_THRESHOLD
-                self.hough_voting.skip_pixels=cfg.TEST.HOUGH_SKIP_PIXELS
+                self.hough_voting.label_threshold = cfg.TEST.HOUGH_LABEL_THRESHOLD
+                self.hough_voting.voting_threshold = cfg.TEST.HOUGH_VOTING_THRESHOLD
+                self.hough_voting.skip_pixels = cfg.TEST.HOUGH_SKIP_PIXELS
+                self.hough_voting.inlier_threshold = cfg.TEST.HOUGH_INLIER_THRESHOLD
             out_box, out_pose = self.hough_voting(out_label, out_vertex, meta_data, extents)
 
             # bounding box classification and regression branch
@@ -365,14 +338,16 @@ class PoseCNN_RGBD(nn.Module):
             # hough voting
             if self.training:
                 self.hough_voting.is_train = 1
-                self.hough_voting.label_threshold=cfg.TRAIN.HOUGH_LABEL_THRESHOLD
-                self.hough_voting.voting_threshold=cfg.TRAIN.HOUGH_VOTING_THRESHOLD
-                self.hough_voting.skip_pixels=cfg.TRAIN.HOUGH_SKIP_PIXELS
+                self.hough_voting.label_threshold = cfg.TRAIN.HOUGH_LABEL_THRESHOLD
+                self.hough_voting.voting_threshold = cfg.TRAIN.HOUGH_VOTING_THRESHOLD
+                self.hough_voting.skip_pixels = cfg.TRAIN.HOUGH_SKIP_PIXELS
+                self.hough_voting.inlier_threshold = cfg.TRAIN.HOUGH_INLIER_THRESHOLD
             else:
                 self.hough_voting.is_train = 0
-                self.hough_voting.label_threshold=cfg.TEST.HOUGH_LABEL_THRESHOLD
-                self.hough_voting.voting_threshold=cfg.TEST.HOUGH_VOTING_THRESHOLD
-                self.hough_voting.skip_pixels=cfg.TEST.HOUGH_SKIP_PIXELS
+                self.hough_voting.label_threshold = cfg.TEST.HOUGH_LABEL_THRESHOLD
+                self.hough_voting.voting_threshold = cfg.TEST.HOUGH_VOTING_THRESHOLD
+                self.hough_voting.skip_pixels = cfg.TEST.HOUGH_SKIP_PIXELS
+                self.hough_voting.inlier_threshold = cfg.TEST.HOUGH_INLIER_THRESHOLD
             out_box, out_pose = self.hough_voting(out_label, out_vertex, meta_data, extents)
 
             # bounding box classification and regression branch
@@ -446,24 +421,24 @@ def posecnn(num_classes, num_units, data=None):
 
     if data is not None:
         model_dict = model.state_dict()
-        print 'model keys'
-        print '================================================='
+        print('model keys')
+        print('=================================================')
         for k, v in model_dict.items():
-            print k
-        print '================================================='
+            print(k)
+        print('=================================================')
 
-        print 'data keys'
-        print '================================================='
+        print('data keys')
+        print('=================================================')
         for k, v in data.items():
-            print k
-        print '================================================='
+            print(k)
+        print('=================================================')
 
         pretrained_dict = {k: v for k, v in data.items() if k in model_dict and v.size() == model_dict[k].size()}
-        print 'load the following keys from the pretrained model'
-        print '================================================='
+        print('load the following keys from the pretrained model')
+        print('=================================================')
         for k, v in pretrained_dict.items():
-            print k
-        print '================================================='
+            print(k)
+        print('=================================================')
         model_dict.update(pretrained_dict) 
         model.load_state_dict(model_dict)
 
@@ -476,17 +451,17 @@ def posecnn_rgbd(num_classes, num_units, data=None):
 
     if data is not None:
         model_dict = model.state_dict()
-        print 'model keys'
-        print '================================================='
+        print('model keys')
+        print('=================================================')
         for k, v in model_dict.items():
-            print k
-        print '================================================='
+            print(k)
+        print('=================================================')
 
-        print 'data keys'
-        print '================================================='
+        print('data keys')
+        print('=================================================')
         for k, v in data.items():
-            print k
-        print '================================================='
+            print(k)
+        print('=================================================')
 
         # construct the dictionary for update
         update_dict = dict()
@@ -508,11 +483,11 @@ def posecnn_rgbd(num_classes, num_units, data=None):
                 if key in data:
                     update_dict[mk] = data[key]
 
-        print 'load the following keys from the pretrained model'
-        print '================================================='
+        print('load the following keys from the pretrained model')
+        print('=================================================')
         for k, v in update_dict.items():
-            print k
-        print '================================================='
+            print(k)
+        print('=================================================')
         model_dict.update(update_dict) 
         model.load_state_dict(model_dict)
 

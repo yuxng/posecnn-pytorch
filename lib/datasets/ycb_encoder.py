@@ -3,7 +3,6 @@ import os.path
 import cv2
 import random
 import glob
-import cPickle
 import torch
 import torch.utils.data as data
 import torchvision
@@ -12,6 +11,10 @@ import torch.nn.functional as F
 import numpy as np
 import numpy.random as npr
 import datasets
+try:
+    import cPickle  # Use cPickle on Python 2.7
+except ImportError:
+    import pickle as cPickle
 from fcn.config import cfg
 from transforms3d.quaternions import *
 from transforms3d.euler import *
@@ -90,6 +93,7 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         self._image_set = image_set
         self._ycb_object_path = self._get_default_path() if ycb_object_path is None \
                             else ycb_object_path
+        self._model_path = os.path.join(datasets.ROOT_DIR, 'data', 'models')
         self.root_path = self._ycb_object_path
 
         # define all the classes
@@ -99,14 +103,15 @@ class YCBEncoder(data.Dataset, datasets.imdb):
                          '051_large_clamp', '052_extra_large_clamp', '061_foam_brick', 'holiday_cup1', 'holiday_cup2', 'sanning_mug', \
                          '001_chips_can', 'block_red_big', 'block_green_big', 'block_blue_big', 'block_yellow_big', \
                          'block_red_small', 'block_green_small', 'block_blue_small', 'block_yellow_small', \
-                         'block_red_median', 'block_green_median', 'block_blue_median', 'block_yellow_median', 'fusion_duplo_dude')
+                         'block_red_median', 'block_green_median', 'block_blue_median', 'block_yellow_median', 
+                         'fusion_duplo_dude', 'cabinet_handle', 'industrial_dolly')
         self._num_classes_all = len(self._classes_all)
         self._class_colors_all = [(255, 255, 255), (255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (255, 0, 255), (0, 255, 255), \
                               (0, 0, 128), (0, 128, 0), (128, 0, 0), (128, 128, 0), (128, 0, 128), (0, 128, 128), \
                               (0, 64, 0), (64, 0, 0), (0, 0, 64), (64, 64, 0), (64, 0, 64), (0, 64, 64), \
                               (192, 0, 0), (0, 192, 0), (0, 0, 192), (192, 192, 0), (192, 0, 192), (0, 192, 192), (32, 0, 0), \
                               (150, 0, 0), (0, 150, 0), (0, 0, 150), (150, 150, 0), (75, 0, 0), (0, 75, 0), (0, 0, 75), (75, 75, 0), \
-                              (255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (32, 32, 0)]
+                              (255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (32, 32, 0), (16, 16, 16), (0, 0, 16)]
         self._extents_all = self._load_object_extents()
 
         self._width = 128
@@ -135,23 +140,23 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         self._num_classes_other = len(self._classes_other)
 
         # 3D model paths
-        self.model_sdf_paths = ['{}/models/{}/textured_simple_low_res.pth'.format(self._ycb_object_path, cls) for cls in self._classes_all[1:22]]
+        self.model_sdf_paths = ['{}/{}/textured_simple_low_res.pth'.format(self._model_path, cls) for cls in self._classes_all[1:22]]
         self.model_colors = [np.array(self._class_colors_all[i]) / 255.0 for i in range(1, len(self._classes_all))]
 
         self.model_mesh_paths = []
         for cls in self._classes_all[1:]:
-            filename = '{}/models/{}/textured_simple.ply'.format(self._ycb_object_path, cls)
+            filename = '{}/{}/textured_simple.ply'.format(self._model_path, cls)
             if os.path.exists(filename):
                 self.model_mesh_paths.append(filename)
                 continue
-            filename = '{}/models/{}/textured_simple.obj'.format(self._ycb_object_path, cls)
+            filename = '{}/{}/textured_simple.obj'.format(self._model_path, cls)
             if os.path.exists(filename):
                 self.model_mesh_paths.append(filename)
                 continue
 
         self.model_texture_paths = []
         for cls in self._classes_all[1:]:
-            filename = '{}/models/{}/texture_map.png'.format(self._ycb_object_path, cls)
+            filename = '{}/{}/texture_map.png'.format(self._model_path, cls)
             if os.path.exists(filename):
                 self.model_texture_paths.append(filename)
             else:
@@ -161,30 +166,30 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         self.model_colors_target = [np.array(self._class_colors_all[i]) / 255.0 for i in cfg.TRAIN.CLASSES[1:]]
         self.model_mesh_paths_target = []
         for cls in self._classes[1:]:
-            filename = '{}/models/{}/textured_simple.ply'.format(self._ycb_object_path, cls)
+            filename = '{}/{}/textured_simple.ply'.format(self._model_path, cls)
             if os.path.exists(filename):
                 self.model_mesh_paths_target.append(filename)
                 continue
-            filename = '{}/models/{}/textured_simple.obj'.format(self._ycb_object_path, cls)
+            filename = '{}/{}/textured_simple.obj'.format(self._model_path, cls)
             if os.path.exists(filename):
                 self.model_mesh_paths_target.append(filename)
 
         self.model_texture_paths_target = []
         for cls in self._classes[1:]:
-            filename = '{}/models/{}/texture_map.png'.format(self._ycb_object_path, cls)
+            filename = '{}/{}/texture_map.png'.format(self._model_path, cls)
             if os.path.exists(filename):
                 self.model_texture_paths_target.append(filename)
             else:
                 self.model_texture_paths_target.append('')
 
-        self._class_to_ind = dict(zip(self._classes, xrange(self._num_classes)))
+        self._class_to_ind = dict(zip(self._classes, range(self._num_classes)))
         self._size = cfg.TRAIN.SYNNUM
         self._build_uniform_poses()
         self._losses_pose = np.zeros((self._num_classes, self._size), dtype=np.float32)
 
         # load poserbpf poses
         if cfg.MODE == 'TEST' and cfg.TEST.BUILD_CODEBOOK:
-            filename = os.path.join(self._ycb_object_path, 'pose_list.pth')
+            filename = os.path.join(datasets.ROOT_DIR, 'data', 'checkpoints', 'pose_list.pth')
             poses_rbpf = torch.load(filename)
             self.poses_rbpf = poses_rbpf.cpu().numpy()
             self._size = self.poses_rbpf.shape[0]
@@ -224,7 +229,7 @@ class YCBEncoder(data.Dataset, datasets.imdb):
 
         with open(cache_file, 'wb') as fid:
             cPickle.dump(render_depths, fid, cPickle.HIGHEST_PROTOCOL)
-        print 'wrote render_depths to {}'.format(cache_file)
+        print('wrote render_depths to {}'.format(cache_file))
 
         return render_depths
 
@@ -246,7 +251,7 @@ class YCBEncoder(data.Dataset, datasets.imdb):
         fy = self._intrinsic_matrix[1, 1]
         px = self._intrinsic_matrix[0, 2]
         py = self._intrinsic_matrix[1, 2]
-        zfar = 6.0
+        zfar = 10.0
         znear = 0.01
         cfg.renderer.set_projection_matrix(self._width, self._height, fx, fy, px, py, znear, zfar)
 
@@ -426,21 +431,22 @@ class YCBEncoder(data.Dataset, datasets.imdb):
 
     def _load_object_extents(self):
 
-        extent_file = os.path.join(self._ycb_object_path, 'extents.txt')
-        assert os.path.exists(extent_file), \
-                'Path does not exist: {}'.format(extent_file)
-
         extents = np.zeros((self._num_classes_all, 3), dtype=np.float32)
-        extents[1:, :] = np.loadtxt(extent_file)
+        for i in range(1, self._num_classes_all):
+            point_file = os.path.join(self._model_path, self._classes_all[i], 'points.xyz')
+            print(point_file)
+            assert os.path.exists(point_file), 'Path does not exist: {}'.format(point_file)
+            points = np.loadtxt(point_file)
+            extents[i, :] = 2 * np.max(np.absolute(points), axis=0)
 
         return extents
 
 
     def _load_object_points(self):
 
-        points = [[] for _ in xrange(len(self._classes))]
-        for i in xrange(len(self._classes)):
-            point_file = os.path.join(self._ycb_object_path, 'models', self._classes[i], 'points.xyz')
+        points = [[] for _ in range(len(self._classes))]
+        for i in range(len(self._classes)):
+            point_file = os.path.join(self._model_path, self._classes[i], 'points.xyz')
             print(point_file)
             assert os.path.exists(point_file), 'Path does not exist: {}'.format(point_file)
             points[i] = np.loadtxt(point_file)
@@ -459,7 +465,7 @@ class YCBEncoder(data.Dataset, datasets.imdb):
 
         # label image is in BGR order
         index = label_image[:,:,2] + 256*label_image[:,:,1] + 256*256*label_image[:,:,0]
-        for i in xrange(1, len(self._class_colors_all)):
+        for i in range(1, len(self._class_colors_all)):
             color = self._class_colors_all[i]
             ind = color[0] + 256*color[1] + 256*256*color[2]
             I = np.where(index == ind)

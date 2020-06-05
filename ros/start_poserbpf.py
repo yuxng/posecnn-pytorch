@@ -61,9 +61,6 @@ def parse_args():
                         help='target object to track',
                         default='003_cracker_box',
                         type=str)
-    parser.add_argument('--gen_data', dest='gen_data',
-                        help='generate training data',
-                        action='store_true')
 
     args = parser.parse_args()
     return args
@@ -120,8 +117,11 @@ if __name__ == '__main__':
     pose_rbpf = PoseRBPF(dataset, args.pretrained, args.codebook)
 
     # image listener
-    listener = ImageListener(pose_rbpf, args.gen_data)
+    listener = ImageListener(pose_rbpf, cfg.TEST.GEN_DATA)
     while not rospy.is_shutdown():
         if listener.input_rgb is not None:
-            listener.process_data()
+            if cfg.TEST.GLOBAL_SEARCH:
+                listener.process_data_global_search()
+            else:
+                listener.process_data()
     listener.stop_publishing_tf()

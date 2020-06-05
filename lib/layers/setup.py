@@ -7,6 +7,7 @@ setup(
         CUDAExtension(
             name='posecnn_cuda', 
             sources = [
+            'correlation_kernel.cu',
             'backproject_kernel.cu',
             'sdf_matching_loss_kernel.cu',
             'posecnn_layers.cpp',

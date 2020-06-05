@@ -13,6 +13,7 @@ import cv2
 import scipy.ndimage.filters as sci_filter
 import numba
 import time
+import math
 from numba import jit
 
 from layers.roi_align import ROIAlign
@@ -696,3 +697,29 @@ def backproject_depth(depth_cv, intrinsic_matrix, return_finite_depth=True):
         X = X[selection, :]
 
     return X
+
+# poses: n x 7
+def block_poses_dolly(poses):
+
+    index = []
+    count = 0
+    intrinsic_matrix = np.array([[500, 0, 64],
+                                 [0, 500, 64],
+                                 [0, 0, 1]])
+
+    for i in range(poses.shape[0]):
+        qt = poses[i, :]
+        RT = np.zeros((3, 4), dtype=np.float32)
+        RT[:3, :3] = quat2mat(qt[3:])
+        RT[:3, 3] = qt[:3]
+        y = np.matmul(intrinsic_matrix, np.matmul(RT, np.array([0, 1, 0, 1])))
+        x1 = y[0] / y[2]
+        y1 = y[1] / y[2]
+
+        if y1 > 64:
+            index.append(1)
+        else:
+            count += 1
+            index.append(0)
+    print('%d poses selected' % count)
+    return np.array(index)

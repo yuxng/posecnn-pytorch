@@ -8,9 +8,12 @@ from os.path import *
 import numpy as np
 import numpy.random as npr
 import cv2
-import cPickle
 import scipy.io
 import copy
+try:
+    import cPickle  # Use cPickle on Python 2.7
+except ImportError:
+    import pickle as cPickle
 
 import datasets
 from fcn.config import cfg
@@ -48,6 +51,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
             self._data_path = os.path.join(self._ycb_video_path, 'data')
         else:
             self._data_path = cfg.DATA_PATH
+        self._model_path = os.path.join(datasets.ROOT_DIR, 'data', 'models')
 
         # define all the classes
         self._classes_all = ('__background__', '002_master_chef_can', '003_cracker_box', '004_sugar_box', '005_tomato_soup_can', '006_mustard_bottle', \
@@ -89,18 +93,18 @@ class YCBVideo(data.Dataset, datasets.imdb):
         self._num_classes_other = len(self._classes_other)
 
         # 3D model paths
-        self.model_mesh_paths = ['{}/models/{}/textured_simple.obj'.format(self._ycb_video_path, cls) for cls in self._classes_all[1:]]
-        self.model_sdf_paths = ['{}/models/{}/textured_simple_low_res.pth'.format(self._ycb_video_path, cls) for cls in self._classes_all[1:]]
-        self.model_texture_paths = ['{}/models/{}/texture_map.png'.format(self._ycb_video_path, cls) for cls in self._classes_all[1:]]
+        self.model_mesh_paths = ['{}/{}/textured_simple.obj'.format(self._model_path, cls) for cls in self._classes_all[1:]]
+        self.model_sdf_paths = ['{}/{}/textured_simple_low_res.pth'.format(self._model_path, cls) for cls in self._classes_all[1:]]
+        self.model_texture_paths = ['{}/{}/texture_map.png'.format(self._model_path, cls) for cls in self._classes_all[1:]]
         self.model_colors = [np.array(self._class_colors_all[i]) / 255.0 for i in range(1, len(self._classes_all))]
 
-        self.model_mesh_paths_target = ['{}/models/{}/textured_simple.obj'.format(self._ycb_video_path, cls) for cls in self._classes[1:]]
-        self.model_sdf_paths_target = ['{}/models/{}/textured_simple.sdf'.format(self._ycb_video_path, cls) for cls in self._classes[1:]]
-        self.model_texture_paths_target = ['{}/models/{}/texture_map.png'.format(self._ycb_video_path, cls) for cls in self._classes[1:]]
+        self.model_mesh_paths_target = ['{}/{}/textured_simple.obj'.format(self._model_path, cls) for cls in self._classes[1:]]
+        self.model_sdf_paths_target = ['{}/{}/textured_simple.sdf'.format(self._model_path, cls) for cls in self._classes[1:]]
+        self.model_texture_paths_target = ['{}/{}/texture_map.png'.format(self._model_path, cls) for cls in self._classes[1:]]
         self.model_colors_target = [np.array(self._class_colors_all[i]) / 255.0 for i in cfg.TRAIN.CLASSES[1:]]
 
         self._class_to_ind = dict(zip(self._classes, xrange(self._num_classes)))
-        self._image_ext = '.png'
+        self._image_ext = '.jpg'
         self._image_index = self._load_image_set_index(image_set)
 
         if (cfg.MODE == 'TRAIN' and cfg.TRAIN.SYNTHESIZE) or (cfg.MODE == 'TEST' and cfg.TEST.SYNTHESIZE):
@@ -717,8 +721,8 @@ class YCBVideo(data.Dataset, datasets.imdb):
         num = np.inf
 
         for i in xrange(1, len(self._classes)):
-            point_file = os.path.join(self._ycb_video_path, 'models', self._classes[i], 'points.xyz')
-            print point_file
+            point_file = os.path.join(self._model_path, self._classes[i], 'points.xyz')
+            print(point_file)
             assert os.path.exists(point_file), 'Path does not exist: {}'.format(point_file)
             points[i] = np.loadtxt(point_file)
             if points[i].shape[0] < num:
@@ -741,7 +745,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
                 point_blob[i, :, :] = weight * point_blob[i, :, :]
 
         # points of large clamp
-        point_file = os.path.join(self._ycb_video_path, 'models', '051_large_clamp', 'points.xyz')
+        point_file = os.path.join(self._model_path, '051_large_clamp', 'points.xyz')
         points_clamp = np.loadtxt(point_file)
         points_clamp = points_clamp[:num, :]
 
@@ -750,12 +754,13 @@ class YCBVideo(data.Dataset, datasets.imdb):
 
     def _load_object_extents(self):
 
-        extent_file = os.path.join(self._ycb_video_path, 'extents.txt')
-        assert os.path.exists(extent_file), \
-                'Path does not exist: {}'.format(extent_file)
-
         extents = np.zeros((self._num_classes_all, 3), dtype=np.float32)
-        extents[1:, :] = np.loadtxt(extent_file)
+        for i in range(1, self._num_classes_all):
+            point_file = os.path.join(self._model_path, self._classes_all[i], 'points.xyz')
+            print(point_file)
+            assert os.path.exists(point_file), 'Path does not exist: {}'.format(point_file)
+            points = np.loadtxt(point_file)
+            extents[i, :] = 2 * np.max(np.absolute(points), axis=0)
 
         return extents
 
@@ -839,7 +844,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
         if os.path.exists(cache_file):
             with open(cache_file, 'rb') as fid:
                 roidb = cPickle.load(fid)
-            print '{} gt roidb loaded from {}'.format(self.name, cache_file)
+            print('{} gt roidb loaded from {}'.format(self.name, cache_file))
             return roidb
 
         gt_roidb = [self._load_ycb_video_annotation(index)
@@ -847,7 +852,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
 
         with open(cache_file, 'wb') as fid:
             cPickle.dump(gt_roidb, fid, cPickle.HIGHEST_PROTOCOL)
-        print 'wrote gt roidb to {}'.format(cache_file)
+        print('wrote gt roidb to {}'.format(cache_file))
 
         return gt_roidb
 
@@ -930,7 +935,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
                 poses = cPickle.load(fid)
                 for i in range(len(poses)):
                     print('%s, min distance %f, max distance %f' % (self._classes[i+1], np.min(poses[i][:,5]), np.max(poses[i][:,5])))
-            print '{} poses loaded from {}'.format(self.name, cache_file)
+            print('{} poses loaded from {}'.format(self.name, cache_file))
             return poses
 
         poses = [np.zeros((0, 6), dtype=np.float32) for i in range(len(cfg.TRAIN.CLASSES)-1)] # no background
@@ -962,7 +967,7 @@ class YCBVideo(data.Dataset, datasets.imdb):
         # save poses
         with open(cache_file, 'wb') as fid:
             cPickle.dump(poses, fid, cPickle.HIGHEST_PROTOCOL)
-        print 'wrote poses to {}'.format(cache_file)
+        print('wrote poses to {}'.format(cache_file))
         return poses
 
 

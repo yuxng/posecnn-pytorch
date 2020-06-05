@@ -34,7 +34,7 @@ import copy
 from cv_bridge import CvBridge, CvBridgeError
 from fcn.config import cfg, cfg_from_file, get_output_dir
 from datasets.factory import get_dataset
-from fcn.train_test import render_image_detection
+from fcn.render_utils import render_image_detection
 from std_msgs.msg import String
 from sensor_msgs.msg import Image, CameraInfo
 from geometry_msgs.msg import PoseStamped
@@ -114,28 +114,39 @@ class ImageListener:
             cls = cls + fusion_type
             self.pubs.append(rospy.Publisher('/objects/prior_pose/' + cls, PoseStamped, queue_size=10))
 
-        self.base_frame = 'measured/base_link'
         if cfg.TEST.ROS_CAMERA == 'ISAAC_SIM':
             # ISAAC SIM
+            self.base_frame = 'measured/base_link'
             rgb_sub = message_filters.Subscriber('/sim/left_color_camera/image', Image, queue_size=10)
             depth_sub = message_filters.Subscriber('/sim/left_depth_camera/image', Image, queue_size=10)
             msg = rospy.wait_for_message('/sim/left_color_camera/camera_info', CameraInfo)
             self.target_frame = self.base_frame
         elif cfg.TEST.ROS_CAMERA == 'D415':
             # use RealSense D435
+            self.base_frame = 'measured/base_link'
             rgb_sub = message_filters.Subscriber('/camera/color/image_raw', Image, queue_size=10)
             depth_sub = message_filters.Subscriber('/camera/aligned_depth_to_color/image_raw', Image, queue_size=10)
             msg = rospy.wait_for_message('/camera/color/camera_info', CameraInfo)
             self.camera_frame = 'measured/camera_color_optical_frame'
             self.target_frame = self.base_frame
             self.viz_pub = rospy.Publisher('/obj/mask_estimates/realsense', MarkerArray, queue_size=1)
-        elif cfg.TEST.ROS_CAMERA == 'Azure':             
+        elif cfg.TEST.ROS_CAMERA == 'Azure':
+            self.base_frame = 'measured/base_link'
             rgb_sub = message_filters.Subscriber('/k4a/rgb/image_raw', Image, queue_size=10)
             depth_sub = message_filters.Subscriber('/k4a/depth_to_rgb/image_raw', Image, queue_size=10)
             msg = rospy.wait_for_message('/k4a/rgb/camera_info', CameraInfo)
             self.camera_frame = 'rgb_camera_link'
             self.target_frame = self.base_frame
             self.viz_pub = rospy.Publisher('/obj/mask_estimates/azure', MarkerArray, queue_size=1)
+        else:
+            # use kinect
+            self.base_frame = '%s_rgb_optical_frame' % (cfg.TEST.ROS_CAMERA)
+            rgb_sub = message_filters.Subscriber('/%s/rgb/image_color' % (cfg.TEST.ROS_CAMERA), Image, queue_size=10)
+            depth_sub = message_filters.Subscriber('/%s/depth_registered/image' % (cfg.TEST.ROS_CAMERA), Image, queue_size=10)
+            msg = rospy.wait_for_message('/%s/rgb/camera_info' % (cfg.TEST.ROS_CAMERA), CameraInfo)
+            self.camera_frame = '%s_rgb_optical_frame' % (cfg.TEST.ROS_CAMERA)
+            self.target_frame = self.base_frame
+            self.viz_pub = rospy.Publisher('/obj/mask_estimates/%s' % (cfg.TEST.ROS_CAMERA), MarkerArray, queue_size=1)
 
         # camera to base transformation
         self.Tbc_now = np.eye(4, dtype=np.float32)
@@ -255,7 +266,7 @@ class ImageListener:
         rois = rois[index, :]
 
         # non-maximum suppression within class
-        index = nms(rois, 0.5)
+        index = nms(rois, 0.2)
         rois = rois[index, :]
 
         # render output image
@@ -271,6 +282,42 @@ class ImageListener:
         label_msg.header.frame_id = rgb_frame_id
         label_msg.encoding = 'mono8'
         self.label_pub.publish(label_msg)
+
+        # visualization
+        if cfg.TEST.VISUALIZE:
+            fig = plt.figure()
+            ax = fig.add_subplot(2, 3, 1)
+            plt.imshow(im_color)
+            ax.set_title('input image')
+
+            ax = fig.add_subplot(2, 3, 2)
+            plt.imshow(im_label)
+
+            ax = fig.add_subplot(2, 3, 3)
+            plt.imshow(labels)
+
+            # show predicted vertex targets
+            vertex_pred = out_vertex.detach().cpu().numpy()
+            vertex_target = vertex_pred[0, :, :, :]
+            center = np.zeros((3, height, width), dtype=np.float32)
+
+            for j in range(1, dataset._num_classes):
+                index = np.where(labels == j)
+                if len(index[0]) > 0:
+                    center[0, index[0], index[1]] = vertex_target[3*j, index[0], index[1]]
+                    center[1, index[0], index[1]] = vertex_target[3*j+1, index[0], index[1]]
+                    center[2, index[0], index[1]] = np.exp(vertex_target[3*j+2, index[0], index[1]])
+
+            ax = fig.add_subplot(2, 3, 4)
+            plt.imshow(center[0,:,:])
+            ax.set_title('predicted center x')
+            ax = fig.add_subplot(2, 3, 5)
+            plt.imshow(center[1,:,:])
+            ax.set_title('predicted center y')
+            ax = fig.add_subplot(2, 3, 6)
+            plt.imshow(center[2,:,:])
+            ax.set_title('predicted z')
+            plt.show()
 
         if not rois.shape[0]:
             return

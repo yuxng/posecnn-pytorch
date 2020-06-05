@@ -9,7 +9,6 @@ import os
 import os.path as osp
 import numpy as np
 import datasets
-import cPickle
 import math
 import glob
 from fcn.config import cfg
@@ -188,13 +187,13 @@ class imdb(object):
 
         for i in xrange(len(backgrounds_color)):
             if not os.path.isfile(backgrounds_color[i]):
-                print 'file not exist {}'.format(backgrounds_color[i])
+                print('file not exist {}'.format(backgrounds_color[i]))
 
         for i in xrange(len(backgrounds_depth)):
             if not os.path.isfile(backgrounds_depth[i]):
-                print 'file not exist {}'.format(backgrounds_depth[i])
+                print('file not exist {}'.format(backgrounds_depth[i]))
 
         self._backgrounds_color = backgrounds_color
         self._backgrounds_depth = backgrounds_depth
-        print 'build color background images finished, {:d} images'.format(len(backgrounds_color))
-        print 'build depth background images finished, {:d} images'.format(len(backgrounds_depth))
+        print('build color background images finished, {:d} images'.format(len(backgrounds_color)))
+        print('build depth background images finished, {:d} images'.format(len(backgrounds_depth)))

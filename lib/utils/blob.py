@@ -119,7 +119,7 @@ def add_noise(image, level = 0.1):
         noisy = np.clip(noisy, 0, 255)
     else:
         # motion blur
-	sizes = [3, 5, 7, 9, 11, 15]
+        sizes = [3, 5, 7, 9, 11, 15]
         size = sizes[int(np.random.randint(len(sizes), size=1))]
         kernel_motion_blur = np.zeros((size, size))
         if np.random.rand(1) < 0.5:

@@ -1,6 +1,6 @@
 # posecnn-pytorch
 
-PyTorch implementation of the PoseCNN framework.
+PyTorch implementation of the PoseCNN and PoseRBPF framework.
 
 ### Introduction
 
@@ -14,13 +14,20 @@ PoseCNN is released under the MIT License (refer to the LICENSE file for details
 
 ### Citation
 
-If you find PoseCNN useful in your research, please consider citing:
+If you find the package is useful in your research, please consider citing:
 
     @inproceedings{xiang2018posecnn,
         Author = {Xiang, Yu and Schmidt, Tanner and Narayanan, Venkatraman and Fox, Dieter},
         Title = {PoseCNN: A Convolutional Neural Network for 6D Object Pose Estimation in Cluttered Scenes},
-        Journal   = {Robotics: Science and Systems (RSS)},
+        booktitle   = {Robotics: Science and Systems (RSS)},
         Year = {2018}
+    }
+
+    @inproceedings{deng2019pose,
+        author    = {Xinke Deng and Arsalan Mousavian and Yu Xiang and Fei Xia and Timothy Bretl and Dieter Fox},
+        title     = {PoseRBPF: A Rao-Blackwellized Particle Filter for 6D Object Pose Tracking},
+        booktitle = {Robotics: Science and Systems (RSS)},
+        year      = {2019}
     }
 
 ### Installation

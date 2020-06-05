@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 # --------------------------------------------------------
 # PoseCNN
@@ -24,8 +24,8 @@ import scipy.io
 import glob
 
 import _init_paths
-from fcn.train_test import test_image
-from fcn.config import cfg, cfg_from_file, get_output_dir, write_selected_class_file
+from fcn.test_imageset import test_image
+from fcn.config import cfg, cfg_from_file, yaml_from_file, get_output_dir
 from datasets.factory import get_dataset
 import networks
 from ycb_renderer import YCBRenderer
@@ -51,6 +51,8 @@ def parse_args():
                         default=None, type=str)
     parser.add_argument('--cfg', dest='cfg_file',
                         help='optional config file', default=None, type=str)
+    parser.add_argument('--meta', dest='meta_file',
+                        help='optional metadata file', default=None, type=str)
     parser.add_argument('--dataset', dest='dataset_name',
                         help='dataset to train on',
                         default='shapenet_scene_train', type=str)
@@ -98,6 +100,16 @@ if __name__ == '__main__':
 
     if len(cfg.TEST.CLASSES) == 0:
         cfg.TEST.CLASSES = cfg.TRAIN.CLASSES
+
+    if args.meta_file is not None:
+        meta = yaml_from_file(args.meta_file)
+        # overwrite test classes
+        print(meta)
+        cfg.TEST.CLASSES = [0]
+        for i in meta.ycb_ids:
+            cfg.TEST.CLASSES.append(i)
+        print('TEST CLASSES:', cfg.TEST.CLASSES)
+
     print('Using config:')
     pprint.pprint(cfg)
 
@@ -168,7 +180,7 @@ if __name__ == '__main__':
 
     #'''
     print('loading 3D models')
-    cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, gpu_id=1-args.gpu_id, render_marker=False)
+    cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, gpu_id=args.gpu_id, render_marker=False)
     if cfg.TEST.SYNTHESIZE:
         cfg.renderer.load_objects(dataset.model_mesh_paths, dataset.model_texture_paths, dataset.model_colors)
     else:
@@ -183,10 +195,10 @@ if __name__ == '__main__':
     # load sdfs
     if cfg.TEST.POSE_REFINE:
         print('loading SDFs')
-        cfg.sdf_optimizers = []
+        sdf_files = []
         for i in cfg.TEST.CLASSES[1:]:
-            print(dataset.model_sdf_paths[i-1])
-            cfg.sdf_optimizers.append(sdf_optimizer(dataset.model_sdf_paths[i-1]))
+            sdf_files.append(dataset.model_sdf_paths[i-1])
+        cfg.sdf_optimizer = sdf_optimizer(cfg.TEST.CLASSES[1:], sdf_files)
 
     # prepare autoencoder and codebook
     if cfg.TRAIN.VERTEX_REG:
@@ -197,27 +209,38 @@ if __name__ == '__main__':
     # run network
     for i in index_images:
         im = pad_im(cv2.imread(images_color[i], cv2.IMREAD_COLOR), 16)
-        if osp.exists(images_depth[i]):
+        print(images_color[i])
+        if len(images_depth) > 0 and osp.exists(images_depth[i]):
             depth = pad_im(cv2.imread(images_depth[i], cv2.IMREAD_UNCHANGED), 16)
             depth = depth.astype('float') / 1000.0
+            print(images_depth[i])
         else:
             depth = None
-        print(images_color[i], images_depth[i])
+            print('no depth image')
 
         # rescale image if necessary
         if cfg.TEST.SCALES_BASE[0] != 1:
             im_scale = cfg.TEST.SCALES_BASE[0]
             im = pad_im(cv2.resize(im, None, None, fx=im_scale, fy=im_scale, interpolation=cv2.INTER_LINEAR), 16)
-            depth = pad_im(cv2.resize(depth, None, None, fx=im_scale, fy=im_scale, interpolation=cv2.INTER_NEAREST), 16)
+            if depth is not None:
+                depth = pad_im(cv2.resize(depth, None, None, fx=im_scale, fy=im_scale, interpolation=cv2.INTER_NEAREST), 16)
 
-        im_pose, labels, rois, poses = test_image(network, pose_rbpf, dataset, im, depth)
+        im_index = None
+        im_pose, im_pose_refined, labels, rois, poses, poses_refined = test_image(network, pose_rbpf, dataset, im, depth, im_index)
 
         # save result
         if not cfg.TEST.VISUALIZE:
-            result = {'labels': labels, 'rois': rois, 'poses': poses, 'intrinsic_matrix': dataset._intrinsic_matrix}
+
+            # map the roi index
+            for j in range(rois.shape[0]):
+                rois[j, 1] = cfg.TRAIN.CLASSES.index(cfg.TEST.CLASSES[int(rois[j, 1])])
+
+            result = {'labels': labels, 'rois': rois, 'poses': poses, 'poses_refined': poses_refined, 'intrinsic_matrix': dataset._intrinsic_matrix}
             head, tail = os.path.split(images_color[i])
             filename = os.path.join(resdir, tail + '.mat')
             scipy.io.savemat(filename, result, do_compression=True)
             # rendered image
             filename = os.path.join(resdir, tail + '_render.jpg')
             cv2.imwrite(filename, im_pose[:, :, (2, 1, 0)])
+            filename = os.path.join(resdir, tail + '_render_refined.jpg')
+            cv2.imwrite(filename, im_pose_refined[:, :, (2, 1, 0)])

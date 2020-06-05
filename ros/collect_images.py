@@ -33,8 +33,8 @@ class ImageListener:
 
         # initialize a node
         rospy.init_node("image_listener")
-        rgb_sub = message_filters.Subscriber('/camera/rgb/image_color', Image, queue_size=2)
-        depth_sub = message_filters.Subscriber('/camera/depth_registered/image', Image, queue_size=2)
+        rgb_sub = message_filters.Subscriber('/kinect2/rgb/image_color', Image, queue_size=2)
+        depth_sub = message_filters.Subscriber('/kinect2/depth_registered/image', Image, queue_size=2)
         # depth_sub = message_filters.Subscriber('/camera/depth_registered/sw_registered/image_rect_raw', Image, queue_size=2)
 
         queue_size = 1

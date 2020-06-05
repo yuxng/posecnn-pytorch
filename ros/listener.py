@@ -11,7 +11,7 @@ import sys
 import os
 
 from fcn.config import cfg
-from fcn.train_test import test_image
+from fcn.test_imageset import test_image
 from cv_bridge import CvBridge, CvBridgeError
 from std_msgs.msg import String
 from sensor_msgs.msg import Image, CameraInfo
@@ -23,6 +23,7 @@ from ycb_renderer import YCBRenderer
 from utils.se3 import *
 from utils.nms import *
 
+from posecnn_pytorch.msg import DetectionList, Detection, BBox
 
 class ImageListener:
 
@@ -44,6 +45,7 @@ class ImageListener:
         self.br = tf.TransformBroadcaster()
         self.label_pub = rospy.Publisher('posecnn_label' + suffix, Image, queue_size=1)
         self.pose_pub = rospy.Publisher('posecnn_pose' + suffix, Image, queue_size=1)
+        self.detection_pub = rospy.Publisher('posecnn/%02d/info' % cfg.instance_id, DetectionList, queue_size=1)
 
         # create pose publisher for each known object class
         self.pubs = []
@@ -156,6 +158,9 @@ class ImageListener:
         index = np.argsort(rois[:, 2])
         rois = rois[index, :]
         poses = poses[index, :]
+
+        detections = DetectionList()
+
         for i in range(rois.shape[0]):
             cls = int(rois[i, 1])
             if cls > 0 and rois[i, -1] > cfg.TEST.DET_THRESHOLD:
@@ -173,7 +178,7 @@ class ImageListener:
                 y2 = rois[i, 5] / n
                 now = rospy.Time.now()
                 self.br.sendTransform([n, now.secs, 0], [x1, y1, x2, y2], now, tf_name + '_roi', frame)
-
+		
                 # create pose msg
                 msg = PoseStamped()
                 msg.header.stamp = rospy.Time.now()
@@ -187,6 +192,18 @@ class ImageListener:
                 msg.pose.position.z = poses[i, 6]
                 pub = self.pubs[cls - 1]
                 pub.publish(msg)
+
+                detection = Detection()
+                detection.name = name
+                detection.score = rois[i, 6]
+                detection.roi.x1 = x1
+                detection.roi.y1 = y1
+                detection.roi.x2 = x2
+                detection.roi.y2 = y2
+                detection.pose = msg
+                detections.detections.append(detection)
+
+        self.detection_pub.publish(detections)
 
 
     def callback_rgbd(self, rgb, depth):
@@ -240,6 +257,8 @@ class ImageListener:
         else:
             frame = '%s_depth_optical_frame' % (cfg.TEST.ROS_CAMERA)
 
+        detections = DetectionList()
+
         indexes = np.zeros((self.dataset.num_classes, ), dtype=np.int32)
         index = np.argsort(rois[:, 2])
         rois = rois[index, :]
@@ -281,3 +300,15 @@ class ImageListener:
                 msg.pose.position.z = poses[i, 6]
                 pub = self.pubs[cls - 1]
                 pub.publish(msg)
+
+                detection = Detection()
+                detection.name = name
+                detection.score = rois[i, 6]
+                detection.roi.x1 = x1
+                detection.roi.y1 = y1
+                detection.roi.x2 = x2
+                detection.roi.y2 = y2
+                detection.pose = msg
+                detections.detections.append(detection)
+
+        self.detection_pub.publish(detections)

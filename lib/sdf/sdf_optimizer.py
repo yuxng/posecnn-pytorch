@@ -1,7 +1,7 @@
 import sys
 import cv2
 import time
-from sdf_utils import *
+from .sdf_utils import *
 import _init_paths
 from fcn.config import cfg
 from layers.sdf_matching_loss import SDFLoss
@@ -44,6 +44,7 @@ class sdf_optimizer():
 
             print('     minimal coordinate = ({:.4f}, {:.4f}, {:.4f}) cm'.format(self.xmins[i] * 100, self.ymins[i] * 100, self.zmins[i] * 100))
             print('     maximal coordinate = ({:.4f}, {:.4f}, {:.4f}) cm'.format(self.xmaxs[i] * 100, self.ymaxs[i] * 100, self.zmaxs[i] * 100))
+            print(sdf_torch_list[-1].shape)
             print(' finished loading sdf ! ')
 
         # combine sdfs
@@ -56,12 +57,12 @@ class sdf_optimizer():
             self.sdf_limits[i, 0] = self.xmins[i]
             self.sdf_limits[i, 1] = self.ymins[i]
             self.sdf_limits[i, 2] = self.zmins[i]
-            self.sdf_limits[i, 3] = self.xmaxs[i]
-            self.sdf_limits[i, 4] = self.ymaxs[i]
-            self.sdf_limits[i, 5] = self.zmaxs[i]
-            self.sdf_limits[i, 6] = size[0]
-            self.sdf_limits[i, 7] = size[1]
-            self.sdf_limits[i, 8] = size[2]
+            self.sdf_limits[i, 3] = self.xmins[i] + (self.xmaxs[i] - self.xmins[i]) * max_shape[0] / size[0]
+            self.sdf_limits[i, 4] = self.ymins[i] + (self.ymaxs[i] - self.ymins[i]) * max_shape[1] / size[1]
+            self.sdf_limits[i, 5] = self.zmins[i] + (self.zmaxs[i] - self.zmins[i]) * max_shape[2] / size[2]
+            self.sdf_limits[i, 6] = max_shape[0]
+            self.sdf_limits[i, 7] = max_shape[1]
+            self.sdf_limits[i, 8] = max_shape[2]
         self.sdf_limits = torch.from_numpy(self.sdf_limits)
 
         if self.use_gpu:

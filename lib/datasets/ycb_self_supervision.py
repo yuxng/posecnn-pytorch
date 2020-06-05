@@ -8,10 +8,13 @@ from os.path import *
 import numpy as np
 import numpy.random as npr
 import cv2
-import cPickle
 import scipy.io
 import copy
 import glob
+try:
+    import cPickle  # Use cPickle on Python 2.7
+except ImportError:
+    import pickle as cPickle
 
 import datasets
 from fcn.config import cfg
@@ -47,6 +50,7 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
         self._ycb_self_supervision_path = self._get_default_path() if ycb_self_supervision_path is None \
                             else ycb_self_supervision_path
         self._data_path = os.path.join(self._ycb_self_supervision_path, 'data')
+        self._model_path = os.path.join(datasets.ROOT_DIR, 'data', 'models')
 
         # define all the classes
         self._classes_all = ('__background__', '002_master_chef_can', '003_cracker_box', '004_sugar_box', '005_tomato_soup_can', '006_mustard_bottle', \
@@ -55,14 +59,14 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
                          '051_large_clamp', '052_extra_large_clamp', '061_foam_brick', 'holiday_cup1', 'holiday_cup2', 'sanning_mug', \
                          '001_chips_can', 'block_red_big', 'block_green_big', 'block_blue_big', 'block_yellow_big', \
                          'block_red_small', 'block_green_small', 'block_blue_small', 'block_yellow_small', \
-                         'block_red_median', 'block_green_median', 'block_blue_median', 'block_yellow_median')
+                         'block_red_median', 'block_green_median', 'block_blue_median', 'block_yellow_median', 'fusion_duplo_dude', 'cabinet_handle')
         self._num_classes_all = len(self._classes_all)
         self._class_colors_all = [(255, 255, 255), (255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (255, 0, 255), (0, 255, 255), \
                               (0, 0, 128), (0, 128, 0), (128, 0, 0), (128, 128, 0), (128, 0, 128), (0, 128, 128), \
                               (0, 64, 0), (64, 0, 0), (0, 0, 64), (64, 64, 0), (64, 0, 64), (0, 64, 64), \
                               (192, 0, 0), (0, 192, 0), (0, 0, 192), (192, 192, 0), (192, 0, 192), (0, 192, 192), (32, 0, 0), \
-                              (150, 0, 0), (0, 150, 0), (0, 0, 150), (150, 150, 0), (255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), \
-                              (200, 0, 0), (0, 200, 0), (0, 0, 200), (200, 200, 0)]
+                              (150, 0, 0), (0, 150, 0), (0, 0, 150), (150, 150, 0), (75, 0, 0), (0, 75, 0), (0, 0, 75), (75, 75, 0), \
+                              (200, 0, 0), (0, 200, 0), (0, 0, 200), (200, 200, 0), (16, 16, 0), (16, 16, 16)]
         self._extents_all = self._load_object_extents()
 
         self._width = cfg.TRAIN.SYN_WIDTH
@@ -104,22 +108,22 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
         self._num_classes_other = len(self._classes_other)
 
         # 3D model paths
-        self.model_sdf_paths = ['{}/models/{}/textured_simple_low_res.pth'.format(self._ycb_self_supervision_path, cls) for cls in self._classes_all[1:]]
+        self.model_sdf_paths = ['{}/{}/textured_simple_low_res.pth'.format(self._model_path, cls) for cls in self._classes_all[1:]]
         self.model_colors = [np.array(self._class_colors_all[i]) / 255.0 for i in range(1, len(self._classes_all))]
 
         self.model_mesh_paths = []
         for cls in self._classes_all[1:]:
-            filename = '{}/models/{}/textured_simple.ply'.format(self._ycb_self_supervision_path, cls)
+            filename = '{}/{}/textured_simple.ply'.format(self._model_path, cls)
             if osp.exists(filename):
                 self.model_mesh_paths.append(filename)
                 continue
-            filename = '{}/models/{}/textured_simple.obj'.format(self._ycb_self_supervision_path, cls)
+            filename = '{}/{}/textured_simple.obj'.format(self._model_path, cls)
             if osp.exists(filename):
                 self.model_mesh_paths.append(filename)
 
         self.model_texture_paths = []
         for cls in self._classes_all[1:]:
-            filename = '{}/models/{}/texture_map.png'.format(self._ycb_self_supervision_path, cls)
+            filename = '{}/{}/texture_map.png'.format(self._model_path, cls)
             if osp.exists(filename):
                 self.model_texture_paths.append(filename)
             else:
@@ -129,23 +133,23 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
         self.model_colors_target = [np.array(self._class_colors_all[i]) / 255.0 for i in cfg.TRAIN.CLASSES[1:]]
         self.model_mesh_paths_target = []
         for cls in self._classes[1:]:
-            filename = '{}/models/{}/textured_simple.ply'.format(self._ycb_self_supervision_path, cls)
+            filename = '{}/{}/textured_simple.ply'.format(self._model_path, cls)
             if osp.exists(filename):
                 self.model_mesh_paths_target.append(filename)
                 continue
-            filename = '{}/models/{}/textured_simple.obj'.format(self._ycb_self_supervision_path, cls)
+            filename = '{}/{}/textured_simple.obj'.format(self._model_path, cls)
             if osp.exists(filename):
                 self.model_mesh_paths_target.append(filename)
 
         self.model_texture_paths_target = []
         for cls in self._classes[1:]:
-            filename = '{}/models/{}/texture_map.png'.format(self._ycb_self_supervision_path, cls)
+            filename = '{}/{}/texture_map.png'.format(self._model_path, cls)
             if osp.exists(filename):
                 self.model_texture_paths_target.append(filename)
             else:
                 self.model_texture_paths_target.append('')
 
-        self._class_to_ind = dict(zip(self._classes, xrange(self._num_classes)))
+        self._class_to_ind = dict(zip(self._classes, range(self._num_classes)))
         self._image_ext = '.png'
         self._image_index = self._load_image_set_index(image_set)
 
@@ -385,7 +389,7 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
         pose_blob = np.zeros((self.num_classes, 9), dtype=np.float32)
         gt_boxes = np.zeros((self.num_classes, 5), dtype=np.float32)
         count = 0
-        for i in xrange(num_target):
+        for i in range(num_target):
             cls = int(indexes_target[i])
             T = poses_all[i][:3]
             qt = poses_all[i][3:]
@@ -700,7 +704,7 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
         pose_blob = np.zeros((num_classes, 9), dtype=np.float32)
         gt_boxes = np.zeros((num_classes, 5), dtype=np.float32)
         count = 0
-        for i in xrange(num):
+        for i in range(num):
             cls = int(meta_data['cls_indexes'][i])
             ind = np.where(classes == cls)[0]
             if len(ind) > 0:
@@ -784,7 +788,7 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
         vertex_weights = np.zeros((3 * num_classes, height, width), dtype=np.float32)
 
         c = np.zeros((2, 1), dtype=np.float32)
-        for i in xrange(1, num_classes):
+        for i in range(1, num_classes):
             y, x = np.where(im_label == classes[i])
             I = np.where(im_label == classes[i])
             ind = np.where(cls_indexes == classes[i])[0]
@@ -859,7 +863,7 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
         num = np.inf
         num_classes = len(classes)
         for i in range(1, num_classes):
-            point_file = os.path.join(self._ycb_self_supervision_path, 'models', classes[i], 'points.xyz')
+            point_file = os.path.join(self._model_path, classes[i], 'points.xyz')
             print(point_file)
             assert os.path.exists(point_file), 'Path does not exist: {}'.format(point_file)
             points[i] = np.loadtxt(point_file)
@@ -883,7 +887,7 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
                 point_blob[i, :, :] = weight * point_blob[i, :, :]
 
         # points of large clamp
-        point_file = os.path.join(self._ycb_self_supervision_path, 'models', '051_large_clamp', 'points.xyz')
+        point_file = os.path.join(self._model_path, '051_large_clamp', 'points.xyz')
         points_clamp = np.loadtxt(point_file)
         points_clamp = points_clamp[:num, :]
 
@@ -892,12 +896,13 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
 
     def _load_object_extents(self):
 
-        extent_file = os.path.join(self._ycb_self_supervision_path, 'extents.txt')
-        assert os.path.exists(extent_file), \
-                'Path does not exist: {}'.format(extent_file)
-
         extents = np.zeros((self._num_classes_all, 3), dtype=np.float32)
-        extents[1:, :] = np.loadtxt(extent_file)
+        for i in range(1, self._num_classes_all):
+            point_file = os.path.join(self._model_path, self._classes_all[i], 'points.xyz')
+            print(point_file)
+            assert os.path.exists(point_file), 'Path does not exist: {}'.format(point_file)
+            points = np.loadtxt(point_file)
+            extents[i, :] = 2 * np.max(np.absolute(points), axis=0)
 
         return extents
 
@@ -1011,7 +1016,7 @@ class YCBSelfSupervision(data.Dataset, datasets.imdb):
 
         # label image is in BGR order
         index = label_image[:,:,2] + 256*label_image[:,:,1] + 256*256*label_image[:,:,0]
-        for i in xrange(1, len(self._class_colors_all)):
+        for i in range(1, len(self._class_colors_all)):
             color = self._class_colors_all[i]
             ind = color[0] + 256*color[1] + 256*256*color[2]
             I = np.where(index == ind)

@@ -3,7 +3,6 @@ import os.path
 import cv2
 import random
 import glob
-import cPickle
 import torch
 import torch.utils.data as data
 import torchvision
@@ -12,6 +11,10 @@ import torch.nn.functional as F
 import numpy as np
 import numpy.random as npr
 import datasets
+try:
+    import cPickle  # Use cPickle on Python 2.7
+except ImportError:
+    import pickle as cPickle
 from fcn.config import cfg
 from transforms3d.quaternions import *
 from transforms3d.euler import *
@@ -218,7 +221,7 @@ class MOPEDEncoder(data.Dataset, datasets.imdb):
 
         with open(cache_file, 'wb') as fid:
             cPickle.dump(render_depths, fid, cPickle.HIGHEST_PROTOCOL)
-        print 'wrote render_depths to {}'.format(cache_file)
+        print('wrote render_depths to {}'.format(cache_file))
 
         return render_depths
 

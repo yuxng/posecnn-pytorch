@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 # --------------------------------------------------------
 # DeepIM
@@ -23,8 +23,8 @@ import random
 import scipy.io
 
 import _init_paths
-from fcn.train_test import test, test_autoencoder
-from fcn.config import cfg, cfg_from_file, get_output_dir, write_selected_class_file
+from fcn.test_dataset import test, test_autoencoder, test_docsnet, test_segnet, test_triplet_net
+from fcn.config import cfg, cfg_from_file, get_output_dir
 from datasets.factory import get_dataset
 import networks
 from ycb_renderer import YCBRenderer
@@ -41,11 +41,20 @@ def parse_args():
     parser.add_argument('--pretrained', dest='pretrained',
                         help='initialize with pretrained checkpoint',
                         default=None, type=str)
+    parser.add_argument('--pretrained_encoder', dest='pretrained_encoder',
+                        help='initialize with pretrained encoder checkpoint',
+                        default=None, type=str)
+    parser.add_argument('--codebook', dest='codebook',
+                        help='codebook',
+                        default=None, type=str)
     parser.add_argument('--cfg', dest='cfg_file',
                         help='optional config file', default=None, type=str)
     parser.add_argument('--dataset', dest='dataset_name',
                         help='dataset to train on',
                         default='shapenet_scene_train', type=str)
+    parser.add_argument('--dataset_background', dest='dataset_background_name',
+                        help='background dataset to train on',
+                        default='background_nvidia', type=str)
     parser.add_argument('--rand', dest='randomize',
                         help='randomize (do not use a fixed seed)',
                         action='store_true')
@@ -100,18 +109,24 @@ if __name__ == '__main__':
         shuffle = False
     cfg.MODE = 'TEST'
     dataset = get_dataset(args.dataset_name)
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size=cfg.TEST.IMS_PER_BATCH, shuffle=shuffle, num_workers=0)
+    worker_init_fn = dataset.worker_init_fn if hasattr(dataset, 'worker_init_fn') else None
+    if 'shapenet' in dataset.name:
+        num_workers = 1
+    else:
+        num_workers = 0
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=cfg.TEST.IMS_PER_BATCH, shuffle=shuffle,
+        num_workers=num_workers, worker_init_fn=worker_init_fn)
     print('Use dataset `{:s}` for training'.format(dataset.name))
 
     if cfg.INPUT == 'COLOR':
         if cfg.TRAIN.SYN_BACKGROUND_SPECIFIC:
-            background_dataset = get_dataset('background_nvidia')
+            background_dataset = get_dataset(args.dataset_background_name)
         else:
-            background_dataset = get_dataset('background_pascal')
+            background_dataset = get_dataset('background_coco')
     else:
         background_dataset = get_dataset('background_rgbd')
     background_loader = torch.utils.data.DataLoader(background_dataset, batch_size=cfg.TEST.IMS_PER_BATCH,
-                                                    shuffle=True, num_workers=8)
+                                                    shuffle=True, num_workers=1)
 
     # overwrite intrinsics
     if len(cfg.INTRINSICS) > 0:
@@ -134,6 +149,8 @@ if __name__ == '__main__':
     # prepare network
     if args.pretrained:
         network_data = torch.load(args.pretrained)
+        if isinstance(network_data, dict) and 'model' in network_data:
+            network_data = network_data['model']
         print("=> using pre-trained network '{}'".format(args.pretrained))
     else:
         network_data = None
@@ -144,38 +161,49 @@ if __name__ == '__main__':
     network = torch.nn.DataParallel(network, device_ids=[cfg.gpu_id]).cuda(device=cfg.device)
     cudnn.benchmark = True
 
-    #'''
     print('loading 3D models')
-    cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, gpu_id=args.gpu_id, render_marker=False)
-    if cfg.TEST.SYNTHESIZE:
-        cfg.renderer.load_objects(dataset.model_mesh_paths, dataset.model_texture_paths, dataset.model_colors)
-    else:
-        model_mesh_paths = [dataset.model_mesh_paths[i-1] for i in cfg.TEST.CLASSES]
-        model_texture_paths = [dataset.model_texture_paths[i-1] for i in cfg.TEST.CLASSES]
-        model_colors = [dataset.model_colors[i-1] for i in cfg.TEST.CLASSES]
-        cfg.renderer.load_objects(model_mesh_paths, model_texture_paths, model_colors)
-    cfg.renderer.set_camera_default()
-    print(dataset.model_mesh_paths)
-    #'''
+    if 'shapenet' not in dataset.name:
+        cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, gpu_id=args.gpu_id, render_marker=False)
+        if cfg.TEST.SYNTHESIZE:
+            cfg.renderer.load_objects(dataset.model_mesh_paths, dataset.model_texture_paths, dataset.model_colors)
+        else:
+            model_mesh_paths = [dataset.model_mesh_paths[i-1] for i in cfg.TEST.CLASSES]
+            model_texture_paths = [dataset.model_texture_paths[i-1] for i in cfg.TEST.CLASSES]
+            model_colors = [dataset.model_colors[i-1] for i in cfg.TEST.CLASSES]
+            cfg.renderer.load_objects(model_mesh_paths, model_texture_paths, model_colors)
+        cfg.renderer.set_camera_default()
+        print(dataset.model_mesh_paths)
+
+        if args.network_name == 'docsnet':
+            dataset.compute_render_depths(cfg.renderer)
 
     # load sdfs
     if cfg.TEST.POSE_REFINE:
         print('loading SDFs')
-        cfg.sdf_optimizers = []
-        for i in cfg.TEST.CLASSES:
-            cfg.sdf_optimizers.append(sdf_optimizer(dataset.model_sdf_paths[i-1]))
+        sdf_files = []
+        for i in cfg.TEST.CLASSES[1:]:
+            sdf_files.append(dataset.model_sdf_paths[i-1])
+        cfg.sdf_optimizer = sdf_optimizer(cfg.TEST.CLASSES[1:], sdf_files)
 
     # test network
     if args.network_name == 'autoencoder':
         test_autoencoder(dataloader, background_loader, network, output_dir)
+    elif args.network_name == 'docsnet':
+        test_docsnet(dataloader, background_loader, network, output_dir)
+    elif 'contrastive' in args.network_name:
+        test_docsnet(dataloader, background_loader, network, output_dir, contrastive=True, prototype=False)
+    elif 'prototype' in args.network_name:
+        test_docsnet(dataloader, background_loader, network, output_dir, contrastive=False, prototype=True)
+    elif 'triplet' in args.network_name:
+        test_triplet_net(dataloader, background_loader, network, output_dir)
+    elif 'rrn' in args.network_name:
+        test_segnet(dataloader, background_loader, network, output_dir, rrn=True)
+    elif 'seg' in args.network_name:
+        test_segnet(dataloader, background_loader, network, output_dir, rrn=False)
     else:
         #'''
         # prepare autoencoder and codebook
-        if cfg.TRAIN.VERTEX_REG and not cfg.TRAIN.POSE_REG:
-            pose_rbpf = PoseRBPF(dataset)
-        else:
-            pose_rbpf = None
-
+        pose_rbpf = PoseRBPF(dataset, args.pretrained_encoder, args.codebook)
         test(dataloader, background_loader, network, pose_rbpf, output_dir)
         #'''
 

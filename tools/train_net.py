@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 # --------------------------------------------------------
 # FCN
@@ -27,9 +27,8 @@ import _init_paths
 import datasets
 import networks
 from fcn.config import cfg, cfg_from_file, get_output_dir, write_selected_class_file
-from fcn.train_test import train, train_autoencoder
+from fcn.train import train, train_autoencoder, train_docsnet, train_segnet, train_triplet_net
 from datasets.factory import get_dataset
-from ycb_renderer import YCBRenderer
 
 def parse_args():
     """
@@ -54,6 +53,9 @@ def parse_args():
     parser.add_argument('--dataset', dest='dataset_name',
                         help='dataset to train on',
                         default='shapenet_scene_train', type=str)
+    parser.add_argument('--dataset_background', dest='dataset_background_name',
+                        help='background dataset to train on',
+                        default='background_nvidia', type=str)
     parser.add_argument('--rand', dest='randomize',
                         help='randomize (do not use a fixed seed)',
                         action='store_true')
@@ -94,18 +96,24 @@ if __name__ == '__main__':
     # prepare dataset
     cfg.MODE = 'TRAIN'
     dataset = get_dataset(args.dataset_name)
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size=cfg.TRAIN.IMS_PER_BATCH, shuffle=True, num_workers=0)
+    worker_init_fn = dataset.worker_init_fn if hasattr(dataset, 'worker_init_fn') else None
+    if 'shapenet' in dataset.name:
+        num_workers = 4
+    else:
+        num_workers = 0
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=cfg.TRAIN.IMS_PER_BATCH, shuffle=True, 
+        num_workers=num_workers, worker_init_fn=worker_init_fn)
     print('Use dataset `{:s}` for training'.format(dataset.name))
 
     if cfg.INPUT == 'COLOR':
         if cfg.TRAIN.SYN_BACKGROUND_SPECIFIC:
-            background_dataset = get_dataset('background_nvidia')
+            background_dataset = get_dataset(args.dataset_background_name)
         else:
-            background_dataset = get_dataset('background_pascal')
+            background_dataset = get_dataset('background_coco')
     else:
         background_dataset = get_dataset('background_rgbd')
     background_loader = torch.utils.data.DataLoader(background_dataset, batch_size=cfg.TRAIN.IMS_PER_BATCH,
-                                                    shuffle=True, num_workers=8)
+                                                    shuffle=True, num_workers=4)
 
     # overwrite intrinsics
     if len(cfg.INTRINSICS) > 0:
@@ -122,6 +130,8 @@ if __name__ == '__main__':
     # prepare network
     if args.pretrained:
         network_data = torch.load(args.pretrained)
+        if isinstance(network_data, dict) and 'model' in network_data:
+            network_data = network_data['model']
         print("=> using pre-trained network '{}'".format(args.network_name))
     else:
         network_data = None
@@ -135,11 +145,16 @@ if __name__ == '__main__':
     cudnn.benchmark = True
 
     if cfg.TRAIN.SYNTHESIZE:
-        print('loading 3D models')
-        cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, render_marker=False)
-        cfg.renderer.load_objects(dataset.model_mesh_paths, dataset.model_texture_paths, dataset.model_colors)
-        cfg.renderer.set_camera_default()
-        print(dataset.model_mesh_paths)
+        if 'shapenet' not in dataset.name:
+            from ycb_renderer import YCBRenderer
+            print('loading 3D models')
+            cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, render_marker=False)
+            cfg.renderer.load_objects(dataset.model_mesh_paths, dataset.model_texture_paths, dataset.model_colors)
+            cfg.renderer.set_camera_default()
+            print(dataset.model_mesh_paths)
+
+    if args.network_name == 'docsnet' and 'shapenet' not in dataset.name:
+        dataset.compute_render_depths(cfg.renderer)
 
     assert(args.solver in ['adam', 'sgd'])
     print('=> setting {} solver'.format(args.solver))
@@ -168,6 +183,23 @@ if __name__ == '__main__':
         
         if args.network_name == 'autoencoder':
             train_autoencoder(dataloader, background_loader, network, optimizer, optimizer_discriminator, epoch)
+        elif args.network_name == 'docsnet':
+            train_docsnet(dataloader, background_loader, network, optimizer, epoch)
+        elif args.network_name == 'seg_vgg' or args.network_name == 'seg_unet':
+            train_segnet(dataloader, background_loader, network, optimizer, epoch, embedding=False, rrn=False)
+        elif 'rrn' in args.network_name:
+            train_segnet(dataloader, background_loader, network, optimizer, epoch, embedding=False, rrn=True)
+        elif 'embedding' in args.network_name:
+            train_segnet(dataloader, background_loader, network, optimizer, epoch, embedding=True, rrn=False)
+        elif 'contrastive' in args.network_name:
+            if cfg.TRAIN.EMBEDDING_PIXELWISE:
+                train_docsnet(dataloader, background_loader, network, optimizer, epoch, contrastive_pixelwise=True)
+            else:
+                train_docsnet(dataloader, background_loader, network, optimizer, epoch, contrastive=True)
+        elif 'triplet' in args.network_name:
+            train_triplet_net(dataloader, background_loader, network, optimizer, epoch)
+        elif 'prototype' in args.network_name:
+            train_docsnet(dataloader, background_loader, network, optimizer, epoch, prototype=True)
         else:
             train(dataloader, background_loader, network, optimizer, epoch)
 

@@ -7,7 +7,10 @@ from os.path import *
 import numpy as np
 import numpy.random as npr
 import cv2
-import cPickle
+try:
+    import cPickle  # Use cPickle on Python 2.7
+except ImportError:
+    import pickle as cPickle
 import scipy.io
 
 import datasets
@@ -215,7 +218,7 @@ class linemod(data.Dataset):
 
         for i in xrange(1, len(self._classes)):
             point_file = os.path.join(self._linemod_path, 'models', self._classes[i] + '.xyz')
-            print point_file
+            print(point_file)
             assert os.path.exists(point_file), 'Path does not exist: {}'.format(point_file)
             points[i] = np.loadtxt(point_file)
             if points[i].shape[0] < num:
@@ -326,7 +329,7 @@ class linemod(data.Dataset):
         if os.path.exists(cache_file):
             with open(cache_file, 'rb') as fid:
                 roidb = cPickle.load(fid)
-            print '{} gt roidb loaded from {}'.format(self.name, cache_file)
+            print('{} gt roidb loaded from {}'.format(self.name, cache_file))
             return roidb
 
         gt_roidb = [self._load_linemod_annotation(index)
@@ -334,7 +337,7 @@ class linemod(data.Dataset):
 
         with open(cache_file, 'wb') as fid:
             cPickle.dump(gt_roidb, fid, cPickle.HIGHEST_PROTOCOL)
-        print 'wrote gt roidb to {}'.format(cache_file)
+        print('wrote gt roidb to {}'.format(cache_file))
 
         return gt_roidb
 

@@ -107,7 +107,7 @@ if __name__ == '__main__':
             qt[:3] = RT[:, 3]
             poses_all.append(qt)
 
-        print poses_all
+        print(poses_all)
         renderer.set_poses(poses_all)
         renderer.set_light_pos([0, 0, 0])
 

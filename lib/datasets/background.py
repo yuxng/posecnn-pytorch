@@ -19,16 +19,44 @@ class BackgroundDataset(data.Dataset, datasets.imdb):
         self.files_color = []
         self.files_depth = []
 
-        if name == 'pascal':
-            background_dir = os.path.join(self.cache_path, '../PASCAL2012/data')
+        if name == 'coco':
+            background_dir = os.path.join(self.cache_path, '../coco/train2014/train2014')
+            for filename in os.listdir(background_dir):
+                self.files_color.append(os.path.join(background_dir, filename))
+            self.files_color.sort()
+
+        elif name == 'texture':
+            background_dir = os.path.join(self.cache_path, '../textures')
             for filename in os.listdir(background_dir):
                 self.files_color.append(os.path.join(background_dir, filename))
             self.files_color.sort()
 
         elif name == 'nvidia':
-            allencenter = os.path.join(self.cache_path, '../AllenCenter/data')
+            allencenter = os.path.join(self.cache_path, '../backgrounds/nvidia')
             subdirs = os.listdir(allencenter)
-            for i in xrange(len(subdirs)):
+            for i in range(len(subdirs)):
+                subdir = subdirs[i]
+                files = os.listdir(os.path.join(allencenter, subdir))
+                for j in range(len(files)):
+                    filename = os.path.join(allencenter, subdir, files[j])
+                    self.files_color.append(filename)
+            self.files_color.sort()
+
+        elif name == 'table':
+            allencenter = os.path.join(self.cache_path, '../backgrounds/table')
+            subdirs = os.listdir(allencenter)
+            for i in range(len(subdirs)):
+                subdir = subdirs[i]
+                files = os.listdir(os.path.join(allencenter, subdir))
+                for j in range(len(files)):
+                    filename = os.path.join(allencenter, subdir, files[j])
+                    self.files_color.append(filename)
+            self.files_color.sort()
+
+        elif name == 'isaac':
+            allencenter = os.path.join(self.cache_path, '../backgrounds/isaac')
+            subdirs = os.listdir(allencenter)
+            for i in range(len(subdirs)):
                 subdir = subdirs[i]
                 files = os.listdir(os.path.join(allencenter, subdir))
                 for j in range(len(files)):
@@ -37,9 +65,9 @@ class BackgroundDataset(data.Dataset, datasets.imdb):
             self.files_color.sort()
 
         elif name == 'rgbd':
-            comotion = os.path.join(self.cache_path, '../D435-data-with-depth/data')
+            comotion = os.path.join(self.cache_path, '../backgrounds/rgbd')
             subdirs = os.listdir(comotion)
-            for i in xrange(len(subdirs)):
+            for i in range(len(subdirs)):
                 subdir = subdirs[i]
                 files = os.listdir(os.path.join(comotion, subdir))
                 for j in range(len(files)):
@@ -58,8 +86,12 @@ class BackgroundDataset(data.Dataset, datasets.imdb):
 
         self.num = len(self.files_color)
         self.subtract_mean = cfg.TRAIN.SYN_BACKGROUND_SUBTRACT_MEAN
-        self._height = cfg.TRAIN.SYN_HEIGHT
-        self._width = cfg.TRAIN.SYN_WIDTH
+        if cfg.TRAIN.SYN_CROP:
+            self._height = cfg.TRAIN.SYN_CROP_SIZE
+            self._width = cfg.TRAIN.SYN_CROP_SIZE
+        else:
+            self._height = cfg.TRAIN.SYN_HEIGHT
+            self._width = cfg.TRAIN.SYN_WIDTH
         self._pixel_mean = cfg.PIXEL_MEANS
         print('{} background images'.format(self.num))
 
@@ -76,12 +108,11 @@ class BackgroundDataset(data.Dataset, datasets.imdb):
         return self.load(filename_color, filename_depth)
 
     def load(self, filename_color, filename_depth):
-
         if filename_depth is None:
             background_depth = np.zeros((3, self._height, self._width), dtype=np.float32)
             mask_depth = np.zeros((self._height, self._width), dtype=np.float32)
 
-        if filename_depth is None and np.random.rand(1) < 0.1:  # only for rgb cases
+        if filename_depth is None and np.random.rand(1) < cfg.TRAIN.SYN_BACKGROUND_CONSTANT_PROB:  # only for rgb cases
             # constant background image
             background_color = np.ones((self._height, self._width, 3), dtype=np.uint8)
             color = np.random.randint(256, size=3)
@@ -104,6 +135,8 @@ class BackgroundDataset(data.Dataset, datasets.imdb):
                 y2 = npr.randint(int(2*bh/3), bh)
                 background_color = background_color[y1:y2, x1:x2]
                 background_color = cv2.resize(background_color, (self._width, self._height), interpolation=cv2.INTER_LINEAR)
+                if len(background_color.shape) != 3:
+                    background_color = cv2.cvtColor(background_color, cv2.COLOR_GRAY2RGB)
 
                 if filename_depth is not None:
                     background_depth = background_depth[y1:y2, x1:x2]
@@ -112,19 +145,19 @@ class BackgroundDataset(data.Dataset, datasets.imdb):
 
             except:
                 background_color = np.zeros((self._height, self._width, 3), dtype=np.uint8)
-                print 'bad background_color image'
+                print('bad background_color image', filename_color)
                 if filename_depth is not None:
                     background_depth = np.zeros((self._height, self._width, 3), dtype=np.float32)
-                    print 'bad depth background image'
+                    print('bad depth background image')
 
             if len(background_color.shape) != 3:
                 background_color = np.zeros((self._height, self._width, 3), dtype=np.uint8)
-                print 'bad background_color image'
+                print('bad background_color image', filename_color)
 
             if filename_depth is not None:
                 if len(background_depth.shape) != 3:
                     background_depth = np.zeros((self._height, self._width, 3), dtype=np.float32)
-                    print 'bad depth background image'
+                    print('bad depth background image')
 
                 z_im = background_depth[:, :, 2]
                 mask_depth = z_im > 0.0

@@ -17,6 +17,7 @@ import pprint
 import time, os, sys
 import os.path as osp
 import numpy as np
+import datetime
 from cv_bridge import CvBridge, CvBridgeError
 from sensor_msgs.msg import Image
 
@@ -30,6 +31,14 @@ class ImageListener:
         # output dir
         this_dir = osp.dirname(__file__)
         self.outdir = osp.join(this_dir, '..', 'data', 'D435')
+        if not osp.exists(self.outdir):
+            os.mkdir(self.outdir)
+
+        now = datetime.datetime.now()
+        seq_name = "{:%m%dT%H%M%S}/".format(now)
+        self.save_dir = osp.join(self.outdir, seq_name)
+        if not osp.exists(self.save_dir):
+            os.mkdir(self.save_dir)
 
         # initialize a node
         rospy.init_node("image_listener")
@@ -55,13 +64,14 @@ class ImageListener:
 
         # write images
         im = self.cv_bridge.imgmsg_to_cv2(rgb, 'bgr8')
-        filename = self.outdir + '/%06d-color.png' % self.count
-        cv2.imwrite(filename, im)
-        print filename
+        filename = self.save_dir + '/%06d-color.png' % self.count
+        if self.count % 10 == 0:
+            cv2.imwrite(filename, im)
+            print(filename)
 
-        filename = self.outdir + '/%06d-depth.png' % self.count
-        cv2.imwrite(filename, depth_cv)
-        print(filename)
+        # filename = self.save_dir + '/%06d-depth.png' % self.count
+        # cv2.imwrite(filename, depth_cv)
+        # print(filename)
 
         self.count += 1
 

@@ -8,17 +8,24 @@ root_path = osp.join(this_dir, '..', 'data', 'YCB_Object')
 #opt = ycb_video()
 
 # classes = opt.classes + ('holiday_cup1', 'holiday_cup2', 'sanning_mug_new', )
-classes = ('block_red', 'block_green', 'block_blue', 'block_yellow')
+# classes = ('block_red', 'block_green', 'block_blue', 'block_yellow')
+classes = ('industrial_dolly',)
 
 # extent file
-filename = osp.join(root_path, 'models', 'extents_blocks.txt')
+filename = osp.join(root_path, 'models', 'extents_dolly.txt')
 fext = open(filename, "w")
 
 for i in range(len(classes)):
 
+    # clear model
+    bpy.ops.object.select_all(action='DESELECT')
+    bpy.ops.object.select_pattern(pattern="Camera")
+    bpy.ops.object.select_all(action='INVERT')
+    bpy.ops.object.delete()
+
     cls = classes[i]
     print(cls)
-    filename = osp.join(root_path, 'models', cls, 'textured_simple.obj')
+    filename = osp.join(root_path, 'models', cls, 'IndustrialDolly.obj')
     print(filename)
 
     imported_object = bpy.ops.import_scene.obj(filepath=filename)
@@ -36,27 +43,26 @@ for i in range(len(classes)):
 
     # normalization
     i = 0
-    m = 0
-    factor = 0.01
+    m = np.mean(vertices, axis=0)
+    factor = 1
 
     for item in bpy.data.objects:
         if item.type == 'MESH':
             for vertex in item.data.vertices:
                 rv = vertex.co
-                vertex.co[0] = vertices[i, 0] * factor
-                vertex.co[1] = vertices[i, 1] * factor
-                vertex.co[2] = vertices[i, 2] * factor
+                vertex.co[0] = (vertices[i, 0] - m[0]) * factor
+                vertex.co[1] = (vertices[i, 1] - m[1]) * factor
+                vertex.co[2] = (vertices[i, 2] - m[2]) * factor
                 i += 1
        
     # save model
     bpy.data.objects[obj_object.name].select = True
-    filename = osp.join(root_path, 'models', cls, 'textured_simple_new.obj')
+    filename = osp.join(root_path, 'models', cls, 'textured_simple.obj')
     bpy.ops.export_scene.obj(filepath=filename, use_selection=True)
 
-    vertices[:, 0] *= factor
-    vertices[:, 1] -= m
-    vertices[:, 1] *= factor
-    vertices[:, 2] *= factor
+    vertices[:, 0] = (vertices[:, 0] - m[0]) * factor
+    vertices[:, 1] = (vertices[:, 1] - m[1]) * factor
+    vertices[:, 2] = (vertices[:, 2] - m[2]) * factor
 
     # write extent
     extent = 2 * np.max(np.absolute(vertices), axis=0)
@@ -68,7 +74,7 @@ for i in range(len(classes)):
     index = perm[:3000]
     pcloud = vertices[index, :]
 
-    filename = osp.join(root_path, 'models', cls, 'points_new.xyz')
+    filename = osp.join(root_path, 'models', cls, 'points.xyz')
     f = open(filename, "w")
     for i in range(pcloud.shape[0]):
         f.write('%f %f %f\n' % (pcloud[i, 0], pcloud[i, 1], pcloud[i, 2]))

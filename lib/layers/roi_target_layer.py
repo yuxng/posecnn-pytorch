@@ -46,7 +46,7 @@ def roi_target_layer(rpn_rois, gt_boxes):
     num = labels.shape[0]
     label_blob = np.zeros((num, num_classes), dtype=np.float32)
     if np.any(roi_blob[:, -1] > 0):
-        for i in xrange(num):
+        for i in range(num):
             label_blob[i, int(labels[i])] = 1.0
 
     return torch.from_numpy(label_blob).cuda(), torch.from_numpy(bbox_targets).cuda(), \

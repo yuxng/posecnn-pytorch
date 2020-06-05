@@ -35,7 +35,7 @@ def pose_target_layer(rois, bbox_prob, bbox_pred, gt_boxes, poses, is_training):
     pred_boxes = bbox_transform_inv(boxes, bbox_pred)
 
     # assign boxes
-    for i in xrange(rois.shape[0]):
+    for i in range(rois.shape[0]):
         cls = int(rois[i, 1])
         rois[i, 2:6] = pred_boxes[i, cls*4:cls*4+4]
         rois[i, 6] = bbox_prob[i, cls]
@@ -98,7 +98,7 @@ def _compute_pose_targets(quaternions, labels, num_classes):
     poses_target = np.zeros((num, 4 * num_classes), dtype=np.float32)
     poses_weight = np.zeros((num, 4 * num_classes), dtype=np.float32)
 
-    for i in xrange(num):
+    for i in range(num):
         cls = labels[i]
         if cls > 0 and np.linalg.norm(quaternions[i, :]) > 0:
             start = int(4 * cls)

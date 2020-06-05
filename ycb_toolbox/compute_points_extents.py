@@ -15,6 +15,12 @@ fext = open(filename, "w")
 
 for i in range(len(classes)):
 
+    # clear model
+    bpy.ops.object.select_all(action='DESELECT')
+    bpy.ops.object.select_pattern(pattern="Camera")
+    bpy.ops.object.select_all(action='INVERT')
+    bpy.ops.object.delete()
+
     cls = classes[i]
     print(cls)
     filename = osp.join(root_path, 'models_sim', cls, 'meshes', cls + '.obj')
