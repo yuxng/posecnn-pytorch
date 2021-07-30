@@ -1,0 +1,1185 @@
+Panels:
+  - Class: rviz/Displays
+    Help Height: 0
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /ManualControl1
+        - /WorldObjects1/Namespaces1
+        - /TF1/Frames1
+        - /Image1
+        - /PoseRBPF1
+      Splitter Ratio: 0.620202005
+    Tree Height: 511
+  - Class: rviz/Selection
+    Name: Selection
+  - Class: rviz/Tool Properties
+    Expanded:
+      - /2D Pose Estimate1
+      - /2D Nav Goal1
+      - /Publish Point1
+    Name: Tool Properties
+    Splitter Ratio: 0.588679016
+  - Class: rviz/Views
+    Expanded:
+      - /Current View1
+    Name: Views
+    Splitter Ratio: 0.5
+  - Class: rviz/Time
+    Experimental: false
+    Name: Time
+    SyncMode: 0
+    SyncSource: Right RGB
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Alpha: 0.5
+      Cell Size: 1
+      Class: rviz/Grid
+      Color: 220; 220; 226
+      Enabled: true
+      Line Style:
+        Line Width: 0.0299999993
+        Value: Lines
+      Name: Grid
+      Normal Cell Count: 0
+      Offset:
+        X: 0
+        Y: 0
+        Z: -1
+      Plane: XY
+      Plane Cell Count: 10
+      Reference Frame: world
+      Value: true
+    - Alpha: 0.300000012
+      Class: rviz/RobotModel
+      Collision Enabled: false
+      Enabled: true
+      Links:
+        All Links Enabled: true
+        Expand Joint Details: false
+        Expand Link Details: false
+        Expand Tree: false
+        Link Tree Style: Links in Alphabetic Order
+      Name: FrankaPanda
+      Robot Description: robot_description
+      TF Prefix: ""
+      Update Interval: 0.00999999978
+      Value: true
+      Visual Enabled: true
+    - Alpha: 1
+      Class: rviz/RobotModel
+      Collision Enabled: false
+      Enabled: true
+      Links:
+        All Links Enabled: true
+        Expand Joint Details: false
+        Expand Link Details: false
+        Expand Tree: false
+        Link Tree Style: Links in Alphabetic Order
+      Name: MeasuredFrankaPanda
+      Robot Description: robot_description
+      TF Prefix: measured
+      Update Interval: 0.00999999978
+      Value: true
+      Visual Enabled: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud
+      Color: 255; 170; 255
+      Color Transformer: FlatColor
+      Decay Time: 0.100000001
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 4096
+      Min Color: 0; 0; 0
+      Min Intensity: 0
+      Name: RightClosestPts
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.0299999993
+      Style: Flat Squares
+      Topic: /world/ambient/closest_pts/right
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud
+      Color: 255; 255; 127
+      Color Transformer: FlatColor
+      Decay Time: 0.100000001
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 4096
+      Min Color: 0; 0; 0
+      Min Intensity: 0
+      Name: LeftClosestPts
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.0299999993
+      Style: Flat Squares
+      Topic: /world/ambient/closest_pts/left
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+    - Alpha: 0.699999988
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud
+      Color: 255; 255; 255
+      Color Transformer: Intensity
+      Decay Time: 0
+      Enabled: false
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 4096
+      Min Color: 0; 0; 0
+      Min Intensity: 0
+      Name: UnassociatedPts
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.00999999978
+      Style: Points
+      Topic: /tracker/point_cloud/unassociated_points
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: false
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud
+      Color: 179; 0; 0
+      Color Transformer: FlatColor
+      Decay Time: 0.100000001
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 4096
+      Min Color: 0; 0; 0
+      Min Intensity: 0
+      Name: BackgroundPts
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 5
+      Size (m): 0.00999999978
+      Style: Points
+      Topic: /world/background_pts
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud
+      Color: 170; 170; 255
+      Color Transformer: FlatColor
+      Decay Time: 0.100000001
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 4096
+      Min Color: 0; 0; 0
+      Min Intensity: 0
+      Name: AmbientPts
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 5
+      Size (m): 0.0250000004
+      Style: Flat Squares
+      Topic: /world/ambient_pts
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud
+      Color: 170; 170; 0
+      Color Transformer: FlatColor
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 170; 0; 255
+      Max Intensity: 4096
+      Min Color: 0; 0; 0
+      Min Intensity: 0
+      Name: AmbientSegment1
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.0199999996
+      Style: Boxes
+      Topic: /world/ambient/base_ambient/update
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud
+      Color: 170; 0; 255
+      Color Transformer: FlatColor
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 4096
+      Min Color: 0; 0; 0
+      Min Intensity: 0
+      Name: AmbientSegment2
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.0199999996
+      Style: Boxes
+      Topic: /world/ambient/segment1/update
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud
+      Color: 0; 170; 127
+      Color Transformer: FlatColor
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 4096
+      Min Color: 0; 0; 0
+      Min Intensity: 0
+      Name: AmbientSegment3
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.0199999996
+      Style: Boxes
+      Topic: /world/ambient/segment2/update
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+    - Class: rviz/InteractiveMarkers
+      Enable Transparency: true
+      Enabled: true
+      Name: ManualControl
+      Show Axes: false
+      Show Descriptions: true
+      Show Visual Aids: false
+      Update Topic: /robot_control_interactive_markers/update
+      Value: true
+    - Class: rviz/MarkerArray
+      Enabled: false
+      Marker Topic: /world/detected_spheres/rviz
+      Name: DetectedSpheres
+      Namespaces:
+        {}
+      Queue Size: 100
+      Value: false
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /world/objects/rviz
+      Name: WorldObjects
+      Namespaces:
+        00_cracker_box: true
+        00_mustard_bottle: true
+        00_potted_meat_can: true
+        00_sugar_box: true
+        00_table: true
+        00_tomato_soup_can: true
+        carter_base_cylinder: true
+      Queue Size: 100
+      Value: true
+    - Class: rviz/InteractiveMarkers
+      Enable Transparency: true
+      Enabled: true
+      Name: WorldControlInteractiveMarkers
+      Show Axes: false
+      Show Descriptions: true
+      Show Visual Aids: false
+      Update Topic: /world/interactive_control/update
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud
+      Color: 255; 255; 127
+      Color Transformer: FlatColor
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 4096
+      Min Color: 0; 0; 0
+      Min Intensity: 0
+      Name: ReferencePoints
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.0199999996
+      Style: Boxes
+      Topic: /world/reference_points/cloud
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /experiments/right_target
+      Name: RightTarget
+      Namespaces:
+        {}
+      Queue Size: 100
+      Value: true
+    - Alpha: 1
+      Axes Length: 0.100000001
+      Axes Radius: 0.00999999978
+      Class: rviz/Pose
+      Color: 255; 25; 0
+      Enabled: true
+      Head Length: 0.300000012
+      Head Radius: 0.100000001
+      Name: BananaPose
+      Shaft Length: 0.100000001
+      Shaft Radius: 0.00999999978
+      Shape: Axes
+      Topic: /banana_pose
+      Unreliable: false
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud
+      Color: 255; 255; 255
+      Color Transformer: Intensity
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 4096
+      Min Color: 0; 0; 0
+      Min Intensity: 0
+      Name: Banana points
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.00999999978
+      Style: Points
+      Topic: /posecnn_points_011_banana
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+    - Class: rviz/Image
+      Enabled: true
+      Image Topic: /sim/left_color_camera/image
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: Right RGB
+      Normalize Range: true
+      Queue Size: 2
+      Transport Hint: raw
+      Unreliable: false
+      Value: true
+    - Class: rviz/Image
+      Enabled: true
+      Image Topic: /sim/left_depth_camera/image
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: Right Depth
+      Normalize Range: true
+      Queue Size: 2
+      Transport Hint: raw
+      Unreliable: false
+      Value: true
+    - Class: rviz/Image
+      Enabled: true
+      Image Topic: /posecnn_label_rgb__00
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: Left Depth
+      Normalize Range: true
+      Queue Size: 2
+      Transport Hint: raw
+      Unreliable: false
+      Value: true
+    - Class: rviz/TF
+      Enabled: true
+      Frame Timeout: 15
+      Frames:
+        00_base_link:
+          Value: true
+        00_chassis_link:
+          Value: true
+        00_cracker_box:
+          Value: true
+        00_mustard_bottle:
+          Value: true
+        00_potted_meat_can:
+          Value: true
+        00_sugar_box:
+          Value: true
+        00_table:
+          Value: true
+        00_tomato_soup_can:
+          Value: true
+        00_zed_left:
+          Value: true
+        00_zed_right:
+          Value: true
+        All Enabled: false
+        baker_anchor_link:
+          Value: true
+        baker_chewie_floor:
+          Value: true
+        baker_handle:
+          Value: true
+        baker_link:
+          Value: true
+        baker_link_tmp:
+          Value: true
+        base_link:
+          Value: true
+        camera_bottom_screw_frame:
+          Value: true
+        camera_color_frame:
+          Value: true
+        camera_color_optical_frame:
+          Value: true
+        camera_depth_frame:
+          Value: true
+        camera_depth_optical_frame:
+          Value: true
+        camera_left_ir_frame:
+          Value: true
+        camera_left_ir_optical_frame:
+          Value: true
+        camera_link:
+          Value: true
+        camera_right_ir_frame:
+          Value: true
+        camera_right_ir_optical_frame:
+          Value: true
+        carter_base_cylinder:
+          Value: true
+        chewie_door_left_anchor_link:
+          Value: true
+        chewie_door_left_handle:
+          Value: true
+        chewie_door_left_link:
+          Value: true
+        chewie_door_left_link_tmp:
+          Value: true
+        chewie_door_right_anchor_link:
+          Value: true
+        chewie_door_right_handle:
+          Value: true
+        chewie_door_right_link:
+          Value: true
+        chewie_door_right_link_tmp:
+          Value: true
+        dagger:
+          Value: true
+        dagger_door_left_anchor_link:
+          Value: true
+        dagger_door_left_handle:
+          Value: true
+        dagger_door_left_link:
+          Value: true
+        dagger_door_left_link_tmp:
+          Value: true
+        dagger_door_right_anchor_link:
+          Value: true
+        dagger_door_right_handle:
+          Value: true
+        dagger_door_right_link:
+          Value: true
+        dagger_door_right_link_tmp:
+          Value: true
+        extractor_hood:
+          Value: true
+        hitman:
+          Value: true
+        hitman_countertop:
+          Value: true
+        hitman_drawer_bottom:
+          Value: true
+        hitman_drawer_bottom_front:
+          Value: true
+        hitman_drawer_handle_bottom:
+          Value: true
+        hitman_drawer_handle_top:
+          Value: true
+        hitman_drawer_top:
+          Value: true
+        hitman_drawer_top_front:
+          Value: true
+        hitman_tmp:
+          Value: true
+        indigo:
+          Value: true
+        indigo_countertop:
+          Value: true
+        indigo_door_left:
+          Value: true
+        indigo_door_left_anchor_link:
+          Value: true
+        indigo_door_left_joint_anchor_link:
+          Value: true
+        indigo_door_left_link:
+          Value: true
+        indigo_door_left_nob_link:
+          Value: true
+        indigo_door_right:
+          Value: true
+        indigo_door_right_anchor_link:
+          Value: true
+        indigo_door_right_joint_anchor_link:
+          Value: true
+        indigo_door_right_link:
+          Value: true
+        indigo_door_right_nob_link:
+          Value: true
+        indigo_drawer_bottom:
+          Value: true
+        indigo_drawer_handle_bottom:
+          Value: true
+        indigo_drawer_handle_top:
+          Value: true
+        indigo_drawer_top:
+          Value: true
+        indigo_tmp:
+          Value: true
+        measured/base_link:
+          Value: true
+        measured/camera_bottom_screw_frame:
+          Value: true
+        measured/camera_color_frame:
+          Value: true
+        measured/camera_color_optical_frame:
+          Value: true
+        measured/camera_depth_frame:
+          Value: true
+        measured/camera_depth_optical_frame:
+          Value: true
+        measured/camera_left_ir_frame:
+          Value: true
+        measured/camera_left_ir_optical_frame:
+          Value: true
+        measured/camera_link:
+          Value: true
+        measured/camera_right_ir_frame:
+          Value: true
+        measured/camera_right_ir_optical_frame:
+          Value: true
+        measured/panda_face_back_left:
+          Value: true
+        measured/panda_face_back_right:
+          Value: true
+        measured/panda_face_left:
+          Value: true
+        measured/panda_face_right:
+          Value: true
+        measured/panda_forearm_end_pt:
+          Value: true
+        measured/panda_hand:
+          Value: true
+        measured/panda_leftfinger:
+          Value: true
+        measured/panda_leftfingertip:
+          Value: true
+        measured/panda_link0:
+          Value: true
+        measured/panda_link1:
+          Value: true
+        measured/panda_link2:
+          Value: true
+        measured/panda_link3:
+          Value: true
+        measured/panda_link4:
+          Value: true
+        measured/panda_link5:
+          Value: true
+        measured/panda_link6:
+          Value: true
+        measured/panda_link7:
+          Value: true
+        measured/panda_link8:
+          Value: true
+        measured/panda_rightfinger:
+          Value: true
+        measured/panda_rightfingertip:
+          Value: true
+        measured/panda_wrist_end_pt:
+          Value: true
+        measured/right_gripper:
+          Value: true
+        panda_face_back_left:
+          Value: true
+        panda_face_back_right:
+          Value: true
+        panda_face_left:
+          Value: true
+        panda_face_right:
+          Value: true
+        panda_forearm_end_pt:
+          Value: true
+        panda_hand:
+          Value: true
+        panda_leftfinger:
+          Value: true
+        panda_leftfingertip:
+          Value: true
+        panda_link0:
+          Value: true
+        panda_link1:
+          Value: true
+        panda_link2:
+          Value: true
+        panda_link3:
+          Value: true
+        panda_link4:
+          Value: true
+        panda_link5:
+          Value: true
+        panda_link6:
+          Value: true
+        panda_link7:
+          Value: true
+        panda_link8:
+          Value: true
+        panda_rightfinger:
+          Value: true
+        panda_rightfingertip:
+          Value: true
+        panda_wrist_end_pt:
+          Value: true
+        posecnn/00_bleach_cleanser_rgb__01_roi:
+          Value: true
+        posecnn/00_cracker_box_rgb__01_roi:
+          Value: true
+        posecnn/00_cracker_box_rgb__02_roi:
+          Value: true
+        posecnn/00_cracker_box_rgb__03_roi:
+          Value: true
+        posecnn/00_extra_large_clamp_rgb__01_roi:
+          Value: true
+        posecnn/00_master_chef_can_rgb__01_roi:
+          Value: true
+        posecnn/00_mustard_bottle_rgb__01_roi:
+          Value: true
+        posecnn/00_potted_meat_can_rgb__01_roi:
+          Value: true
+        posecnn/00_tomato_soup_can_rgb__01_roi:
+          Value: false
+        posecnn/00_tomato_soup_can_rgb__02_roi:
+          Value: true
+        posecnn_camera_link:
+          Value: true
+        range:
+          Value: true
+        right_gripper:
+          Value: true
+        sektion:
+          Value: true
+        ue_world:
+          Value: true
+        wall_right:
+          Value: true
+        walls:
+          Value: true
+        world:
+          Value: true
+      Marker Scale: 0.25
+      Name: TF
+      Show Arrows: true
+      Show Axes: true
+      Show Names: true
+      Tree:
+        ue_world:
+          00_chassis_link:
+            00_base_link:
+              base_link:
+                carter_base_cylinder:
+                  {}
+                measured/base_link:
+                  measured/panda_link0:
+                    measured/panda_link1:
+                      measured/panda_link2:
+                        measured/panda_link3:
+                          measured/panda_link4:
+                            measured/panda_forearm_end_pt:
+                              {}
+                            measured/panda_link5:
+                              measured/panda_link6:
+                                measured/panda_link7:
+                                  measured/panda_link8:
+                                    measured/panda_hand:
+                                      measured/camera_bottom_screw_frame:
+                                        measured/camera_link:
+                                          measured/camera_depth_frame:
+                                            measured/camera_color_frame:
+                                              measured/camera_color_optical_frame:
+                                                {}
+                                            measured/camera_depth_optical_frame:
+                                              {}
+                                            measured/camera_left_ir_frame:
+                                              measured/camera_left_ir_optical_frame:
+                                                {}
+                                            measured/camera_right_ir_frame:
+                                              measured/camera_right_ir_optical_frame:
+                                                {}
+                                      measured/panda_face_back_left:
+                                        {}
+                                      measured/panda_face_back_right:
+                                        {}
+                                      measured/panda_face_left:
+                                        {}
+                                      measured/panda_face_right:
+                                        {}
+                                      measured/panda_leftfinger:
+                                        measured/panda_leftfingertip:
+                                          {}
+                                      measured/panda_rightfinger:
+                                        measured/panda_rightfingertip:
+                                          {}
+                                    measured/right_gripper:
+                                      {}
+                                  measured/panda_wrist_end_pt:
+                                    {}
+                panda_link0:
+                  panda_link1:
+                    panda_link2:
+                      panda_link3:
+                        panda_link4:
+                          panda_forearm_end_pt:
+                            {}
+                          panda_link5:
+                            panda_link6:
+                              panda_link7:
+                                panda_link8:
+                                  panda_hand:
+                                    camera_bottom_screw_frame:
+                                      camera_link:
+                                        camera_depth_frame:
+                                          camera_color_frame:
+                                            camera_color_optical_frame:
+                                              {}
+                                          camera_depth_optical_frame:
+                                            {}
+                                          camera_left_ir_frame:
+                                            camera_left_ir_optical_frame:
+                                              {}
+                                          camera_right_ir_frame:
+                                            camera_right_ir_optical_frame:
+                                              {}
+                                    panda_face_back_left:
+                                      {}
+                                    panda_face_back_right:
+                                      {}
+                                    panda_face_left:
+                                      {}
+                                    panda_face_right:
+                                      {}
+                                    panda_leftfinger:
+                                      panda_leftfingertip:
+                                        {}
+                                    panda_rightfinger:
+                                      panda_rightfingertip:
+                                        {}
+                                  right_gripper:
+                                    {}
+                                panda_wrist_end_pt:
+                                  {}
+                posecnn/00_bleach_cleanser_rgb__01_roi:
+                  {}
+                posecnn/00_cracker_box_rgb__01_roi:
+                  {}
+                posecnn/00_cracker_box_rgb__02_roi:
+                  {}
+                posecnn/00_cracker_box_rgb__03_roi:
+                  {}
+                posecnn/00_extra_large_clamp_rgb__01_roi:
+                  {}
+                posecnn/00_master_chef_can_rgb__01_roi:
+                  {}
+                posecnn/00_mustard_bottle_rgb__01_roi:
+                  {}
+                posecnn/00_potted_meat_can_rgb__01_roi:
+                  {}
+                posecnn/00_tomato_soup_can_rgb__01_roi:
+                  {}
+                posecnn/00_tomato_soup_can_rgb__02_roi:
+                  {}
+                posecnn_camera_link:
+                  {}
+          00_cracker_box:
+            {}
+          00_mustard_bottle:
+            {}
+          00_potted_meat_can:
+            {}
+          00_sugar_box:
+            {}
+          00_table:
+            {}
+          00_tomato_soup_can:
+            {}
+          00_zed_left:
+            {}
+          00_zed_right:
+            {}
+        world:
+          sektion:
+            baker_anchor_link:
+              baker_link_tmp:
+                baker_handle:
+                  {}
+                baker_link:
+                  {}
+            baker_chewie_floor:
+              {}
+            chewie_door_left_anchor_link:
+              chewie_door_left_link_tmp:
+                chewie_door_left_handle:
+                  {}
+                chewie_door_left_link:
+                  {}
+            chewie_door_right_anchor_link:
+              chewie_door_right_link_tmp:
+                chewie_door_right_handle:
+                  {}
+                chewie_door_right_link:
+                  {}
+            dagger:
+              dagger_door_left_anchor_link:
+                dagger_door_left_link_tmp:
+                  dagger_door_left_handle:
+                    {}
+                  dagger_door_left_link:
+                    {}
+              dagger_door_right_anchor_link:
+                dagger_door_right_link_tmp:
+                  dagger_door_right_handle:
+                    {}
+                  dagger_door_right_link:
+                    {}
+            extractor_hood:
+              {}
+            hitman_tmp:
+              hitman:
+                hitman_drawer_bottom:
+                  hitman_drawer_bottom_front:
+                    {}
+                  hitman_drawer_handle_bottom:
+                    {}
+                hitman_drawer_top:
+                  hitman_drawer_handle_top:
+                    {}
+                  hitman_drawer_top_front:
+                    {}
+              hitman_countertop:
+                {}
+            indigo_tmp:
+              indigo:
+                indigo_door_left_anchor_link:
+                  indigo_door_left_joint_anchor_link:
+                    indigo_door_left_link:
+                      indigo_door_left:
+                        {}
+                      indigo_door_left_nob_link:
+                        {}
+                indigo_door_right_anchor_link:
+                  indigo_door_right_joint_anchor_link:
+                    indigo_door_right_link:
+                      indigo_door_right:
+                        {}
+                      indigo_door_right_nob_link:
+                        {}
+                indigo_drawer_bottom:
+                  indigo_drawer_handle_bottom:
+                    {}
+                indigo_drawer_top:
+                  indigo_drawer_handle_top:
+                    {}
+              indigo_countertop:
+                {}
+              wall_right:
+                {}
+            range:
+              {}
+            walls:
+              {}
+      Update Interval: 0
+      Value: true
+    - Alpha: 1
+      Class: rviz/RobotModel
+      Collision Enabled: false
+      Enabled: false
+      Links:
+        All Links Enabled: true
+        Expand Joint Details: false
+        Expand Link Details: false
+        Expand Tree: false
+        Link Tree Style: Links in Alphabetic Order
+      Name: Cabinet
+      Robot Description: kitchen_description
+      TF Prefix: ""
+      Update Interval: 0
+      Value: false
+      Visual Enabled: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /action_marker
+      Name: Goal markers
+      Namespaces:
+        {}
+      Queue Size: 100
+      Value: true
+    - Class: moveit_rviz_plugin/PlanningScene
+      Enabled: true
+      Move Group Namespace: ""
+      Name: PlanningScene
+      Planning Scene Topic: move_group/monitored_planning_scene
+      Robot Description: robot_description
+      Scene Geometry:
+        Scene Alpha: 0.899999976
+        Scene Color: 50; 230; 50
+        Scene Display Time: 0.200000003
+        Show Scene Geometry: true
+        Voxel Coloring: Z-Axis
+        Voxel Rendering: Occupied Voxels
+      Scene Robot:
+        Attached Body Color: 150; 50; 150
+        Links:
+          All Links Enabled: true
+          Expand Joint Details: false
+          Expand Link Details: false
+          Expand Tree: false
+          Link Tree Style: Links in Alphabetic Order
+        Robot Alpha: 1
+        Show Robot Collision: false
+        Show Robot Visual: true
+      Value: true
+    - Class: moveit_rviz_plugin/Trajectory
+      Color Enabled: false
+      Enabled: true
+      Interrupt Display: false
+      Links:
+        All Links Enabled: true
+        Expand Joint Details: false
+        Expand Link Details: false
+        Expand Tree: false
+        Link Tree Style: Links in Alphabetic Order
+      Loop Animation: true
+      Name: Trajectory
+      Robot Alpha: 0.5
+      Robot Color: 150; 50; 150
+      Robot Description: robot_description
+      Show Robot Collision: false
+      Show Robot Visual: true
+      Show Trail: false
+      State Display Time: 0.05 s
+      Trail Step Size: 1
+      Trajectory Topic: /move_group/display_planned_path
+      Value: true
+    - Class: rviz/Axes
+      Enabled: true
+      Length: 0.100000001
+      Name: Camera
+      Radius: 0.0250000004
+      Reference Frame: 00_zed_left
+      Value: true
+    - Class: rviz/Axes
+      Enabled: false
+      Length: 1
+      Name: Coordinate frame
+      Radius: 0.00999999978
+      Reference Frame: 00_base_link
+      Value: false
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /grasps
+      Name: Grasps
+      Namespaces:
+        {}
+      Queue Size: 100
+      Value: true
+    - Class: rviz/Image
+      Enabled: false
+      Image Topic: /posecnn_label_rgb__00
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: Image
+      Normalize Range: true
+      Queue Size: 2
+      Transport Hint: raw
+      Unreliable: false
+      Value: false
+    - Class: rviz/Image
+      Enabled: true
+      Image Topic: /poserbpf_image
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: PoseRBPF
+      Normalize Range: true
+      Queue Size: 2
+      Transport Hint: raw
+      Unreliable: false
+      Value: true
+  Enabled: true
+  Global Options:
+    Background Color: 77; 77; 77
+    Default Light: true
+    Fixed Frame: world
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz/Interact
+      Hide Inactive Objects: true
+    - Class: rviz/MoveCamera
+    - Class: rviz/Select
+    - Class: rviz/FocusCamera
+    - Class: rviz/Measure
+    - Class: rviz/SetInitialPose
+      Topic: /initialpose
+    - Class: rviz/SetGoal
+      Topic: /move_base_simple/goal
+    - Class: rviz/PublishPoint
+      Single click: true
+      Topic: /clicked_point
+  Value: true
+  Views:
+    Current:
+      Class: rviz/Orbit
+      Distance: 6.57640409
+      Enable Stereo Rendering:
+        Stereo Eye Separation: 0.0599999987
+        Stereo Focal Distance: 1
+        Swap Stereo Eyes: false
+        Value: false
+      Focal Point:
+        X: 1.65051579
+        Y: -2.67013073
+        Z: -1.21144962
+      Focal Shape Fixed Size: true
+      Focal Shape Size: 0.0500000007
+      Invert Z Axis: false
+      Name: Current View
+      Near Clip Distance: 0.00999999978
+      Pitch: 0.234798819
+      Target Frame: <Fixed Frame>
+      Value: Orbit (rviz)
+      Yaw: 0.795253158
+    Saved: ~
+Window Geometry:
+  Displays:
+    collapsed: false
+  Height: 1176
+  Hide Left Dock: false
+  Hide Right Dock: false
+  Image:
+    collapsed: false
+  Left Depth:
+    collapsed: false
+  PoseRBPF:
+    collapsed: false
+  QMainWindow State: 000000ff00000000fd00000004000000000000029b00000240fc020000000afb0000001200530065006c0065006300740069006f006e00000001e10000009b0000006100fffffffb0000001e0054006f006f006c002000500072006f007000650072007400690065007302000001ed000001df00000185000000a3fb000000120056006900650077007300200054006f006f02000001df000002110000018500000122fb000000200054006f006f006c002000500072006f0070006500720074006900650073003203000002880000011d000002210000017afb000000100044006900730070006c006100790073010000023a00000240000000d700fffffffb0000002000730065006c0065006300740069006f006e00200062007500660066006500720200000138000000aa0000023a00000294fb00000014005700690064006500530074006500720065006f02000000e6000000d2000003ee0000030bfb0000000c004b0069006e0065006300740200000186000001060000030c00000261fb000000280020002d0020005400720061006a006500630074006f0072007900200053006c00690064006500720000000000ffffffff0000000000000000fb0000003c005400720061006a006500630074006f007200790020002d0020005400720061006a006500630074006f0072007900200053006c00690064006500720000000000ffffffff0000004a00ffffff000000010000021a00000240fc0200000004fb0000001e0054006f006f006c002000500072006f00700065007200740069006500730100000041000000780000000000000000fb000000100050006f007300650052004200500046010000023a000002400000001600fffffffb0000000a0056006900650077007300000002f200000188000000ad00fffffffb0000001200530065006c0065006300740069006f006e010000025a000000b2000000000000000000000002000007510000020cfc0100000005fb00000014004c0065006600740020004400650070007400680100000000000001ff0000007c00fffffffb00000016005200690067006800740020004400650070007400680100000205000002cf0000008500fffffffb0000000a0049006d00610067006501000003c9000001fe0000000000000000fc000004da000002770000007700fffffffa000000010200000002fb0000000a0049006d0061006700650000000000ffffffff0000001600fffffffb000000120052006900670068007400200052004700420100000028000000a90000001600fffffffb0000000a00560069006500770073030000004e00000080000002e100000197000000030000073f00000043fc0100000002fb0000000800540069006d006500000000000000073f0000030000fffffffb0000000800540069006d00650100000000000004500000000000000000000002900000024000000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  Right Depth:
+    collapsed: false
+  Right RGB:
+    collapsed: false
+  Selection:
+    collapsed: false
+  Time:
+    collapsed: false
+  Tool Properties:
+    collapsed: false
+  Trajectory - Trajectory Slider:
+    collapsed: false
+  Views:
+    collapsed: false
+  Width: 1873
+  X: 1967
+  Y: 24

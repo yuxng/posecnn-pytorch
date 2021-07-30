@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # --------------------------------------------------------
-# DeepIM
+# PoseCNN
 # Copyright (c) 2018 NVIDIA
 # Licensed under The MIT License [see LICENSE for details]
 # Written by Yu Xiang
@@ -23,7 +23,7 @@ import random
 import scipy.io
 
 import _init_paths
-from fcn.test_dataset import test, test_autoencoder, test_docsnet, test_segnet, test_triplet_net
+from fcn.test_dataset import test, test_autoencoder
 from fcn.config import cfg, cfg_from_file, get_output_dir
 from datasets.factory import get_dataset
 import networks
@@ -60,12 +60,6 @@ def parse_args():
                         action='store_true')
     parser.add_argument('--network', dest='network_name',
                         help='name of the network',
-                        default=None, type=str)
-    parser.add_argument('--cad', dest='cad_name',
-                        help='name of the CAD file',
-                        default=None, type=str)
-    parser.add_argument('--pose', dest='pose_name',
-                        help='name of the pose files',
                         default=None, type=str)
     parser.add_argument('--background', dest='background_name',
                         help='name of the background file',

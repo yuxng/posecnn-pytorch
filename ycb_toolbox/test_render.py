@@ -18,6 +18,8 @@ from fcn.config import cfg, cfg_from_file, get_output_dir
 import scipy.io
 import cv2
 import numpy as np
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 from utils.se3 import *
 from ycb_renderer import YCBRenderer
 from ycb_globals import ycb_video
@@ -37,10 +39,6 @@ def parse_args():
                         help='name of the pose files',
                         default=None, type=str)
 
-    if len(sys.argv) == 1:
-        parser.print_help()
-        sys.exit(1)
-
     args = parser.parse_args()
     return args
 
@@ -54,6 +52,8 @@ if __name__ == '__main__':
     seq_id = '0038'
     height = 480
     width = 640
+    start = 0
+    is_save = False
 
     # load the first mat file
     filename = os.path.join(root, 'data', seq_id, '000001-meta.mat')
@@ -63,12 +63,12 @@ if __name__ == '__main__':
     intrinsic_matrix = metadata['intrinsic_matrix']
 
     obj_paths = [
-        '{}/models/{}/textured_simple.obj'.format(root, opt.classes[int(cls)-1]) for cls in cls_indexes]
+        '{}/models/{}/textured_simple.obj'.format(root, opt.classes[int(cls)]) for cls in cls_indexes]
     texture_paths = [
-        '{}/models/{}/texture_map.png'.format(root, opt.classes[int(cls)-1]) for cls in cls_indexes]
-    colors = [np.array(opt.class_colors[int(cls)-1]) / 255.0 for cls in cls_indexes]
+        '{}/models/{}/texture_map.png'.format(root, opt.classes[int(cls)]) for cls in cls_indexes]
+    colors = [np.array(opt.class_colors[int(cls)]) / 255.0 for cls in cls_indexes]
 
-    renderer = YCBRenderer(width=width, height=height, render_marker=True)
+    renderer = YCBRenderer(width=width, height=height, render_marker=False)
     renderer.load_objects(obj_paths, texture_paths, colors)
 
     fx = intrinsic_matrix[0, 0]
@@ -84,8 +84,11 @@ if __name__ == '__main__':
     image_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
     seg_tensor = torch.cuda.FloatTensor(height, width, 4).detach()
 
-    num_images = opt.nums[int(seq_id)]
-    perm = np.random.permutation(np.arange(num_images))
+    num_images = min(500, opt.nums[int(seq_id)])
+    if is_save:
+        perm = range(num_images)
+    else:
+        perm = np.random.permutation(np.arange(num_images))
     for i in perm:
 
         # load meta data
@@ -100,14 +103,13 @@ if __name__ == '__main__':
         num = poses.shape[2]
         
         poses_all = []
-        for j in xrange(num):
+        for j in range(num):
             RT = poses[:,:,j]
             qt = np.zeros((7, ), dtype=np.float32)
             qt[3:] = mat2quat(RT[:, :3])
             qt[:3] = RT[:, 3]
             poses_all.append(qt)
 
-        print(poses_all)
         renderer.set_poses(poses_all)
         renderer.set_light_pos([0, 0, 0])
 
@@ -124,34 +126,43 @@ if __name__ == '__main__':
         im_label = np.clip(im_label, 0, 255)
         im_label = im_label.astype(np.uint8)
 
-        '''
-        pcloud = frame[2].reshape((-1, 3))
-        index = np.where(pcloud[:, 0] != 0)[0]
-        perm = np.random.permutation(np.arange(len(index)))
-        index = index[perm[:3000]]
-        pcloud = pcloud[index, :]
-        '''
+        filename = os.path.join(root, 'data', seq_id, '{:06d}-color.jpg'.format(i+1))
+        im = cv2.imread(filename, cv2.IMREAD_UNCHANGED)
+
+        filename = os.path.join(root, 'data', seq_id, '{:06d}-depth.png'.format(i+1))
+        depth = cv2.imread(filename, cv2.IMREAD_UNCHANGED)
 
         # show images
-        import matplotlib.pyplot as plt
-        from mpl_toolkits.mplot3d import Axes3D
-        fig = plt.figure()
-        ax = fig.add_subplot(2, 2, 1)
-        filename = os.path.join(root, 'data', seq_id, '{:06d}-color.png'.format(i+1))
-        im = cv2.imread(filename, cv2.IMREAD_UNCHANGED)
-        im = im[:, :, (2, 1, 0)]
-        plt.imshow(im)
-        ax.set_title('color')
-
-        ax = fig.add_subplot(2, 2, 2)
-        plt.imshow(im_syn)
-        ax.set_title('render')
-
-        ax = fig.add_subplot(2, 2, 3)
-        plt.imshow(im_label)
-        ax.set_title('label')
-
-        # ax = fig.add_subplot(2, 2, 4, projection='3d')
-        # ax.scatter(pcloud[:, 0], pcloud[:, 1], pcloud[:, 2], color='green')
-
-        plt.show()
+        if is_save:
+            # color
+            filename = os.path.join('data', 'color', '{:06d}.png'.format(start+i+1))
+            print(filename)
+            cv2.imwrite(filename, im)
+            # depth
+            colors = plt.cm.viridis(plt.Normalize(np.min(depth), np.max(depth))(depth)) * 255
+            colors = np.clip(colors, 0, 255)
+            colors = colors.astype(np.uint8)
+            filename = os.path.join('data', 'depth', '{:06d}.png'.format(start+i+1))
+            cv2.imwrite(filename, colors)
+            # syn
+            filename = os.path.join('data', 'syn', '{:06d}.png'.format(start+i+1))
+            cv2.imwrite(filename, im_syn[:, :, (2, 1, 0)])
+            # label
+            filename = os.path.join('data', 'label', '{:06d}.png'.format(start+i+1))
+            cv2.imwrite(filename, im_label[:, :, (2, 1, 0)])
+        else:
+            fig = plt.figure()
+            ax = fig.add_subplot(2, 2, 1)
+            im = im[:, :, (2, 1, 0)]
+            plt.imshow(im)
+            ax.set_title('color')
+            ax = fig.add_subplot(2, 2, 2)
+            plt.imshow(depth)
+            ax.set_title('depth')
+            ax = fig.add_subplot(2, 2, 3)
+            plt.imshow(im_syn)
+            ax.set_title('render')
+            ax = fig.add_subplot(2, 2, 4)
+            plt.imshow(im_label)
+            ax.set_title('label')
+            plt.show()

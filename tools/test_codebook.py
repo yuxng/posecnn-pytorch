@@ -112,7 +112,7 @@ if __name__ == '__main__':
     num = codes.shape[0]
     metric = cfg.TRAIN.EMBEDDING_METRIC
     K = 5
-    visualize = True
+    visualize = False
 
     # for each image
     index = np.random.permutation(num)
@@ -169,3 +169,4 @@ if __name__ == '__main__':
                 plt.show()
 
     print('error count %d' % (error))
+    print('error rate %.2f' % (100 * float(error) / float(K * num)))

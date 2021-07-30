@@ -13,11 +13,6 @@ from .ycb_encoder import YCBEncoder
 from .moped_encoder import MOPEDEncoder
 from .ycb_object import YCBObject
 from .nv_object import NVObject
-from .docs_object import DOCSObject
-from .shapenet_utils import *
-from .shapenet_object import ShapeNetObject
-from .shapenet_rendering import ShapeNetRendering
-from .shapenet_encoder import ShapeNetEncoder
 from .background import BackgroundDataset
 from .linemod import linemod
 from .isaac_sim import IsaacSim

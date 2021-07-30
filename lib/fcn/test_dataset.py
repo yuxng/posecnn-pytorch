@@ -17,15 +17,13 @@ import matplotlib.pyplot as plt
 from fcn.config import cfg
 from fcn.particle_filter import particle_filter
 from fcn.test_common import test_pose_rbpf, add_pose_rbpf, refine_pose, eval_poses
-from fcn.test_common import _vis_minibatch_autoencoder, _vis_minibatch_cosegmentation, _vis_minibatch_segmentation
-from fcn.test_common import _vis_minibatch_correspondences, _vis_minibatch_prototype, _vis_minibatch_triplet
+from fcn.test_common import _vis_minibatch_autoencoder, _save_images_autoencoder
 from transforms3d.quaternions import mat2quat, quat2mat, qmult
 from utils.se3 import *
 from utils.nms import *
 from utils.pose_error import re, te
 from utils.loose_bounding_boxes import compute_centroids_and_loose_bounding_boxes, mean_shift_and_loose_bounding_boxes
-from utils.mean_shift import mean_shift_smart_init
-from utils.correspondences import find_correspondences, compute_prototype_distances
+
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -269,6 +267,8 @@ def test_autoencoder(test_loader, background_loader, network, output_dir):
     epoch_size = len(test_loader)
     enum_background = enumerate(background_loader)
     cls = test_loader.dataset.classes[0]
+    save_count = 0
+    print(output_dir)
 
     if cfg.TEST.BUILD_CODEBOOK:
         num = test_loader.dataset._size
@@ -351,6 +351,9 @@ def test_autoencoder(test_loader, background_loader, network, output_dir):
 
         if cfg.TEST.VISUALIZE:
             _vis_minibatch_autoencoder(inputs, background_color, mask, sample, out_images, im_render)
+        else:
+            # save images
+            save_count = _save_images_autoencoder(output_dir, save_count, inputs, background_color, mask, sample, out_images, im_render)
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -371,202 +374,6 @@ def test_autoencoder(test_loader, background_loader, network, output_dir):
         filename = os.path.join(output_dir, 'codebook_%s.pth' % (test_loader.dataset.name + '_' + cls))
         torch.save((codebook_poserbpf, codepose_poserbpf), filename)
         print('code book is saved to {}'.format(filename))
-
-
-def test_docsnet(test_loader, background_loader, network, output_dir, contrastive=False, prototype=False):
-
-    batch_time = AverageMeter()
-    epoch_size = len(test_loader)
-    enum_background = enumerate(background_loader)
-
-    # switch to test mode
-    network.eval()
-
-    for i, sample in enumerate(test_loader):
-
-        end = time.time()
-
-        # construct input
-        image = sample['image_color']
-        mask = sample['mask']
-        label = sample['label']
-
-        # separate two images
-        h = cfg.TRAIN.SYN_CROP_SIZE
-        w = cfg.TRAIN.SYN_CROP_SIZE
-        image_a = image[:, 0, :, :h, :w].contiguous().cuda()
-        image_b = image[:, 1].contiguous().cuda()
-        mask_a = mask[:, 0, :, :h, :w].contiguous().cuda()
-        mask_b = mask[:, 1].contiguous().cuda()
-        label_a = label[:, 0, :, :h, :w].contiguous().cuda()
-        label_b = label[:, 1].contiguous().cuda()
-
-        if contrastive:
-            matches_a = sample['matches_a'].contiguous().cuda()
-            matches_b = sample['matches_b'].contiguous().cuda()
-            masked_non_matches_a = sample['masked_non_matches_a'].contiguous().cuda()
-            masked_non_matches_b = sample['masked_non_matches_b'].contiguous().cuda()
-            others_non_matches_a = sample['others_non_matches_a'].contiguous().cuda()
-            others_non_matches_b = sample['others_non_matches_b'].contiguous().cuda()
-            background_non_matches_a = sample['background_non_matches_a'].contiguous().cuda()
-            background_non_matches_b = sample['background_non_matches_b'].contiguous().cuda()
-        else:
-            matches_a = None
-            matches_b = None
-            masked_non_matches_a = None
-            masked_non_matches_b = None
-            others_non_matches_a = None
-            others_non_matches_b = None
-            background_non_matches_a = None
-            background_non_matches_b = None
-
-        # add background
-        for j in range(2):
-            try:
-                _, background = next(enum_background)
-            except:
-                enum_background = enumerate(background_loader)
-                _, background = next(enum_background)
-
-            num = image.size(0)
-            if background['background_color'].size(0) < num:
-                enum_background = enumerate(background_loader)
-                _, background = next(enum_background)
-
-            background_color = background['background_color'].cuda()
-
-            if j == 0:
-                input_a = mask_a * image_a + (1 - mask_a) * background_color[:num, :, :h, :w]
-            else:
-                input_b = mask_b * image_b + (1 - mask_b) * background_color[:num]
-
-        # run network
-        out_label_a, out_label_b = network(input_a, input_b, label_a, label_b, \
-            matches_a, matches_b, masked_non_matches_a, masked_non_matches_b, others_non_matches_a, others_non_matches_b, \
-            background_non_matches_a, background_non_matches_b)
-
-        if contrastive:
-            uv_a, uv_b = find_correspondences(out_label_a, out_label_b, label_a, label_b, num_samples=5)
-
-        if prototype:
-            distances = compute_prototype_distances(out_label_a, out_label_b, label_a)
-
-        if cfg.TEST.VISUALIZE:
-            if contrastive:
-                _vis_minibatch_correspondences(input_a, input_b, label_a, label_b, out_label_a, out_label_b, background_color, matches_a, matches_b,
-                    masked_non_matches_a, masked_non_matches_b, others_non_matches_a, others_non_matches_b,
-                    background_non_matches_a, background_non_matches_b, uv_a, uv_b)
-            elif prototype:
-                _vis_minibatch_prototype(input_a, input_b, label_a, label_b, out_label_a, out_label_b, background_color, distances)
-            else:
-                _vis_minibatch_cosegmentation(input_a, input_b, label_a, label_b, background_color, out_label_a, out_label_b)
-
-        # measure elapsed time
-        batch_time.update(time.time() - end)
-        print('[%d/%d], batch time %.2f' % (i, epoch_size, batch_time.val))
-
-
-def test_segnet(test_loader, background_loader, network, output_dir, rrn=False):
-
-    batch_time = AverageMeter()
-    epoch_size = len(test_loader)
-    enum_background = enumerate(background_loader)
-
-    # switch to test mode
-    network.eval()
-
-    for i, sample in enumerate(test_loader):
-
-        end = time.time()
-
-        # construct input
-        image = sample['image_color'].contiguous().cuda()
-        mask = sample['mask'].contiguous().cuda()
-        label = sample['label'].contiguous().cuda()
-        if rrn:
-            initial_mask = sample['initial_mask'].contiguous().cuda()
-
-        # add background
-        try:
-            _, background = next(enum_background)
-        except:
-            enum_background = enumerate(background_loader)
-            _, background = next(enum_background)
-
-        num = image.size(0)
-        if background['background_color'].size(0) < num:
-            enum_background = enumerate(background_loader)
-            _, background = next(enum_background)
-
-        background_color = background['background_color'].cuda()
-        inputs = mask * image + (1 - mask) * background_color[:num]
-
-        # run network
-        if not rrn and network.module.embedding:
-            features = network(inputs, label)
-            height = features.shape[2]
-            width = features.shape[3]
-            out_label = torch.zeros((features.shape[0], height, width))
-
-            # mean shift clustering
-            num_seeds = 10
-            kappa = 20
-            for i in range(features.shape[0]):
-                X = features[i].view(features.shape[1], -1)
-                X = torch.transpose(X, 0, 1)
-                cluster_labels, selected_indices = mean_shift_smart_init(X, kappa=kappa, num_seeds=num_seeds, max_iters=10, metric='cosine')
-                out_label[i] = cluster_labels.view(height, width)
-        else:
-            if rrn:
-                inputs = torch.cat([inputs, initial_mask], dim=1) # Shape: [N x 4 x H x W]
-
-            out_label = network(inputs, label)
-            features = None
-
-        if cfg.TEST.VISUALIZE:
-            _vis_minibatch_segmentation(inputs, label, background_color, out_label, features, i)
-
-        # measure elapsed time
-        batch_time.update(time.time() - end)
-        print('[%d/%d], batch time %.2f' % (i, epoch_size, batch_time.val))
-
-
-def test_triplet_net(test_loader, background_loader, network, output_dir):
-
-    batch_time = AverageMeter()
-    epoch_size = len(test_loader)
-    enum_background = enumerate(background_loader)
-
-    # switch to test mode
-    network.eval()
-
-    for i, sample in enumerate(test_loader):
-
-        end = time.time()
-
-        # construct input
-        image_anchor = sample['image_anchor'].cuda()
-        image_positive = sample['image_positive'].cuda()
-        image_negative = sample['image_negative'].cuda()
-
-        features_anchor, features_positive, features_negative \
-            = network(image_anchor, image_positive, image_negative)
-
-        if cfg.TRAIN.EMBEDDING_METRIC == 'euclidean':
-            norm_degree = 2
-            dp = (features_anchor - features_positive).norm(norm_degree, 1)
-            dn = (features_anchor - features_negative).norm(norm_degree, 1)
-        elif cfg.TRAIN.EMBEDDING_METRIC == 'cosine':
-            dp = 0.5 * (1 - torch.sum(features_anchor * features_positive, dim=1))
-            dn = 0.5 * (1 - torch.sum(features_anchor * features_negative, dim=1))
-
-        if cfg.TEST.VISUALIZE:
-            print('positive distance %.4f, negative distance %.4f' % (dp, dn))
-            _vis_minibatch_triplet(image_anchor, image_positive, image_negative, dp, dn, features_anchor, features_positive, features_negative)
-
-        # measure elapsed time
-        batch_time.update(time.time() - end)
-        print('[%d/%d], batch time %.2f' % (i, epoch_size, batch_time.val))
 
 
 def _vis_test(inputs, labels, out_label, out_vertex, rois, poses, poses_refined, sample, points, points_clamp, classes, class_colors, pose_scores):

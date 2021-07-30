@@ -26,8 +26,8 @@ import cv2
 import _init_paths
 import datasets
 import networks
-from fcn.config import cfg, cfg_from_file, get_output_dir, write_selected_class_file
-from fcn.train import train, train_autoencoder, train_docsnet, train_segnet, train_triplet_net
+from fcn.config import cfg, cfg_from_file, get_output_dir
+from fcn.train import train, train_autoencoder
 from datasets.factory import get_dataset
 
 def parse_args():
@@ -62,12 +62,6 @@ def parse_args():
     parser.add_argument('--network', dest='network_name',
                         help='name of the network',
                         default=None, type=str)
-    parser.add_argument('--cad', dest='cad_name',
-                        help='name of the CAD files',
-                        default=None, type=str)
-    parser.add_argument('--pose', dest='pose_name',
-                        help='name of the pose files',
-                        default=None, type=str)
 
     if len(sys.argv) == 1:
         parser.print_help()
@@ -97,10 +91,7 @@ if __name__ == '__main__':
     cfg.MODE = 'TRAIN'
     dataset = get_dataset(args.dataset_name)
     worker_init_fn = dataset.worker_init_fn if hasattr(dataset, 'worker_init_fn') else None
-    if 'shapenet' in dataset.name:
-        num_workers = 4
-    else:
-        num_workers = 0
+    num_workers = 0
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=cfg.TRAIN.IMS_PER_BATCH, shuffle=True, 
         num_workers=num_workers, worker_init_fn=worker_init_fn)
     print('Use dataset `{:s}` for training'.format(dataset.name))
@@ -141,20 +132,18 @@ if __name__ == '__main__':
     if torch.cuda.device_count() > 1:
         cfg.TRAIN.GPUNUM = torch.cuda.device_count()
         print("Let's use", torch.cuda.device_count(), "GPUs!")
+    else:
+        print('only one GPU available')
     network = torch.nn.DataParallel(network).cuda()
     cudnn.benchmark = True
 
     if cfg.TRAIN.SYNTHESIZE:
-        if 'shapenet' not in dataset.name:
-            from ycb_renderer import YCBRenderer
-            print('loading 3D models')
-            cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, render_marker=False)
-            cfg.renderer.load_objects(dataset.model_mesh_paths, dataset.model_texture_paths, dataset.model_colors)
-            cfg.renderer.set_camera_default()
-            print(dataset.model_mesh_paths)
-
-    if args.network_name == 'docsnet' and 'shapenet' not in dataset.name:
-        dataset.compute_render_depths(cfg.renderer)
+        from ycb_renderer import YCBRenderer
+        print('loading 3D models')
+        cfg.renderer = YCBRenderer(width=cfg.TRAIN.SYN_WIDTH, height=cfg.TRAIN.SYN_HEIGHT, render_marker=False)
+        cfg.renderer.load_objects(dataset.model_mesh_paths, dataset.model_texture_paths, dataset.model_colors)
+        cfg.renderer.set_camera_default()
+        print(dataset.model_mesh_paths)
 
     assert(args.solver in ['adam', 'sgd'])
     print('=> setting {} solver'.format(args.solver))
@@ -183,23 +172,6 @@ if __name__ == '__main__':
         
         if args.network_name == 'autoencoder':
             train_autoencoder(dataloader, background_loader, network, optimizer, optimizer_discriminator, epoch)
-        elif args.network_name == 'docsnet':
-            train_docsnet(dataloader, background_loader, network, optimizer, epoch)
-        elif args.network_name == 'seg_vgg' or args.network_name == 'seg_unet':
-            train_segnet(dataloader, background_loader, network, optimizer, epoch, embedding=False, rrn=False)
-        elif 'rrn' in args.network_name:
-            train_segnet(dataloader, background_loader, network, optimizer, epoch, embedding=False, rrn=True)
-        elif 'embedding' in args.network_name:
-            train_segnet(dataloader, background_loader, network, optimizer, epoch, embedding=True, rrn=False)
-        elif 'contrastive' in args.network_name:
-            if cfg.TRAIN.EMBEDDING_PIXELWISE:
-                train_docsnet(dataloader, background_loader, network, optimizer, epoch, contrastive_pixelwise=True)
-            else:
-                train_docsnet(dataloader, background_loader, network, optimizer, epoch, contrastive=True)
-        elif 'triplet' in args.network_name:
-            train_triplet_net(dataloader, background_loader, network, optimizer, epoch)
-        elif 'prototype' in args.network_name:
-            train_docsnet(dataloader, background_loader, network, optimizer, epoch, prototype=True)
         else:
             train(dataloader, background_loader, network, optimizer, epoch)
 

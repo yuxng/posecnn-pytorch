@@ -195,9 +195,6 @@ class YCBObject(data.Dataset, datasets.imdb):
             files = glob.glob(dirname)
             self.pose_images.append(files)
 
-        assert os.path.exists(self._ycb_object_path), \
-                'ycb_object path does not exist: {}'.format(self._ycb_object_path)
-
         # construct fake inputs
         label_blob = np.zeros((1, self._num_classes, self._height, self._width), dtype=np.float32)
         pose_blob = np.zeros((1, self._num_classes, 9), dtype=np.float32)

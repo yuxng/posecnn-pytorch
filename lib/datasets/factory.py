@@ -12,9 +12,6 @@ __sets = {}
 import datasets.ycb_video
 import datasets.ycb_object
 import datasets.nv_object
-import datasets.docs_object
-import datasets.shapenet_object
-import datasets.shapenet_rendering
 import datasets.ycb_self_supervision
 import datasets.ycb_encoder
 import datasets.moped_encoder
@@ -36,34 +33,6 @@ for split in ['train', 'test']:
     print(name)
     __sets[name] = (lambda split=split:
             datasets.YCBObject(split))
-
-# docs object dataset
-for split in ['train', 'test']:
-    name = 'docs_object_{}'.format(split)
-    print(name)
-    __sets[name] = (lambda split=split:
-            datasets.DOCSObject(split))
-
-# shapenet object dataset
-for split in ['train', 'test', 'train_coseg', 'test_coseg']:
-    name = 'shapenet_object_{}'.format(split)
-    print(name)
-    __sets[name] = (lambda split=split:
-            datasets.ShapeNetObject(split))
-
-# shapenet rendering dataset
-for split in ['train', 'test']:
-    name = 'shapenet_rendering_{}'.format(split)
-    print(name)
-    __sets[name] = (lambda split=split:
-            datasets.ShapeNetRendering(split))
-
-# shapenet encoder dataset
-for split in ['train', 'test']:
-    name = 'shapenet_encoder_{}'.format(split)
-    print(name)
-    __sets[name] = (lambda split=split:
-            datasets.ShapeNetEncoder(split))
 
 # nv object dataset
 for split in ['train', 'test']:

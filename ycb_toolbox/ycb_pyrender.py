@@ -21,15 +21,15 @@ if __name__ == '__main__':
     shapenet = ShapeNetObject('train')
     ycb = YCBObject('train')
 
-    ycb._width = 128
-    ycb._height = 128
-    focal = 250
-    ycb._intrinsic_matrix = np.array([[focal, 0, 64],
-                                      [0, focal, 64],
+    ycb._width = 640
+    ycb._height = 480
+    focal = 579.4113
+    ycb._intrinsic_matrix = np.array([[focal, 0, 320],
+                                      [0, focal, 240],
                                       [0, 0, 1]])
     ycb.Kinv = np.linalg.inv(ycb._intrinsic_matrix)
-    ycb.INTRINSIC = [[focal, 0, 64],
-                     [0, focal, 64],
+    ycb.INTRINSIC = [[focal, 0, 320],
+                     [0, focal, 240],
                      [0, 0, 1]]
     canonical_dis = 2.5
 
@@ -41,11 +41,11 @@ if __name__ == '__main__':
     renderer = rendering.Renderer(width=ycb._width, height=ycb._height)
     intrinsic = torch.tensor(ycb.INTRINSIC)
     root_dir = '/capri/YCB-render/ycb-with-background'
-    is_save = True
+    is_save = False
 
     # for each object
     num = 21
-    for k in range(num):
+    for k in range(1, num):
         cls = ycb._classes_all[k + 1]
         object_path = ycb.model_mesh_paths[k]
         print(object_path)

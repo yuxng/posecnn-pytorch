@@ -30,7 +30,7 @@ from transforms3d.quaternions import mat2quat, quat2mat, qmult
 from scipy.optimize import minimize
 from geometry_msgs.msg import PoseStamped, PoseArray
 
-from fcn.config import cfg, cfg_from_file, get_output_dir, write_selected_class_file
+from fcn.config import cfg, cfg_from_file, get_output_dir
 from video_recorder import *
 from utils.cython_bbox import bbox_overlaps
 from utils.nms import *

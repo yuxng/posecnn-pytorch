@@ -1,10 +1,7 @@
-import sys
 import torch
-import torch.nn.functional as F
 import numpy as np
-from fcn.config import cfg
 
-def ball_kernel(Z, X, kappa, metric='cosine'):
+def ball_kernel(Z, X, dist):
     """ Computes pairwise ball kernel (without normalizing constant)
         (note this is kernel as defined in non-parametric statistics, not a kernel as in RKHS)
 
@@ -14,13 +11,12 @@ def ball_kernel(Z, X, kappa, metric='cosine'):
         @return: a [n x m] torch.FloatTensor of pairwise ball kernel computations,
                  without normalizing constant
     """
-    if metric == 'euclidean':
-        distance = Z.unsqueeze(1) - X.unsqueeze(0)
-        distance = torch.norm(distance, dim=2)
-        kernel = torch.exp(-kappa * torch.pow(distance, 2))
-    elif metric == 'cosine':
-        kernel = torch.exp(kappa * torch.mm(Z, X.t()))
-    return kernel
+    distance = X.unsqueeze(1) - Z.unsqueeze(0)  # a are points, b are seeds
+    distance = torch.norm(distance, dim=2)
+    within_ball = distance < dist
+    within_ball = torch.transpose(within_ball, dim0=0, dim1=1)
+    within_ball = within_ball.float()
+    return within_ball
 
 
 def get_label_mode(array):
@@ -34,7 +30,7 @@ def get_label_mode(array):
     return mode
 
 
-def connected_components(Z, epsilon, metric='cosine'):
+def connected_components(Z, epsilon):
     """
         For the connected components, we simply perform a nearest neighbor search in order:
             for each point, find the points that are up to epsilon away (in cosine distance)
@@ -51,12 +47,10 @@ def connected_components(Z, epsilon, metric='cosine'):
     for i in range(n):
         if cluster_labels[i] == -1:
 
-            if metric == 'euclidean':
-                distances = Z.unsqueeze(1) - Z[i:i + 1].unsqueeze(0)  # a are points, b are seeds
-                distances = torch.norm(distances, dim=2)
-            elif metric == 'cosine':
-                distances = 0.5 * (1 - torch.mm(Z, Z[i:i+1].t()))
-            component_seeds = distances[:, 0] <= epsilon
+            distances_euclidean = Z.unsqueeze(1) - Z[i:i + 1].unsqueeze(0)  # a are points, b are seeds
+            distances_euclidean = torch.norm(distances_euclidean, dim=2)
+
+            component_seeds = distances_euclidean[:, 0] <= epsilon
 
             # If at least one component already has a label, then use the mode of the label
             if torch.unique(cluster_labels[component_seeds]).shape[0] > 1:
@@ -72,7 +66,7 @@ def connected_components(Z, epsilon, metric='cosine'):
     return cluster_labels
 
 
-def seed_hill_climbing_ball(X, Z, kappa, max_iters=10, metric='cosine'):
+def seed_hill_climbing_ball(X, Z, dist_threshold, max_iters=10, batch_size=None):
     """ Runs mean shift hill climbing algorithm on the seeds.
         The seeds climb the distribution given by the KDE of X
 
@@ -88,24 +82,22 @@ def seed_hill_climbing_ball(X, Z, kappa, max_iters=10, metric='cosine'):
         # Create a new object for Z
         new_Z = Z.clone()
 
-        W = ball_kernel(Z, X, kappa, metric=metric)
+        W = ball_kernel(Z, X, dist_threshold)
+
+        summed_weights = W.sum(dim=1)
+        summed_weights = summed_weights.unsqueeze(1)
+        summed_weights = torch.clamp(summed_weights, min=1.0)
 
         # use this allocated weight to compute the new center
         new_Z = torch.mm(W, X)  # Shape: [n x d]
 
         # Normalize the update
-        if metric == 'euclidean':
-            summed_weights = W.sum(dim=1)
-            summed_weights = summed_weights.unsqueeze(1)
-            summed_weights = torch.clamp(summed_weights, min=1.0)
-            Z = new_Z / summed_weights
-        elif metric == 'cosine':
-            Z = F.normalize(new_Z, p=2, dim=1)
+        Z = new_Z / summed_weights
 
     return Z
 
 
-def mean_shift_with_seeds(X, Z, kappa, max_iters=10, metric='cosine'):
+def mean_shift_with_seeds(X, Z, dist_threshold, max_iters=10, batch_size=None):
     """ Runs mean-shift
 
         @param X: a [n x d] torch.FloatTensor of d-dim unit vectors
@@ -113,15 +105,15 @@ def mean_shift_with_seeds(X, Z, kappa, max_iters=10, metric='cosine'):
         @param dist_threshold: parameter for the von Mises-Fisher distribution
     """
 
-    Z = seed_hill_climbing_ball(X, Z, kappa, max_iters=max_iters, metric=metric)
+    Z = seed_hill_climbing_ball(X, Z, dist_threshold, max_iters=max_iters, batch_size=batch_size)
 
     # Connected components
-    cluster_labels = connected_components(Z, 2 * cfg.TRAIN.EMBEDDING_ALPHA, metric=metric)  # Set epsilon = 0.1 = 2*alpha
+    cluster_labels = connected_components(Z, 0.04)  # Set epsilon = 0.1 = 2*alpha
 
     return cluster_labels, Z
 
 
-def select_smart_seeds(X, num_seeds, return_selected_indices=False, init_seeds=None, num_init_seeds=None, metric='cosine'):
+def select_smart_seeds(X, num_seeds, return_selected_indices=False, init_seeds=None, num_init_seeds=None):
     """ Selects seeds that are as far away as possible
 
         @param X: a [n x d] torch.FloatTensor of d-dim unit vectors
@@ -133,7 +125,9 @@ def select_smart_seeds(X, num_seeds, return_selected_indices=False, init_seeds=N
         @return: a [num_seeds x d] matrix of seeds
                  a [n x num_seeds] matrix of distances
     """
+
     n, d = X.shape
+
     selected_indices = -1 * torch.ones(num_seeds, dtype=torch.long)
 
     # Initialize seeds matrix
@@ -152,17 +146,17 @@ def select_smart_seeds(X, num_seeds, return_selected_indices=False, init_seeds=N
         selected_indices[0] = selected_seed_index
         selected_seed = X[selected_seed_index, :]
         seeds[0, :] = selected_seed
-        if metric == 'euclidean':
-            distances[:, 0] = torch.norm(X - selected_seed.unsqueeze(0), dim=1)
-        elif metric == 'cosine':
-            distances[:, 0] = 0.5 * (1 - torch.mm(X, selected_seed.unsqueeze(1))[:,0])  
+
+        distances_euclidean = X.unsqueeze(1) - selected_seed.unsqueeze(0)
+        distances_euclidean = torch.norm(distances_euclidean, dim=2).squeeze(1)
+
+        distances[:, 0] = distances_euclidean
+
         num_chosen_seeds += 1
     else:  # Calculate distance to each already chosen seed
         for i in range(num_chosen_seeds):
-            if metric == 'euclidean':
-                distances[:, i] = torch.norm(X - seeds[i:i+1, :], dim=1)
-            elif metric == 'cosine':
-                distances[:, i] = 0.5 * (1 - torch.mm(X, seeds[i:i+1, :].t())[:, 0])
+            ### THIS IS NOT IMPLEMENTED YET ###
+            distances[:, i] = .5 * (1 - torch.mm(X, seeds[i:i + 1, :].t())[:, 0])
 
     # Select rest of seeds
     for i in range(num_chosen_seeds, num_seeds):
@@ -173,11 +167,11 @@ def select_smart_seeds(X, num_seeds, return_selected_indices=False, init_seeds=N
         selected_seed = torch.index_select(X, 0, selected_seed_index)[0, :]
         seeds[i, :] = selected_seed
 
+        distances_euclidean = X.unsqueeze(1) - selected_seed.unsqueeze(0)
+        distances_euclidean = torch.norm(distances_euclidean, dim=2).squeeze(1)
+
         # Calculate distance to this selected seed
-        if metric == 'euclidean':
-            distances[:, i] = torch.norm(X - selected_seed.unsqueeze(0), dim=1)
-        elif metric == 'cosine':
-            distances[:, i] = 0.5 * (1 - torch.mm(X, selected_seed.unsqueeze(1))[:,0])
+        distances[:, i] = distances_euclidean
 
     return_tuple = (seeds,)
     if return_selected_indices:
@@ -185,7 +179,7 @@ def select_smart_seeds(X, num_seeds, return_selected_indices=False, init_seeds=N
     return return_tuple
 
 
-def mean_shift_smart_init(X, kappa, num_seeds=100, max_iters=10, metric='cosine'):
+def mean_shift_smart_init(X, dist_threshold, num_seeds=100, max_iters=10, batch_size=None):
     """ Runs mean shift with carefully selected seeds
 
         @param X: a [n x d] torch.FloatTensor of d-dim unit vectors
@@ -196,30 +190,22 @@ def mean_shift_smart_init(X, kappa, num_seeds=100, max_iters=10, metric='cosine'
     """
 
     n, d = X.shape
-    seeds, selected_indices = select_smart_seeds(X, num_seeds, return_selected_indices=True, metric=metric)
-    seed_cluster_labels, updated_seeds = mean_shift_with_seeds(X, seeds, kappa, max_iters=max_iters, metric=metric)
+
+    # Get the seeds
+    seeds = select_smart_seeds(X, num_seeds)[0]  # implemented euclidean norm here
+
+    seed_cluster_labels, updated_seeds = mean_shift_with_seeds(X, seeds, dist_threshold, max_iters=max_iters,
+                                                               batch_size=batch_size)
 
     # Get distances to updated seeds
-    if metric == 'euclidean':
-        distances = X.unsqueeze(1) - updated_seeds.unsqueeze(0)  # a are points, b are seeds
-        distances = torch.norm(distances, dim=2)
-    elif metric == 'cosine':
-        distances = 0.5 * (1 - torch.mm(X, updated_seeds.t())) # Shape: [n x num_seeds]
+    distances_euclidean = X.unsqueeze(1) - updated_seeds.unsqueeze(0)  # a are points, b are seeds
+    distances_euclidean = torch.norm(distances_euclidean, dim=2)
+    distances = distances_euclidean
 
     # Get clusters by assigning point to closest seed
     closest_seed_indices = torch.argmin(distances, dim=1)  # Shape: [n]
+    # print closest_seed_indices
+
     cluster_labels = seed_cluster_labels[closest_seed_indices]
 
-    # assign zero to the largest cluster
-    num = len(torch.unique(seed_cluster_labels))
-    count = torch.zeros(num, dtype=torch.long)
-    for i in range(num):
-        count[i] = (cluster_labels == i).sum()
-    label_max = torch.argmax(count)
-    if label_max != 0:
-        index1 = cluster_labels == 0
-        index2 = cluster_labels == label_max
-        cluster_labels[index1] = label_max
-        cluster_labels[index2] = 0
-
-    return cluster_labels, selected_indices
+    return cluster_labels

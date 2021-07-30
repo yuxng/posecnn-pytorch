@@ -18,7 +18,7 @@ import _init_paths
 from datasets.factory import get_dataset
 from ycb_renderer import YCBRenderer
 from poserbpf_listener import ImageListener
-from fcn.config import cfg, cfg_from_file, get_output_dir, write_selected_class_file
+from fcn.config import cfg, cfg_from_file, get_output_dir
 from fcn.pose_rbpf import PoseRBPF
 from sdf.sdf_optimizer import sdf_optimizer
 
@@ -47,12 +47,6 @@ def parse_args():
                         action='store_true')
     parser.add_argument('--network', dest='network_name',
                         help='name of the network',
-                        default=None, type=str)
-    parser.add_argument('--cad', dest='cad_name',
-                        help='name of the CAD file',
-                        default=None, type=str)
-    parser.add_argument('--pose', dest='pose_name',
-                        help='name of the pose files',
                         default=None, type=str)
     parser.add_argument('--background', dest='background_name',
                         help='name of the background file',

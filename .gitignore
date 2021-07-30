@@ -9,7 +9,6 @@ lib/utils/bbox.c
 data/
 data_self/
 docker/
-ycb_toolbox/*result*
 
 .idea/
 # Byte-compiled / optimized / DLL files

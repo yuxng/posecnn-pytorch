@@ -6,7 +6,7 @@ set -e
 export PYTHONUNBUFFERED="True"
 export CUDA_VISIBLE_DEVICES=$1
 
-declare -a data="20200529-ychao"
+declare -a data="20201022-lmanuelli"
 declare -a arr=("840412060917" "836212060125" "839512060362" "841412060263" "932122060857" "932122060861" "932122061900" "932122062010")
 
 for d in data/images/table/"$data"/*; do

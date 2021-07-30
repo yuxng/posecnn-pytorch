@@ -71,12 +71,6 @@ def parse_args():
     parser.add_argument('--network', dest='network_name',
                         help='name of the network',
                         default=None, type=str)
-    parser.add_argument('--cad', dest='cad_name',
-                        help='name of the CAD file',
-                        default=None, type=str)
-    parser.add_argument('--pose', dest='pose_name',
-                        help='name of the pose files',
-                        default=None, type=str)
     parser.add_argument('--background', dest='background_name',
                         help='name of the background file',
                         default=None, type=str)

@@ -1,6 +1,6 @@
 # --------------------------------------------------------
-# Fast R-CNN
-# Copyright (c) 2015 Microsoft
+# PoseCNN
+# Copyright (c) 2018
 # Licensed under The MIT License [see LICENSE for details]
-# Written by Ross Girshick
+# Written by Yu Xiang
 # --------------------------------------------------------

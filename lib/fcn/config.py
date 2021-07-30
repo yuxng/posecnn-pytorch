@@ -1,5 +1,5 @@
 # --------------------------------------------------------
-# FCN
+# PoseCNN
 # Copyright (c) 2016
 # Licensed under The MIT License [see LICENSE for details]
 # Written by Yu Xiang
@@ -252,61 +252,6 @@ __C.TRAIN.BBOX_NORMALIZE_MEANS = (0.0, 0.0, 0.0, 0.0)
 __C.TRAIN.BBOX_NORMALIZE_STDS = (0.1, 0.1, 0.2, 0.2)
 
 
-# embedding learning
-__C.TRAIN.EMBEDDING_ALPHA = 0.02
-__C.TRAIN.EMBEDDING_DELTA = 0.5
-__C.TRAIN.EMBEDDING_LAMBDA_INTRA = 1.0
-__C.TRAIN.EMBEDDING_LAMBDA_INTER = 1.0
-__C.TRAIN.EMBEDDING_CONTRASTIVE = False
-__C.TRAIN.EMBEDDING_PIXELWISE = False
-__C.TRAIN.EMBEDDING_PROTOTYPE = False
-__C.TRAIN.EMBEDDING_METRIC = 'euclidean'
-__C.TRAIN.EMBEDDING_NORMALIZATION = True
-__C.TRAIN.EMBEDDING_LOSS_WEIGHT_MATCH = 1.0
-__C.TRAIN.EMBEDDING_LOSS_WEIGHT_NONMATCH = 1.0
-__C.TRAIN.EMBEDDING_LOSS_WEIGHT_BACKGROUND = 1.0
-
-# region refinement network data processing
-__C.TRAIN.max_augmentation_tries = 10
-
-# Padding
-__C.TRAIN.padding_alpha = 1.0
-__C.TRAIN.padding_beta = 4.0
-__C.TRAIN.min_padding_percentage = 0.05
-
-# Erosion/Dilation
-__C.TRAIN.rate_of_morphological_transform = 0.9
-__C.TRAIN.label_dilation_alpha = 1.0
-__C.TRAIN.label_dilation_beta = 19.0
-__C.TRAIN.morphology_max_iters = 3
-
-# Translation
-__C.TRAIN.rate_of_translation = 0.7
-__C.TRAIN.translation_alpha = 1.0
-__C.TRAIN.translation_beta = 19.0
-__C.TRAIN.translation_percentage_min = 0.05
-
-# Rotation
-__C.TRAIN.rate_of_rotation = 0.7
-__C.TRAIN.rotation_angle_max = 10
-
-# ADD
-__C.TRAIN.rate_of_label_adding = 0.5
-__C.TRAIN.add_percentage_min = 0.1
-__C.TRAIN.add_percentage_max = 0.4
-
-# CUTTING
-__C.TRAIN.rate_of_label_cutting = 0.3
-__C.TRAIN.cut_percentage_min = 0.25
-__C.TRAIN.cut_percentage_max = 0.5
-
-# Ellipses
-__C.TRAIN.rate_of_ellipses = 0.8
-__C.TRAIN.num_ellipses_mean = 3
-__C.TRAIN.ellipse_gamma_base_shape = 1.0
-__C.TRAIN.ellipse_gamma_base_scale = 1.0
-__C.TRAIN.ellipse_size_percentage = 0.1
-
 #
 # Testing options
 #
@@ -495,18 +440,3 @@ def yaml_from_file(filename):
     with open(filename, 'r') as f:
         yaml_cfg = edict(yaml.load(f))
     return yaml_cfg
-
-
-def write_selected_class_file(filename, index):
-    # read file
-    with open(filename) as f:
-        lines = [x for x in f.readlines()]
-    lines_selected = [lines[i] for i in index]
-
-    # write new file
-    filename_new = filename + '.selected'
-    f = open(filename_new, 'w')
-    for i in range(len(lines_selected)):
-        f.write(lines_selected[i])
-    f.close()
-    return filename_new
